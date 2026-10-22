@@ -29,7 +29,7 @@ struct GoogleOAuthClientTests {
         #expect(query["response_type"] == "code")
         #expect(query["client_id"] == testConfig.clientID)
         #expect(query["redirect_uri"] == "http://127.0.0.1:54321")
-        #expect(query["scope"] == "https://www.googleapis.com/auth/contacts https://www.googleapis.com/auth/contacts.other.readonly")
+        #expect(query["scope"] == "https://www.googleapis.com/auth/contacts https://www.googleapis.com/auth/contacts.other.readonly https://www.googleapis.com/auth/userinfo.email")
         #expect(query["code_challenge"] == "CHALLENGE" && query["code_challenge_method"] == "S256")
         #expect(query["state"] == "STATE")
         #expect(query["access_type"] == "offline" && query["prompt"] == "consent")
