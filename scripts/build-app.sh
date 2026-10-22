@@ -20,6 +20,8 @@ rm -rf "$STAGE"
 mkdir -p "$STAGE/Contents/MacOS" "$STAGE/Contents/Resources"
 cp "$BIN_DIR/$EXEC_NAME" "$STAGE/Contents/MacOS/$EXEC_NAME"
 cp Resources/Info.plist "$STAGE/Contents/Info.plist"
+# Built from Resources/AppIcon.svg by scripts/make-icon.sh; rerun that when the SVG changes.
+cp Resources/AppIcon.icns "$STAGE/Contents/Resources/AppIcon.icns"
 printf 'APPL????' > "$STAGE/Contents/PkgInfo"
 
 # Google OAuth client ID/secret: bundled as GoogleOAuth.plist when the gitignored local copy exists. Its contents are
