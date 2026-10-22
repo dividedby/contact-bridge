@@ -20,6 +20,7 @@ enum SidebarSection: String, CaseIterable, Identifiable {
 
 struct RootView: View {
     @State private var selection: SidebarSection? = .backup
+    @State private var signIn = SignInController()
 
     var body: some View {
         NavigationSplitView {
@@ -28,7 +29,9 @@ struct RootView: View {
             }
             .navigationSplitViewColumnWidth(min: 160, ideal: 180)
         } detail: {
-            if let selection {
+            if selection == .sync {
+                SyncPlaceholderView(signIn: signIn)
+            } else if let selection {
                 ContentUnavailableView(
                     selection.rawValue,
                     systemImage: selection.systemImage,

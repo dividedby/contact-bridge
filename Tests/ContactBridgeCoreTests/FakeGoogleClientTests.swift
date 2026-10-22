@@ -10,6 +10,13 @@ struct FakeGoogleClientTests {
         )
     }
 
+    /// A person carrying the ownership tag `batchCreate` requires.
+    private func tagged(_ given: String) -> GooglePerson {
+        var tagged = person(given)
+        GoogleOwnership.setSourceID("tag-\(given)", on: &tagged)
+        return tagged
+    }
+
     private func fullList(_ client: FakeGoogleClient, syncToken: String? = nil) async throws -> (people: [GooglePerson], syncToken: String?) {
         var people: [GooglePerson] = []
         var pageToken: String?
@@ -177,7 +184,7 @@ struct FakeGoogleClientTests {
     @Test("Batches are chunked at 200 per call and results keep input order")
     func batchChunking() async throws {
         let client = FakeGoogleClient()
-        let results = try await client.batchCreate((0..<450).map { person("P\($0)") })
+        let results = try await client.batchCreate((0..<450).map { tagged("P\($0)") })
         #expect(results.count == 450)
         #expect(results.allSatisfy { $0.error == nil && $0.person?.resourceName != nil })
         #expect(results.compactMap { $0.person?.names?.first?.givenName } == (0..<450).map { "P\($0)" })
@@ -185,16 +192,26 @@ struct FakeGoogleClientTests {
         #expect(try await fullList(client).people.count == 450)
 
         let names = results.compactMap(\.resourceName)
-        try await client.batchDelete(names)
+        let deleted = try await client.batchDelete(names)
+        #expect(deleted.count == 450 && deleted.allSatisfy { $0.isSuccess } && deleted.compactMap(\.resourceName) == names)
         #expect(await client.batchCallSizes(.batchDelete) == [200, 200, 50])
         #expect(try await fullList(client).people.isEmpty)
+    }
+
+    @Test("batchCreate requires distinct ownership tags and applies nothing when they are missing or repeated")
+    func batchCreateTags() async throws {
+        let client = FakeGoogleClient()
+        await #expect(throws: GoogleBatchError.missingOwnershipTag(index: 1)) { _ = try await client.batchCreate([tagged("A"), person("untagged")]) }
+        await #expect(throws: GoogleBatchError.duplicateOwnershipTag("tag-A")) { _ = try await client.batchCreate([tagged("A"), tagged("A")]) }
+        #expect(try await fullList(client).people.isEmpty)
+        #expect(await client.batchCallSizes(.batchCreate).isEmpty)
     }
 
     @Test("Empty batches make no calls")
     func emptyBatch() async throws {
         let client = FakeGoogleClient()
         #expect(try await client.batchCreate([]).isEmpty)
-        try await client.batchDelete([])
+        #expect(try await client.batchDelete([]).isEmpty)
         #expect(try await client.batchUpdate([]).isEmpty)
         #expect(await client.batchCallSizes(.batchCreate).isEmpty)
     }
@@ -271,14 +288,35 @@ struct FakeGoogleClientTests {
         #expect(try await fullList(client).people.compactMap { $0.names?.first?.givenName } == (0..<450).map { "U\($0)" })
     }
 
-    @Test("A batch delete naming a missing person fails the whole call and deletes nothing in it")
-    func batchDeleteFailsWhole() async throws {
+    @Test("A batch delete naming a missing person deletes the rest and reports notFound for that item")
+    func batchDeleteReportsMissing() async throws {
         let client = FakeGoogleClient(people: [person("A"), person("B")])
         let names = try await fullList(client).people.compactMap(\.resourceName)
-        await #expect(throws: GoogleAPIError.notFound) { try await client.batchDelete([names[0], "people/c404", names[1]]) }
-        #expect(try await fullList(client).people.count == 2)
-        try await client.batchDelete(names)
+        let results = try await client.batchDelete([names[0], "people/c404", names[1]])
+        #expect(results.map(\.error) == [nil, .notFound, nil])
+        #expect(results.map(\.isSuccess) == [true, false, true])
         #expect(try await fullList(client).people.isEmpty)
+        let again = try await client.batchDelete(names)
+        #expect(again.map(\.error) == [.notFound, .notFound])
+    }
+
+    @Test("An injected whole-call batch failure fails its chunk; a fatal one leaves later chunks notAttempted")
+    func injectedBatchFailure() async throws {
+        let fatal = FakeGoogleClient()
+        await fatal.inject(.error(.unauthorized), on: .batchCreate)
+        let results = try await fatal.batchCreate((0..<450).map { tagged("P\($0)") })
+        let failedChunk = results.prefix(200)
+        let skipped = results.dropFirst(200)
+        #expect(failedChunk.allSatisfy { $0.error == GoogleAPIError.unauthorized })
+        #expect(skipped.allSatisfy { $0.isNotAttempted })
+        #expect(try await fullList(fatal).people.isEmpty)
+
+        let recoverable = FakeGoogleClient()
+        await recoverable.inject(.error(.other(status: 400, message: "bad")), on: .batchCreate)
+        let mixed = try await recoverable.batchCreate((0..<450).map { tagged("P\($0)") })
+        #expect(mixed.prefix(200).allSatisfy { $0.error != nil })
+        #expect(mixed.dropFirst(200).allSatisfy { $0.isSuccess })
+        #expect(try await fullList(recoverable).people.count == 250)
     }
 
     // MARK: failure injection
@@ -315,13 +353,13 @@ struct FakeGoogleClientTests {
     func partialBatch() async throws {
         let client = FakeGoogleClient()
         await client.inject(.partialBatch(indices: [1, 3], error: .rateLimited(retryAfter: nil)), on: .batchCreate)
-        let results = try await client.batchCreate((0..<5).map { person("P\($0)") })
+        let results = try await client.batchCreate((0..<5).map { tagged("P\($0)") })
         #expect(results.map { $0.error == nil } == [true, false, true, false, true])
         #expect(results[1].error == .rateLimited(retryAfter: nil))
         #expect(results[1].person == nil)
         #expect(try await fullList(client).people.compactMap { $0.names?.first?.givenName } == ["P0", "P2", "P4"])
 
-        let again = try await client.batchCreate([person("Q")])
+        let again = try await client.batchCreate([tagged("Q")])
         #expect(again.allSatisfy { $0.error == nil })
     }
 

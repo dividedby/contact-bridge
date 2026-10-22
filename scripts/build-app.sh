@@ -22,6 +22,20 @@ cp "$BIN_DIR/$EXEC_NAME" "$STAGE/Contents/MacOS/$EXEC_NAME"
 cp Resources/Info.plist "$STAGE/Contents/Info.plist"
 printf 'APPL????' > "$STAGE/Contents/PkgInfo"
 
+# Google OAuth client ID/secret: bundled as GoogleOAuth.plist when the gitignored local copy exists. Its contents are
+# never printed (all tool output below is discarded); only whether it is usable.
+OAUTH_LOCAL="Config/GoogleOAuth.local.plist"
+if [[ -f "$OAUTH_LOCAL" ]]; then
+    plutil -lint "$OAUTH_LOCAL" >/dev/null 2>&1 || { echo "$OAUTH_LOCAL is not a valid plist" >&2; exit 1; }
+    if grep -q "YOUR_" "$OAUTH_LOCAL"; then
+        echo "WARNING: $OAUTH_LOCAL still has placeholder values; Google sign-in will not work." >&2
+    fi
+    cp "$OAUTH_LOCAL" "$STAGE/Contents/Resources/GoogleOAuth.plist"
+    echo "Bundled GoogleOAuth.plist"
+else
+    echo "WARNING: $OAUTH_LOCAL not found; Google sign-in will not work. Copy Config/GoogleOAuth.example.plist to $OAUTH_LOCAL and fill it in." >&2
+fi
+
 SIGN_ARGS=(--force --options runtime --entitlements Resources/ContactBridge.entitlements)
 IDENTITY="${CODESIGN_IDENTITY:-}"
 if [[ -z "$IDENTITY" ]]; then

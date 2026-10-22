@@ -167,7 +167,9 @@ public actor FakeGoogleClient: GoogleContactsClient {
     // MARK: batches
 
     public func batchCreate(_ batch: [GooglePerson]) async throws -> [GoogleBatchResult] {
-        try runBatch(.batchCreate, batch) { person in
+        _ = try GoogleOwnership.requireDistinctTags(batch)
+        var run = GoogleBatchRun()
+        return await runBatch(.batchCreate, batch, run: &run) { person in
             try Self.checkClientData(person.clientData)
             let created = self.store(person)
             return GoogleBatchResult(resourceName: created.resourceName, person: created)
@@ -176,9 +178,10 @@ public actor FakeGoogleClient: GoogleContactsClient {
 
     public func batchUpdate(_ updates: [GoogleContactUpdate]) async throws -> [GoogleBatchResult] {
         var results = [GoogleBatchResult?](repeating: nil, count: updates.count)
+        var run = GoogleBatchRun()
         for group in updates.maskGroupedChunks() {
             let mask = group[0].update.updatePersonFields
-            let outcome = try runBatch(.batchUpdate, group.map(\.update)) { update in
+            let outcome = await runBatch(.batchUpdate, group.map(\.update), run: &run) { update in
                 let updated = try self.applyUpdate(
                     resourceName: update.resourceName, etag: update.etag, person: update.person, mask: mask
                 )
@@ -189,34 +192,47 @@ public actor FakeGoogleClient: GoogleContactsClient {
         return results.compactMap { $0 }
     }
 
-    /// Like the real endpoint, a missing resource fails the whole call (per chunk), and nothing in that chunk is deleted.
-    public func batchDelete(_ resourceNames: [String]) async throws {
+    /// Like the real client: a chunk naming a missing contact is retried item by item, so the others are deleted and
+    /// each missing one reports `notFound`.
+    public func batchDelete(_ resourceNames: [String]) async throws -> [GoogleBatchResult] {
+        var run = GoogleBatchRun()
+        var results: [GoogleBatchResult] = []
         for chunk in resourceNames.chunked(into: GoogleBatchLimits.maxItemsPerCall) {
-            try fail(.batchDelete)
-            batchSizes[.batchDelete, default: []].append(chunk.count)
-            guard chunk.allSatisfy({ people[$0] != nil }) else { throw GoogleAPIError.notFound }
-            for name in chunk where people[name] != nil { try remove(name) }
+            results += await run.run(chunk, resourceName: { $0 }) { chunk in
+                try self.fail(.batchDelete)
+                self.batchSizes[.batchDelete, default: []].append(chunk.count)
+                return chunk.map { name in
+                    do {
+                        try self.remove(name)
+                        return GoogleBatchResult(resourceName: name)
+                    } catch {
+                        return GoogleBatchResult(resourceName: name, error: .notFound)
+                    }
+                }
+            }
         }
+        return results
     }
 
     private func runBatch<Item>(
-        _ operation: Operation, _ items: [Item],
+        _ operation: Operation, _ items: [Item], run: inout GoogleBatchRun,
         apply: (Item) throws -> GoogleBatchResult,
-        resourceName: (Item) -> String? = { _ in nil }
-    ) throws -> [GoogleBatchResult] {
+        resourceName: @escaping (Item) -> String? = { _ in nil }
+    ) async -> [GoogleBatchResult] {
         var results: [GoogleBatchResult] = []
         for chunk in items.chunked(into: GoogleBatchLimits.maxItemsPerCall) {
-            let partial = try failBatch(operation)
-            batchSizes[operation, default: []].append(chunk.count)
-            for (index, item) in chunk.enumerated() {
-                if let error = partial[index] {
-                    results.append(GoogleBatchResult(resourceName: resourceName(item), error: error))
-                    continue
-                }
-                do {
-                    results.append(try apply(item))
-                } catch let error as GoogleAPIError {
-                    results.append(GoogleBatchResult(resourceName: resourceName(item), error: error))
+            results += await run.run(chunk, resourceName: resourceName) { chunk in
+                let partial = try self.failBatch(operation)
+                self.batchSizes[operation, default: []].append(chunk.count)
+                return chunk.enumerated().map { index, item in
+                    if let error = partial[index] { return GoogleBatchResult(resourceName: resourceName(item), error: error) }
+                    do {
+                        return try apply(item)
+                    } catch let error as GoogleAPIError {
+                        return GoogleBatchResult(resourceName: resourceName(item), error: error)
+                    } catch {
+                        return GoogleBatchResult(resourceName: resourceName(item), error: .other(status: 500, message: "\(error)"))
+                    }
                 }
             }
         }

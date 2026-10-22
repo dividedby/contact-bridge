@@ -139,7 +139,18 @@ struct GoogleFixtureTests {
         #expect(GoogleAPIError.retryAfter(fromHeader: "30") == 30)
         #expect(GoogleAPIError.retryAfter(fromHeader: " 2.5 ") == 2.5)
         #expect(GoogleAPIError.retryAfter(fromHeader: nil) == nil)
-        #expect(GoogleAPIError.retryAfter(fromHeader: "Wed, 21 Oct 2026 07:28:00 GMT") == nil)
+        #expect(GoogleAPIError.retryAfter(fromHeader: "not a delay") == nil)
+    }
+
+    @Test("Retry-After also accepts an HTTP-date, as seconds from now (never negative)")
+    func retryAfterHTTPDate() throws {
+        let now = try #require(ISO8601DateFormatter().date(from: "2026-10-21T07:27:30Z"))
+        #expect(GoogleAPIError.retryAfter(fromHeader: "Wed, 21 Oct 2026 07:28:00 GMT", now: now) == 30)
+        #expect(GoogleAPIError.retryAfter(fromHeader: "Wednesday, 21-Oct-26 07:28:00 GMT", now: now) == 30)
+        #expect(GoogleAPIError.retryAfter(fromHeader: "Wed Oct 21 07:28:00 2026", now: now) == 30)
+        #expect(GoogleAPIError.retryAfter(fromHeader: "Wed, 21 Oct 2026 07:00:00 GMT", now: now) == 0)
+        #expect(GoogleAPIError.retryAfter(fromHeader: "-5", now: now) == 0)
+        #expect(GoogleAPIError.retryAfter(fromHeader: "soon", now: now) == nil)
     }
 
     // MARK: unknown keys

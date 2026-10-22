@@ -190,7 +190,7 @@ struct BackupWriterTests {
         func deleteContact(resourceName: String) async throws { try await inner.deleteContact(resourceName: resourceName) }
         func batchCreate(_ people: [GooglePerson]) async throws -> [GoogleBatchResult] { try await inner.batchCreate(people) }
         func batchUpdate(_ updates: [GoogleContactUpdate]) async throws -> [GoogleBatchResult] { try await inner.batchUpdate(updates) }
-        func batchDelete(_ resourceNames: [String]) async throws { try await inner.batchDelete(resourceNames) }
+        func batchDelete(_ resourceNames: [String]) async throws -> [GoogleBatchResult] { try await inner.batchDelete(resourceNames) }
         func ensureGroup(named name: String) async throws -> String { try await inner.ensureGroup(named: name) }
         func addMembers(groupResourceName: String, memberResourceNames: [String]) async throws {
             try await inner.addMembers(groupResourceName: groupResourceName, memberResourceNames: memberResourceNames)
@@ -584,7 +584,7 @@ struct BackupWriterTests {
         func deleteContact(resourceName: String) async throws { try await inner.deleteContact(resourceName: resourceName) }
         func batchCreate(_ people: [GooglePerson]) async throws -> [GoogleBatchResult] { try await inner.batchCreate(people) }
         func batchUpdate(_ updates: [GoogleContactUpdate]) async throws -> [GoogleBatchResult] { try await inner.batchUpdate(updates) }
-        func batchDelete(_ resourceNames: [String]) async throws { try await inner.batchDelete(resourceNames) }
+        func batchDelete(_ resourceNames: [String]) async throws -> [GoogleBatchResult] { try await inner.batchDelete(resourceNames) }
         func ensureGroup(named name: String) async throws -> String { try await inner.ensureGroup(named: name) }
         func addMembers(groupResourceName: String, memberResourceNames: [String]) async throws {
             try await inner.addMembers(groupResourceName: groupResourceName, memberResourceNames: memberResourceNames)

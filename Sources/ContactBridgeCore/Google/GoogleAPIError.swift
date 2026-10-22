@@ -33,11 +33,26 @@ public enum GoogleAPIError: Error, Sendable, Hashable {
         }
     }
 
-    /// Delay-seconds form of `Retry-After`. HTTP-date values are not parsed.
-    public static func retryAfter(fromHeader value: String?) -> TimeInterval? {
+    /// `Retry-After` as seconds to wait: either delay-seconds or an HTTP-date (measured from `now`). Never negative;
+    /// nil if the value is neither.
+    public static func retryAfter(fromHeader value: String?, now: Date = Date()) -> TimeInterval? {
         guard let value else { return nil }
-        return TimeInterval(value.trimmingCharacters(in: .whitespaces))
+        let trimmed = value.trimmingCharacters(in: .whitespaces)
+        if let seconds = TimeInterval(trimmed) { return max(seconds, 0) }
+        for format in httpDateFormats {
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.timeZone = TimeZone(secondsFromGMT: 0)
+            formatter.dateFormat = format
+            if let date = formatter.date(from: trimmed) { return max(date.timeIntervalSince(now), 0) }
+        }
+        return nil
     }
+
+    /// IMF-fixdate, obsolete RFC 850, and asctime: the three forms HTTP allows.
+    private static let httpDateFormats = [
+        "EEE, dd MMM yyyy HH:mm:ss 'GMT'", "EEEE, dd-MMM-yy HH:mm:ss 'GMT'", "EEE MMM d HH:mm:ss yyyy",
+    ]
 }
 
 private struct GoogleErrorEnvelope: Decodable {
