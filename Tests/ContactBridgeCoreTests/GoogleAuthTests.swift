@@ -246,6 +246,51 @@ struct GoogleAuthSessionTests {
         await #expect(throws: GoogleAuthError.notSignedIn) { _ = try await session.validAccessToken() }
     }
 
+    @Test("A sign-out that lands after the refresh task is created but before it starts still discards the refresh")
+    func signOutBeforeRefreshTaskStarts() async throws {
+        let store = InMemoryTokenStore(storedToken(expiry: now.addingTimeInterval(-10)))
+        let transport = FakeHTTPTransport()
+        await transport.route("POST", "/token", [.json(200, tokenJSON(access: "late"))])
+        await transport.route("POST", "/revoke", [.json(200)])
+        let session = makeSession(store: store, transport: transport)
+
+        let (entered, enteredContinuation) = AsyncStream<Void>.makeStream()
+        let (released, releasedContinuation) = AsyncStream<Void>.makeStream()
+        await session.setBeforeRefreshStarts {
+            enteredContinuation.yield()
+            for await _ in released { return }
+        }
+        let refresh = Task { try await session.validAccessToken() }
+        for await _ in entered { break }
+        // The refresh task exists but has not begun: sign out now, then let it run.
+        _ = try await session.signOut()
+        releasedContinuation.yield()
+
+        await #expect(throws: GoogleAuthError.notSignedIn) { _ = try await refresh.value }
+        #expect(try store.load() == nil)
+        #expect(await transport.requests(containing: "/token").isEmpty)
+        await #expect(throws: GoogleAuthError.notSignedIn) { _ = try await session.validAccessToken() }
+    }
+
+    @Test("A sign-in that completes while sign-out awaits the revocation keeps its fresh credentials")
+    func signInDuringSignOut() async throws {
+        let store = InMemoryTokenStore(storedToken())
+        let transport = FakeHTTPTransport()
+        await transport.route("POST", "/revoke", [.json(200)], delay: .milliseconds(500))
+        await transport.route("POST", "/token", [.json(200, tokenJSON(access: "fresh-access", refresh: "fresh-refresh"))], bodyContains: "grant_type=authorization_code")
+        await transport.route("GET", "people/me", [.json(200, #"{"emailAddresses": [{"value": "new@example.com"}]}"#)])
+        let session = makeSession(store: store, transport: transport, openURL: browser())
+
+        let signOut = Task { try await session.signOut() }
+        try await Task.sleep(for: .milliseconds(100))
+        _ = try await session.signIn()
+        _ = try await signOut.value
+
+        let saved = try #require(try store.load())
+        #expect(saved.refreshToken == "fresh-refresh" && saved.email == "new@example.com")
+        #expect(try await session.validAccessToken() == "fresh-access")
+    }
+
     @Test("A sign-in during an in-flight refresh keeps the new credentials; the stale refresh hands out the new token")
     func signInDuringRefresh() async throws {
         let store = InMemoryTokenStore(storedToken(expiry: now.addingTimeInterval(-10)))

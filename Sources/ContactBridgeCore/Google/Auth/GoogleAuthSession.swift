@@ -39,6 +39,9 @@ public actor GoogleAuthSession: GoogleAccessTokenProviding {
     private var generation = 0
     /// Set when a refresh failed with invalid_grant, so callers hear "needs reauthorization" rather than "not signed in".
     private var refreshTokenRevoked = false
+    /// Test seam: runs inside the refresh task before it does anything, so a test can land a sign-out between the task's
+    /// creation and its start.
+    private var beforeRefreshStarts: (@Sendable () async -> Void)?
 
     /// - Parameter openURL: opens the authorization URL in the user's default browser; false if it could not.
     public init(
@@ -101,7 +104,13 @@ public actor GoogleAuthSession: GoogleAccessTokenProviding {
             task = running
         } else {
             let token = try current()
-            task = Task { try await self.performRefresh(token) }
+            // Read here, synchronously with creating the task: the task body may not start until after a sign-out or
+            // sign-in has bumped the generation, and it must then see itself as stale.
+            let started = generation
+            task = Task {
+                await self.beforeRefreshStarts?()
+                return try await self.performRefresh(token, generation: started)
+            }
             refreshTask = task
         }
         defer { if refreshTask == task { refreshTask = nil } }
@@ -110,8 +119,12 @@ public actor GoogleAuthSession: GoogleAccessTokenProviding {
         return access
     }
 
-    private func performRefresh(_ token: StoredGoogleToken) async throws -> StoredGoogleToken {
-        let started = generation
+    private func performRefresh(_ token: StoredGoogleToken, generation started: Int) async throws -> StoredGoogleToken {
+        // Already stale before it began (sign-out or sign-in landed first): do not spend the dropped refresh token.
+        guard started == generation else {
+            if let cached { return cached }
+            throw GoogleAuthError.notSignedIn
+        }
         let result: Result<GoogleTokenResponse, Error>
         do { result = .success(try await oauth.refresh(refreshToken: token.refreshToken)) } catch { result = .failure(error) }
 
@@ -144,6 +157,8 @@ public actor GoogleAuthSession: GoogleAccessTokenProviding {
         try store.save(updated)
         return updated
     }
+
+    func setBeforeRefreshStarts(_ hook: (@Sendable () async -> Void)?) { beforeRefreshStarts = hook }
 
     /// Invalidates any refresh in flight and lets the next caller start a fresh one.
     private func startNewGeneration() {
@@ -199,6 +214,7 @@ public actor GoogleAuthSession: GoogleAccessTokenProviding {
     @discardableResult
     public func signOut() async throws -> Bool {
         startNewGeneration()
+        let signOutGeneration = generation
         refreshTokenRevoked = false
         let stored = Result { try current() }
         // Drop the in-memory credentials before the revoke call suspends, so nothing can hand them out meanwhile.
@@ -214,7 +230,8 @@ public actor GoogleAuthSession: GoogleAccessTokenProviding {
         case .failure:
             revoked = false
         }
-        try store.delete()
+        // A sign-in that finished during the revoke await owns the store now; deleting would wipe its fresh credentials.
+        if generation == signOutGeneration { try store.delete() }
         return revoked
     }
 }

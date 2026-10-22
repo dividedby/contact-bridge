@@ -95,6 +95,15 @@ struct GoogleBatchOutcomeTests {
         #expect(await sleeps.delays == [])
     }
 
+    @Test("batchCreate: a 408 request timeout is ambiguous, never retried")
+    func createRequestTimeout() async throws {
+        let transport = FakeHTTPTransport()
+        await transport.route("POST", "batchCreateContacts", [.json(408, #"{"error": {"code": 408, "message": "timeout", "status": "DEADLINE_EXCEEDED"}}"#)])
+        let results = try await makeClient(transport).batchCreate((0..<3).map(tagged))
+        #expect(allSame(results, 0..<3, "ambiguous"))
+        #expect(await transport.requests.count == 1)
+    }
+
     @Test("batchCreate: a 2xx whose body cannot be read is ambiguous")
     func createUnreadable() async throws {
         let transport = FakeHTTPTransport()
@@ -207,6 +216,14 @@ struct GoogleBatchOutcomeTests {
         let results = try await makeClient(transport).batchUpdate([update("people/c1", mask: "names")])
         #expect(outcomes(results, 0..<1) == ["ambiguous"])
         #expect(await transport.requests.count == 1)
+    }
+
+    @Test("batchUpdate: a 408 request timeout is ambiguous and stops the rest")
+    func updateRequestTimeout() async throws {
+        let transport = FakeHTTPTransport()
+        await transport.route("POST", "batchUpdateContacts", [updated(["people/c1"]), .json(408, "{}")])
+        let results = try await makeClient(transport).batchUpdate(threeUpdates)
+        #expect(outcomes(results, 0..<3) == ["applied", "ambiguous", "notAttempted"])
     }
 
     // MARK: batchDelete

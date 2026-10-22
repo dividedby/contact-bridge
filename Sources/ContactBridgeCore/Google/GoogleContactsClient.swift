@@ -37,7 +37,7 @@ public enum GoogleBatchOutcome: Sendable, Hashable {
     /// Never sent: an earlier chunk hit an error that makes continuing pointless (sign-in problem, quota, permissions,
     /// or an unknown outcome). Safe to retry as is.
     case notAttempted(reason: String)
-    /// The request may or may not have been applied (transport error, timeout, 5xx or unreadable answer on a mutating
+    /// The request may or may not have been applied (transport error, timeout, 408, 5xx or unreadable answer on a mutating
     /// chunk). Reconcile before retrying: look the contact up by its ownership tag (create) or refetch its etag
     /// (update) so a retry cannot duplicate or clobber.
     case ambiguous(reason: String)
@@ -122,6 +122,9 @@ enum GoogleBatchFailure {
             return .failed(api, stops: true)
         case .other(let status, _) where (200..<300).contains(status):
             return .ambiguous("Google answered but the response could not be read")
+        case .other(408, _):
+            // Request Timeout: the server may have received and applied the request before giving up on it.
+            return .ambiguous("Google answered with a request timeout (408)")
         case .other(let status, _) where status >= 500:
             return .ambiguous("Google answered with a server error (\(status))")
         case .other(403, _):
@@ -181,7 +184,7 @@ public struct GoogleContactUpdate: Sendable, Hashable {
 }
 
 /// The People API operations this app uses. `URLSessionGoogleContactsClient` is the real implementation; tests use
-/// `FakeGoogleClient`. Single calls throw `GoogleAPIError`. A transport error or 5xx on `createContact` or `updateContact`
+/// `FakeGoogleClient`. Single calls throw `GoogleAPIError`. A transport error, 408 or 5xx on `createContact` or `updateContact`
 /// leaves the outcome unknown, so reconcile (by ownership tag / refetched etag) before retrying.
 ///
 /// The batch calls (`batchCreate`, `batchUpdate`, `batchDelete`) chunk at `GoogleBatchLimits.maxItemsPerCall` and return

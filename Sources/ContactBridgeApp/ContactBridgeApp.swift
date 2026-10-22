@@ -1,55 +1,48 @@
 import SwiftUI
 
-enum SidebarSection: String, CaseIterable, Identifiable {
-    case backup = "Backup"
-    case importContacts = "Import"
-    case dedupe = "Dedupe"
-    case sync = "Sync"
-
-    var id: Self { self }
-
-    var systemImage: String {
-        switch self {
-        case .backup: "externaldrive"
-        case .importContacts: "square.and.arrow.down"
-        case .dedupe: "person.2.crop.square.stack"
-        case .sync: "arrow.triangle.2.circlepath"
-        }
-    }
-}
-
 struct RootView: View {
-    @State private var selection: SidebarSection? = .backup
-    @State private var signIn = SignInController()
+    @Bindable var model: AppModel
 
     var body: some View {
         NavigationSplitView {
-            List(SidebarSection.allCases, selection: $selection) { section in
+            List(SidebarSection.allCases, selection: $model.selection) { section in
                 Label(section.rawValue, systemImage: section.systemImage)
             }
-            .navigationSplitViewColumnWidth(min: 160, ideal: 180)
-        } detail: {
-            if selection == .sync {
-                SyncPlaceholderView(signIn: signIn)
-            } else if let selection {
-                ContentUnavailableView(
-                    selection.rawValue,
-                    systemImage: selection.systemImage,
-                    description: Text("Coming soon.")
-                )
-            } else {
-                Text("Select a section")
+            .navigationSplitViewColumnWidth(min: 170, ideal: 190, max: 240)
+            .safeAreaInset(edge: .bottom) {
+                if model.deps.isDemo {
+                    Label("Demo data. Nothing here is real.", systemImage: "testtube.2")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(8)
+                }
             }
+        } detail: {
+            switch model.selection {
+            case .setup: SetupView(model: model)
+            case .backup: BackupView(model: model.backup, setup: model.setup)
+            case .importContacts: ImportView(model: model.importing, app: model)
+            case .dedupe: DedupeView(model: model.dedupe, app: model)
+            case .sync: SyncPlaceholderView(app: model)
+            }
+        }
+        .task { await model.start() }
+        .alert(item: $model.alert) { info in
+            Alert(title: Text(info.title), message: Text(info.message), dismissButton: .default(Text("OK")))
         }
     }
 }
 
 @main
 struct ContactBridgeApp: App {
+    @State private var model = AppModel.make()
+
     var body: some Scene {
         WindowGroup("Contact Bridge") {
-            RootView()
-                .frame(minWidth: 720, minHeight: 440)
+            RootView(model: model)
+                .frame(minWidth: 1000, minHeight: 680)
         }
+        .defaultSize(width: 1200, height: 800)
     }
 }

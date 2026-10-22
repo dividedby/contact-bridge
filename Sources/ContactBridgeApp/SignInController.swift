@@ -25,6 +25,18 @@ final class SignInController {
     @ObservationIgnored private let loadConfig: @MainActor () throws -> OAuthConfig
     @ObservationIgnored private let openURL: @Sendable (URL) async -> Bool
     @ObservationIgnored private var task: Task<Void, Never>?
+    /// Demo mode: sign-in is simulated for this account and nothing touches the Keychain, the network or the browser.
+    @ObservationIgnored private let demoEmail: String?
+
+    init(
+        demoEmail: String?
+    ) {
+        self.demoEmail = demoEmail
+        self.store = InMemoryTokenStore()
+        self.loadConfig = { throw GoogleAuthError.notSignedIn }
+        self.openURL = { _ in false }
+        if demoEmail != nil { status = .signedIn(email: demoEmail) }
+    }
 
     init(
         store: any TokenStore = KeychainTokenStore(),
@@ -34,12 +46,14 @@ final class SignInController {
         self.store = store
         self.loadConfig = loadConfig
         self.openURL = openURL
+        self.demoEmail = nil
     }
 
     var isBusy: Bool { status == .signingIn }
 
     /// Reads stored credentials (no network) so the UI shows who is signed in.
     func restore() async {
+        guard demoEmail == nil else { return }
         guard task == nil, status == .signedOut else { return }
         do {
             if let account = try await makeSession().currentAccount() { status = .signedIn(email: account.email) }
@@ -50,6 +64,10 @@ final class SignInController {
 
     func signIn() {
         guard task == nil else { return }
+        if let demoEmail {
+            status = .signedIn(email: demoEmail)
+            return
+        }
         status = .signingIn
         notice = nil
         task = Task {
@@ -74,6 +92,10 @@ final class SignInController {
 
     func signOut() {
         guard task == nil else { return }
+        if demoEmail != nil {
+            status = .signedOut
+            return
+        }
         task = Task {
             defer { task = nil }
             do {

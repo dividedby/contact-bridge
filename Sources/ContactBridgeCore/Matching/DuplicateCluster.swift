@@ -108,6 +108,8 @@ public struct MatchDiagnostics: Sendable, Hashable {
     public var droppedSwitchboardIdentifiers = 0
     /// Clusters larger than `Options.maxMemberNameCheckSize`, whose member names were not cross-checked.
     public var clustersSkippingMemberNameCheck = 0
+
+    public init() {}
 }
 
 public struct MatchResult: Sendable, Hashable {
