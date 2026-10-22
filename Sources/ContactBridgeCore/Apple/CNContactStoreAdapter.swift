@@ -104,7 +104,8 @@ public final class CNContactStoreAdapter: ContactStoring, @unchecked Sendable {
     }
 
     /// Uses `CNContactVCardSerialization`; if the system refuses its required keys (the gated note key,
-    /// `CNError.unauthorizedKeys`), falls back to `VCardWriter`, which never touches notes.
+    /// `CNError.unauthorizedKeys`), falls back to `VCardWriter`, which has no notes (backups get them from `ContactsAppNotesProvider`
+    /// as `icloud-notes.json`).
     public func exportVCard(ids: [String]) async throws -> Data {
         try await requireAccess()
         return try await onQueue {
@@ -154,7 +155,8 @@ public final class CNContactStoreAdapter: ContactStoring, @unchecked Sendable {
     }
 
     /// One CNSaveRequest: update the survivor (record fields plus what the duplicates carry that ContactRecord cannot
-    /// express) and delete the duplicates. Never requests notes.
+    /// express) and delete the duplicates. Never requests notes:
+    /// `MergeExecutor` combines and writes them separately, after this call succeeds.
     public func merge(survivor: ContactRecord, absorbing ids: [String], backup: BackupReceipt) async throws {
         try await requireAccess()
         try await onQueue {

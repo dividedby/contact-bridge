@@ -10,5 +10,14 @@
 	<true/>
 	<key>com.apple.security.network.server</key>
 	<true/>
+	<!-- Notes are read and written through the Contacts app's AppleScript dictionary (CNContactNoteKey is restricted).
+	     The first key is required under hardened runtime; the second is the sandbox exception that names the target.
+	     If the exception proves insufficient at hand-test, the fallback is dropping com.apple.security.app-sandbox. -->
+	<key>com.apple.security.automation.apple-events</key>
+	<true/>
+	<key>com.apple.security.temporary-exception.apple-events</key>
+	<array>
+		<string>com.apple.AddressBook</string>
+	</array>
 </dict>
 </plist>

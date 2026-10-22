@@ -3,7 +3,7 @@ import Foundation
 
 /// Hand-rolled vCard 3.0 writer, used when `CNContactVCardSerialization` refuses a fetch with
 /// `CNError.unauthorizedKeys` (its required keys include the entitlement-gated note key). Writes every field the merge
-/// path fetches (`CNContactMapper.mergeKeys`) and never notes. Fields a contact was not fetched with are skipped.
+/// path fetches (`CNContactMapper.mergeKeys`) and no notes (they live outside CNContact; see `ContactsAppNotesProvider`). Fields a contact was not fetched with are skipped.
 ///
 /// Conventions follow Apple's own exports so Contacts and `CNContactVCardSerialization.contacts(with:)` read them back:
 /// custom labels use `itemN.X-ABLabel`, year-less birthdays use `X-APPLE-OMIT-YEAR=1604`.

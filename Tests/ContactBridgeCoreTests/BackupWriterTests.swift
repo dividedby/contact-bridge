@@ -314,6 +314,26 @@ struct BackupWriterTests {
         #expect(entry.sha256 == sha256(data) && entry.recordCount == 2)
     }
 
+    @Test("A notes authorization failure (-1743) surfaces as NotesAccessError.notAuthorized and leaves no backup behind")
+    func notesNotAuthorized() async throws {
+        let sandbox = Sandbox()
+        let runner = FakeAppleScriptRunner(responses: [.failure(AppleScriptError(number: -1743, message: "Not authorized to send Apple events to Contacts."))])
+        let provider = ContactsAppNotesProvider(runner: runner, retryDelay: .zero)
+        await #expect(throws: NotesAccessError.notAuthorized) { try await writer(sandbox, notes: provider).createBackup() }
+        #expect(sandbox.entries.isEmpty)
+    }
+
+    @Test("A real provider's notes are written to icloud-notes.json keyed by contact identifier")
+    func providerEndToEnd() async throws {
+        let sandbox = Sandbox()
+        let runner = FakeAppleScriptRunner(responses: [.success(ScriptValue.bulk(ids: ["a", "b", "zzz"], notes: ["Note A", nil, "Not ours"]))])
+        let provider = ContactsAppNotesProvider(runner: runner, retryDelay: .zero)
+        let receipt = try await writer(sandbox, notes: provider).createBackup()
+        let data = try Data(contentsOf: receipt.folderURL.appendingPathComponent("icloud-notes.json"))
+        #expect(try JSONDecoder().decode([String: String].self, from: data) == ["a": "Note A"])
+        #expect(receipt.manifest.notesIncluded)
+    }
+
     @Test("Without a provider there is no notes file")
     func noNotes() async throws {
         let sandbox = Sandbox()

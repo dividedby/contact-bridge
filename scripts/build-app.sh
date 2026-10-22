@@ -10,6 +10,8 @@ APP_NAME="Contact Bridge"
 EXEC_NAME="ContactBridgeApp"
 INSTALL_DIR="$HOME/Applications"
 
+plutil -lint Resources/Info.plist Resources/ContactBridge.entitlements
+
 swift build -c release
 BIN_DIR="$(swift build -c release --show-bin-path)"
 
@@ -37,6 +39,11 @@ else
 fi
 
 codesign --verify --strict --verbose=2 "$STAGE"
+# Notes go through Contacts' AppleScript dictionary: fail the build if the Apple Events entitlements did not make it in.
+SIGNED_ENTITLEMENTS="$(codesign -d --entitlements :- "$STAGE" 2>/dev/null)"
+for required in com.apple.security.automation.apple-events com.apple.security.temporary-exception.apple-events com.apple.AddressBook; do
+    grep -q "$required" <<<"$SIGNED_ENTITLEMENTS" || { echo "Signed app is missing $required" >&2; exit 1; }
+done
 echo "Designated requirement:"
 codesign -d -r- "$STAGE" 2>&1 | sed -n 's/^designated => /  /p'
 

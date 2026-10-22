@@ -3,8 +3,9 @@ import Foundation
 
 /// CNContact <-> ContactRecord. Pure: touches no store, so it is testable with in-memory CNMutableContact objects.
 ///
-/// Notes and images are never read or written (the notes key needs a restricted entitlement). Fields ContactRecord does
-/// not model (prefix, suffix, department, phonetic names, IM, social, relations, dates, ...) are left alone on update.
+/// Notes and images are never read or written here (the notes key needs a restricted entitlement); notes are handled
+/// outside CNContact, through the Contacts app's AppleScript dictionary (`ContactsAppNotesProvider`, `MergeExecutor`).
+/// Fields ContactRecord does not model (prefix, suffix, department, phonetic names, IM, social, relations, dates, ...) are left alone on update.
 enum CNContactMapper {
     /// Everything `record(from:)` reads. Deliberately excludes the note and image keys.
     static var requiredKeys: [CNKeyDescriptor] {
