@@ -59,8 +59,9 @@ final class AppModel {
     func start() async {
         await signIn.restore()
         await setup.refresh()
-        // The demo notes store has no permission to ask for, so the probe is safe to run right away.
-        if deps.isDemo { await setup.checkNotes() }
+        // The probe can raise the Automation prompt, so on a live launch it only runs on its own once the user has
+        // granted access before; then macOS answers silently (or reports a revoke). Demo has no permission to ask for.
+        if deps.isDemo || deps.defaults.bool(forKey: SetupModel.notesGrantedKey) { await setup.checkNotes() }
         await backup.refresh()
     }
 
@@ -132,6 +133,7 @@ final class SetupModel {
     @ObservationIgnored private unowned let app: AppModel
     @ObservationIgnored private lazy var statusStore = app.deps.makeStore(nil)
     static let containerKey = "selectedContainerID"
+    static let notesGrantedKey = "notesAccessGranted"
 
     init(app: AppModel) {
         self.app = app
@@ -181,6 +183,11 @@ final class SetupModel {
         isCheckingNotes = true
         notesStatus = await NotesAccessProbe.check(app.deps.notes)
         isCheckingNotes = false
+        switch notesStatus {
+        case .authorized: app.deps.defaults.set(true, forKey: Self.notesGrantedKey)
+        case .notAuthorized: app.deps.defaults.set(false, forKey: Self.notesGrantedKey)
+        case .unknown, .unavailable: break // Contacts not reachable right now says nothing about the permission.
+        }
         app.servicesChanged()
     }
 }
