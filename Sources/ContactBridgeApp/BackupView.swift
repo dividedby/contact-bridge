@@ -5,6 +5,7 @@ import SwiftUI
 struct BackupView: View {
     let model: BackupModel
     let setup: SetupModel
+    @State private var pendingTrash: BackupEntry?
 
     var body: some View {
         Form {
@@ -33,12 +34,25 @@ struct BackupView: View {
                         }
                         Spacer()
                         Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([entry.folderURL]) }
+                        Button("Move to Trash…", systemImage: "trash", role: .destructive) { pendingTrash = entry }
+                            .labelStyle(.iconOnly)
+                            .help("Move this backup to the Trash")
                     }
                 }
             }
         }
         .formStyle(.grouped)
         .navigationTitle("Backup")
+        .confirmationDialog(
+            "Move this backup to the Trash?",
+            isPresented: Binding(get: { pendingTrash != nil }, set: { if !$0 { pendingTrash = nil } }),
+            presenting: pendingTrash
+        ) { entry in
+            Button("Move to Trash", role: .destructive) { Task { await model.moveToTrash(entry) } }
+            Button("Cancel", role: .cancel) {}
+        } message: { entry in
+            Text("The backup from \(entry.createdAt.formatted(date: .abbreviated, time: .standard)) goes to the Trash. You can put it back from there until you empty the Trash. The next import or merge takes a fresh backup first.")
+        }
         .task { await model.refresh() }
     }
 

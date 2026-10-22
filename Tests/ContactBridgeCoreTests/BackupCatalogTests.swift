@@ -38,6 +38,63 @@ struct BackupCatalogTests {
         #expect(BackupCatalog.list(in: URL(fileURLWithPath: "/nonexistent-\(UUID().uuidString)")).isEmpty)
     }
 
+    @Test("Moving a backup to the Trash hands exactly its folder to the trasher and it leaves the list")
+    func trashesBackup() async throws {
+        let directory = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = InMemoryContactStore(records: [ContactRecord(id: "1", source: .icloud, sourceIdentifier: "1", givenName: "Ann")])
+        let clock = Clock()
+        let writer = BackupWriter(store: store, baseDirectory: directory, now: { clock.next() })
+        _ = try await writer.createBackup()
+        _ = try await writer.createBackup()
+        let entries = BackupCatalog.list(in: directory)
+        let trashed = Trashed()
+        // Resolve before the folder is gone: symlink resolution needs the path to exist (/var → /private/var).
+        let expected = entries[1].folderURL.resolvingSymlinksInPath().path
+
+        try BackupCatalog.moveToTrash(entries[1], in: directory, trash: { url in
+            trashed.urls.append(url)
+            try FileManager.default.removeItem(at: url)
+        })
+
+        #expect(trashed.urls.map(\.path) == [expected])
+        #expect(BackupCatalog.list(in: directory).map(\.id) == [entries[0].id])
+    }
+
+    @Test("Refuses anything that is not a backup folder directly inside the backups directory")
+    func refusesNonBackups() async throws {
+        let directory = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = InMemoryContactStore(records: [ContactRecord(id: "1", source: .icloud, sourceIdentifier: "1", givenName: "Ann")])
+        let receipt = try await BackupWriter(store: store, baseDirectory: directory).createBackup()
+        let real = try #require(BackupCatalog.list(in: directory).first)
+        let neverCalled: @Sendable (URL) throws -> Void = { _ in Issue.record("trash must not be called") }
+
+        let stray = directory.appendingPathComponent("stray-folder")
+        try FileManager.default.createDirectory(at: stray, withIntermediateDirectories: true)
+        var noManifest = real
+        noManifest.folderURL = stray
+        #expect(throws: BackupCatalogError.notABackup) { try BackupCatalog.moveToTrash(noManifest, in: directory, trash: neverCalled) }
+
+        let elsewhere = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: elsewhere) }
+        let copy = elsewhere.appendingPathComponent(receipt.folderURL.lastPathComponent)
+        try FileManager.default.copyItem(at: receipt.folderURL, to: copy)
+        var outside = real
+        outside.folderURL = copy
+        #expect(throws: BackupCatalogError.notABackup) { try BackupCatalog.moveToTrash(outside, in: directory, trash: neverCalled) }
+
+        var escaping = real
+        escaping.folderURL = directory.appendingPathComponent("..").appendingPathComponent(elsewhere.lastPathComponent)
+        #expect(throws: BackupCatalogError.notABackup) { try BackupCatalog.moveToTrash(escaping, in: directory, trash: neverCalled) }
+
+        #expect(BackupCatalog.list(in: directory).count == 1)
+    }
+
+    private final class Trashed: @unchecked Sendable {
+        var urls: [URL] = []
+    }
+
     private final class Clock: @unchecked Sendable {
         private let lock = NSLock()
         private var seconds = 1_800_000_000.0

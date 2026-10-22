@@ -227,6 +227,19 @@ final class BackupModel {
         }
         await refresh()
     }
+
+    func moveToTrash(_ entry: BackupEntry) async {
+        let directory = app.deps.backupDirectory
+        do {
+            try await Task.detached { try BackupCatalog.moveToTrash(entry, in: directory) }.value
+            // The cached receipt may point at this folder; never let a trashed backup stand behind a later write.
+            await app.backupCoordinator.invalidate()
+            lastMessage = "Moved the backup from \(entry.createdAt.formatted(date: .abbreviated, time: .shortened)) to the Trash."
+        } catch {
+            app.present(error, title: "Could not move the backup to the Trash")
+        }
+        await refresh()
+    }
 }
 
 // MARK: - import
