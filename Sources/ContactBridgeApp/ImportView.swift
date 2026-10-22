@@ -138,6 +138,9 @@ struct ImportView: View {
             Text(candidate.record.displayName)
             let line = ContactText.contactLine(candidate.record)
             if !line.isEmpty { Text(line).font(.caption).foregroundStyle(.secondary) }
+            if candidate.isShortCodeSender {
+                Text("Automated text-message sender").font(.caption).foregroundStyle(.secondary)
+            }
             if !plan.possibleMatches(forGoogleID: candidate.id).isEmpty {
                 Label("Might already be in iCloud (see possible matches)", systemImage: "exclamationmark.triangle.fill")
                     .font(.caption).foregroundStyle(.orange)

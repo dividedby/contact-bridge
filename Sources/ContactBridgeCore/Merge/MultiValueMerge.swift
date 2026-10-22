@@ -34,6 +34,7 @@ extension MergePlan {
     static func phoneKey(_ raw: String) -> String? {
         let phone = PhoneNormalizer.normalize(raw)
         guard !phone.value.isEmpty else { return nil }
+        if let digits = phone.shortCodeDigits { return "short|" + digits }
         guard phone.isNormalizable else { return "raw|" + phone.value.lowercased() }
         return "e164|" + phone.value + (phone.extensionDigits.map { "x" + $0 } ?? "")
     }

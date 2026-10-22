@@ -275,6 +275,59 @@ struct ImportPlannerTests {
         #expect(result.otherContactCandidates[0].record.source == .googleOther)
     }
 
+    // MARK: short-code senders
+
+    private func sender(_ id: String, org: String = "Acme Bank", phones: [String] = ["72727"], source: ContactSource = .google) -> ContactRecord {
+        ContactRecord(
+            id: id, source: source, sourceIdentifier: id, organization: org,
+            phones: phones.map { Labeled(label: "other", value: $0) }
+        )
+    }
+
+    @Test("A connection with only short-code phones, no person name and no email is a sender, not selected by default")
+    func connectionSenderNotSelected() {
+        let result = plan([], [sender("people/c1"), google("people/c2", "Bob", "Stone", phones: ["415-555-0002"])])
+        let senderCandidate = result.toImport.first { $0.id == "people/c1" }
+        #expect(senderCandidate?.isShortCodeSender == true)
+        #expect(senderCandidate?.isSelected == false)
+        let person = result.toImport.first { $0.id == "people/c2" }
+        #expect(person?.isShortCodeSender == false)
+        #expect(person?.isSelected == true)
+    }
+
+    @Test("An other contact that is a short-code sender is marked and stays unselected")
+    func otherContactSender() {
+        let result = plan([], [], [sender("otherContacts/c1", source: .googleOther)])
+        #expect(result.otherContactCandidates.map(\.isShortCodeSender) == [true])
+        #expect(result.otherContactCandidates.allSatisfy { !$0.isSelected })
+    }
+
+    @Test("Several short codes still make a sender; one regular phone, a name or an email does not", arguments: [
+        (["72727", "12345"], "", "", "", true),
+        (["72727", "415-555-2671"], "", "", "", false),
+        (["72727"], "Sam", "", "", false),
+        (["72727"], "", "Lee", "", false),
+        (["72727"], "", "", "bank@example.com", false),
+        (["+12345"], "", "", "", false),
+        ([], "", "", "", false),
+    ])
+    func senderDefinition(phones: [String], given: String, family: String, email: String, expected: Bool) {
+        let record = ContactRecord(
+            id: "people/c1", source: .google, sourceIdentifier: "people/c1", givenName: given, familyName: family, organization: "Acme Bank",
+            phones: phones.map { Labeled(label: "other", value: $0) }, emails: email.isEmpty ? [] : [Labeled(label: "home", value: email)]
+        )
+        let result = plan([], [record])
+        #expect(result.toImport.map(\.isShortCodeSender) == [expected])
+        #expect(result.toImport.map(\.isSelected) == [!expected])
+    }
+
+    @Test("A short-code business already in iCloud is linked, not offered again")
+    func senderAlreadyInICloud() {
+        let result = plan([icloud("i1", "", "", phones: ["72727"], org: "Acme Bank")], [sender("people/c1")])
+        #expect(result.toImport.isEmpty)
+        #expect(result.links.map(\.googleResourceName) == ["people/c1"])
+    }
+
     // MARK: known links
 
     @Test("A connection the app already imported is never offered again, even when nothing matches")

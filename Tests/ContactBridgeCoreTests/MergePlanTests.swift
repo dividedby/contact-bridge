@@ -38,6 +38,19 @@ struct MergePlanTests {
 
     // MARK: multi-value
 
+    @Test("Short-code phones dedupe by their digits, whatever the formatting or label")
+    func shortCodesDedupe() {
+        let plan = MergePlan.build(
+            survivor: record("a", org: "Acme Bank", phones: [("other", "72727")]),
+            others: [
+                record("b", org: "Acme Bank", phones: [("other", "72727")]),
+                record("c", org: "Acme Bank", phones: [(nil, "727-27"), ("other", "72728")]),
+            ]
+        )
+        #expect(plan.merged.phones.map(\.value) == ["72727", "72728"])
+        #expect(plan.deleteIDs == ["b", "c"])
+    }
+
     @Test("Phones union and dedupe by normalized value")
     func phonesUnion() {
         let plan = MergePlan.build(

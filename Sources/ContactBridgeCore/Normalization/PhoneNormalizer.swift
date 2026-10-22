@@ -10,6 +10,16 @@ public struct NormalizedPhone: Sendable, Hashable {
     /// Digits only, from "x123", "ext. 123", ",123" and similar. Never part of `value`.
     public var extensionDigits: String?
     public var isNormalizable: Bool
+
+    /// Digits of an SMS short code: after stripping formatting, 3-6 digits with no leading "+" that did not normalize to
+    /// E.164 (verification-code senders such as 72727). Nil for anything else.
+    public var shortCodeDigits: String? {
+        guard !isNormalizable, extensionDigits == nil else { return nil }
+        let stripped = value.filter { !PhoneNormalizer.separators.contains($0) }
+        guard (3...6).contains(stripped.count), stripped.allSatisfy({ $0.isASCII && $0.isNumber }) else { return nil }
+        return stripped
+    }
+    public var isShortCode: Bool { shortCodeDigits != nil }
 }
 
 public enum PhoneNormalizer {
@@ -35,7 +45,7 @@ public enum PhoneNormalizer {
         return (String(match.1), String(match.2))
     }
 
-    private static let separators: Set<Character> = [
+    fileprivate static let separators: Set<Character> = [
         " ", "-", ".", "(", ")", "/", "\u{00A0}", "\u{2010}", "\u{2011}", "\u{2012}", "\u{2013}", "\u{2014}",
     ]
 

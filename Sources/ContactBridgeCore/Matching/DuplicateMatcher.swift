@@ -2,8 +2,8 @@ import Foundation
 
 /// Finds likely duplicates. Pure and deterministic: the same records in any order give identical output.
 ///
-/// Pairs are only compared when they share a blocking key (normalized phone, normalized email, or surname prefix +
-/// given-name initial), so a few thousand contacts never need all n² comparisons.
+/// Pairs are only compared when they share a blocking key (normalized phone, normalized email, company + SMS short code,
+/// website, or surname prefix + given-name initial), so a few thousand contacts never need all n² comparisons.
 ///
 /// Records join a cluster only through links of medium confidence or better with no conflict flag (union-find, strongest
 /// first). Weaker or flagged links are never unioned through: they are attached to clusters as `relatedEdges`. Records
@@ -12,7 +12,7 @@ public struct DuplicateMatcher: Sendable {
     public struct Options: Sendable, Hashable {
         /// Pairs scoring below this are dropped. Default keeps flagged low-confidence pairs for review.
         public var minimumConfidence = 0.3
-        /// A phone or email shared by more than this many records is a switchboard/placeholder and is ignored.
+        /// A phone, email, short code or website shared by more than this many records is a switchboard/placeholder and is ignored.
         public var maxIdentifierBlockSize = 100
         /// Name-only matches (no shared phone/email) need at least this name similarity.
         public var nameOnlyMinimumSimilarity = 0.92
@@ -45,6 +45,10 @@ public struct DuplicateMatcher: Sendable {
         static let conflictingContactInfoFactor = 0.6
         /// A person and an unnamed record sharing an identifier never reach `ConfidenceLevel.highThreshold`.
         static let unnamedCap = 0.84
+        /// Same company (non-empty, folded) and same SMS short code, with no person-name conflict.
+        static let shortCode = 0.9
+        /// Same website and compatible person names, nothing else shared.
+        static let website = 0.7
         /// Shared email, same family name, given names a close spelling variant (Sara/Sarah).
         static let emailSpellingVariant = 0.7
         /// Given names at least this similar (Jaro-Winkler) count as a spelling variant.
@@ -94,15 +98,39 @@ public struct DuplicateMatcher: Sendable {
         let sharedPhones = a.phones.keys.filter { b.phones[$0] != nil }.sorted()
         let sharedEmails = a.emails.intersection(b.emails).sorted()
         let relation = NameRelation(a.name, b.name)
+        let sharedShortCodes = sharedShortCodes(a, b, relation: relation)
 
-        if !sharedPhones.isEmpty || !sharedEmails.isEmpty {
-            return identifierMatch(a, b, sharedPhones: sharedPhones, sharedEmails: sharedEmails, relation: relation)
+        if !sharedPhones.isEmpty || !sharedEmails.isEmpty || !sharedShortCodes.isEmpty {
+            return identifierMatch(
+                a, b, sharedPhones: sharedPhones, sharedEmails: sharedEmails, sharedShortCodes: sharedShortCodes, relation: relation
+            )
         }
-        return nameOnlyMatch(a, b, relation: relation)
+        let byName = nameOnlyMatch(a, b, relation: relation)
+        guard let byWebsite = websiteMatch(a, b) else { return byName }
+        return (byName?.confidence ?? 0) > byWebsite.confidence ? byName : byWebsite
+    }
+
+    /// A short code is only meaningful inside one sender: it is evidence only when both records name the same company and
+    /// their person names (if any) do not contradict.
+    private func sharedShortCodes(_ a: Profile, _ b: Profile, relation: NameRelation) -> [String] {
+        guard !a.organization.isEmpty, a.organization == b.organization, !relation.conflictsOnIdentifier else { return [] }
+        return a.shortCodes.intersection(b.shortCodes).sorted()
+    }
+
+    /// A shared website, medium only: the given names must be equal (single names allowed) with no family-name conflict.
+    private func websiteMatch(_ a: Profile, _ b: Profile) -> PairMatch? {
+        let shared = a.websites.intersection(b.websites).sorted()
+        guard !shared.isEmpty, !a.name.given.isEmpty, a.name.given == b.name.given else { return nil }
+        if !a.name.family.isEmpty, !b.name.family.isEmpty, a.name.family != b.name.family,
+           StringSimilarity.jaroWinkler(a.name.family, b.name.family) < Score.spellingVariantSimilarity {
+            return nil
+        }
+        return PairMatch(confidence: Score.website, reasons: shared.map { "same website \($0)" }, flags: [])
     }
 
     private func identifierMatch(
-        _ a: Profile, _ b: Profile, sharedPhones: [String], sharedEmails: [String], relation: NameRelation
+        _ a: Profile, _ b: Profile, sharedPhones: [String], sharedEmails: [String], sharedShortCodes: [String],
+        relation: NameRelation
     ) -> PairMatch {
         // A near-identical given name is tolerated only on a shared email, never a shared phone.
         let spellingVariant = relation.isSpellingVariant && sharedPhones.isEmpty
@@ -125,6 +153,10 @@ public struct DuplicateMatcher: Sendable {
                 reasons.append("similar name")
                 flags.append(.nameSpellingVariant)
             }
+        }
+        if !sharedShortCodes.isEmpty {
+            miss *= 1 - Score.shortCode
+            reasons += sharedShortCodes.map { "same company and short code \($0)" }
         }
         if let score = relation.identifierSupport {
             miss *= 1 - Score.nameSupport * score
@@ -160,6 +192,12 @@ public struct DuplicateMatcher: Sendable {
         for (index, profile) in profiles.enumerated() {
             for key in profile.phones.keys { blocks["p|" + key, default: []].append(index) }
             for email in profile.emails { blocks["e|" + email, default: []].append(index) }
+            if !profile.organization.isEmpty {
+                for code in profile.shortCodes { blocks["s|" + profile.organization + "|" + code, default: []].append(index) }
+            }
+            if !profile.name.given.isEmpty {
+                for site in profile.websites { blocks["u|" + site, default: []].append(index) }
+            }
             if let nameKey = profile.name.blockKey { blocks["n|" + nameKey, default: []].append(index) }
         }
         // Oversized name blocks degrade to exact-name groups, which are skipped in turn if still oversized.
@@ -179,24 +217,29 @@ public struct DuplicateMatcher: Sendable {
         return blocks
     }
 
-    /// Drops phones/emails held by more than `maxIdentifierBlockSize` records, so they neither block nor score.
+    /// Drops phones, emails, short codes and websites held by more than `maxIdentifierBlockSize` records, so they neither
+    /// block nor score.
     private func withoutSwitchboards(_ profiles: [Profile], diagnostics: inout MatchDiagnostics) -> [Profile] {
         var phoneCounts: [String: Int] = [:]
         var emailCounts: [String: Int] = [:]
+        var shortCodeCounts: [String: Int] = [:]
+        var websiteCounts: [String: Int] = [:]
         for profile in profiles {
             for key in profile.phones.keys { phoneCounts[key, default: 0] += 1 }
             for email in profile.emails { emailCounts[email, default: 0] += 1 }
+            for code in profile.shortCodes { shortCodeCounts[code, default: 0] += 1 }
+            for site in profile.websites { websiteCounts[site, default: 0] += 1 }
         }
         let limit = options.maxIdentifierBlockSize
-        diagnostics.droppedSwitchboardIdentifiers =
-            phoneCounts.values.filter { $0 > limit }.count + emailCounts.values.filter { $0 > limit }.count
-        guard phoneCounts.values.contains(where: { $0 > limit }) || emailCounts.values.contains(where: { $0 > limit }) else {
-            return profiles
-        }
+        let counts = [phoneCounts, emailCounts, shortCodeCounts, websiteCounts]
+        diagnostics.droppedSwitchboardIdentifiers = counts.reduce(0) { $0 + $1.values.filter { $0 > limit }.count }
+        guard counts.contains(where: { $0.values.contains(where: { $0 > limit }) }) else { return profiles }
         return profiles.map { profile in
             var copy = profile
             copy.phones = profile.phones.filter { phoneCounts[$0.key, default: 0] <= limit }
             copy.emails = profile.emails.filter { emailCounts[$0, default: 0] <= limit }
+            copy.shortCodes = profile.shortCodes.filter { shortCodeCounts[$0, default: 0] <= limit }
+            copy.websites = profile.websites.filter { websiteCounts[$0, default: 0] <= limit }
             return copy
         }
     }
@@ -334,6 +377,12 @@ private struct Profile {
     /// Normalizable phones only: comparison key -> display text. The key includes any extension.
     var phones: [String: String]
     var emails: Set<String>
+    /// SMS short codes (digits only). Evidence only between records of the same `organization`.
+    var shortCodes: Set<String>
+    /// Normalized website keys (scheme and host folded, path kept).
+    var websites: Set<String>
+    /// Folded organization; empty when the record has none.
+    let organization: String
     let name: PersonName
 
     init(_ record: ContactRecord) {
@@ -344,7 +393,33 @@ private struct Profile {
         }
         self.phones = phones
         self.emails = Set(record.normalizedEmails)
+        self.shortCodes = Set(record.normalizedPhones.compactMap(\.shortCodeDigits))
+        self.websites = Set(record.urls.compactMap { Profile.websiteKey($0.value) })
+        self.organization = NameNormalizer.foldedKey(record.organization)
         self.name = PersonName(given: record.givenNameMatchKey, family: record.familyNameMatchKey)
+    }
+}
+
+extension Profile {
+    /// Hosts that serve millions of people: a bare root or generic page on one says nothing about who owns the link.
+    private static let sharedHosts: Set<String> = [
+        "facebook.com", "instagram.com", "linkedin.com", "twitter.com", "x.com", "tiktok.com", "youtube.com", "google.com",
+        "gmail.com", "apple.com", "icloud.com", "github.com", "medium.com", "wordpress.com", "blogspot.com",
+    ]
+    private static let genericPaths: Set<String> = [
+        "home", "index", "index.html", "index.php", "login", "signin", "signup", "about", "explore", "help", "search", "feed",
+        "discover", "welcome", "main",
+    ]
+
+    /// The merge URL key, or nil when it is a root (or a single generic page) on a shared host.
+    static func websiteKey(_ raw: String) -> String? {
+        guard let key = MergePlan.urlKey(raw) else { return nil }
+        let hostEnd = key.firstIndex(where: { "/?#".contains($0) }) ?? key.endIndex
+        guard sharedHosts.contains(String(key[..<hostEnd])) else { return key }
+        let path = key[hostEnd...].prefix { $0 != "?" && $0 != "#" }.split(separator: "/", omittingEmptySubsequences: true)
+        if path.isEmpty { return nil }
+        if path.count == 1, genericPaths.contains(path[0].lowercased()) { return nil }
+        return key
     }
 }
 

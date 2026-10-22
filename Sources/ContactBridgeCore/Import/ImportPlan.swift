@@ -6,12 +6,15 @@ public struct ImportCandidate: Sendable, Hashable, Identifiable {
     public var id: String { record.id }
     /// `.google` for a connection, `.googleOther` for an "Other contact".
     public var record: ContactRecord
-    /// Connections start selected; other contacts do not.
+    /// Connections start selected; other contacts and short-code senders do not.
     public var isSelected: Bool
+    /// Only SMS short-code phones, no person name, no email: an automated text-message sender, rarely worth a contact.
+    public var isShortCodeSender: Bool
 
-    public init(record: ContactRecord, isSelected: Bool) {
+    public init(record: ContactRecord, isSelected: Bool, isShortCodeSender: Bool = false) {
         self.record = record
         self.isSelected = isSelected
+        self.isShortCodeSender = isShortCodeSender
     }
 
     public var googleResourceName: String { record.sourceIdentifier }

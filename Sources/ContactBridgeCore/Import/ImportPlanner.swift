@@ -120,7 +120,8 @@ public struct ImportPlanner: Sendable {
             } else {
                 var candidate = connection
                 candidate.source = .google
-                plan.toImport.append(ImportCandidate(record: candidate, isSelected: true))
+                let sender = candidate.isShortCodeSender
+                plan.toImport.append(ImportCandidate(record: candidate, isSelected: !sender, isShortCodeSender: sender))
                 plan.possibleMatches += possibleMatches(for: connection, edges: edges)
             }
         }
@@ -130,7 +131,7 @@ public struct ImportPlanner: Sendable {
             guard !edges.contains(where: \.edge.joinsCluster), !otherMatchesConnection.contains(other.id) else { continue }
             var candidate = other
             candidate.source = .googleOther
-            plan.otherContactCandidates.append(ImportCandidate(record: candidate, isSelected: false))
+            plan.otherContactCandidates.append(ImportCandidate(record: candidate, isSelected: false, isShortCodeSender: candidate.isShortCodeSender))
             plan.possibleMatches += possibleMatches(for: other, edges: edges)
         }
 

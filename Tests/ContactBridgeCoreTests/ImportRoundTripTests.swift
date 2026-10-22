@@ -31,4 +31,31 @@ struct ImportRoundTripTests {
         #expect(after.toImport.isEmpty, "still offered for import: \(candidate.record.displayName)")
         #expect(after.links.map(\.googleResourceName) == [google.resourceName])
     }
+
+    @Test("A short-code business imported twice shows up as a Dedupe cluster")
+    func shortCodeBusinessImportedTwiceClusters() throws {
+        let google = try person(#"{"resourceName": "people/c9", "etag": "e", "organizations": [{"name": "Acme Bank", "metadata": {"source": {"type": "CONTACT"}}}], "phoneNumbers": [{"value": "72727", "type": "other", "metadata": {"source": {"type": "CONTACT"}}}]}"#)
+        let planner = ImportPlanner()
+        let candidate = try #require(planner.plan(icloud: [], googleConnections: [google], googleOtherContacts: []).toImport.first)
+        #expect(candidate.isShortCodeSender)
+
+        var first = saved(candidate.record)
+        first.id = "icloud-1"
+        first.sourceIdentifier = "icloud-1"
+        var second = saved(candidate.record)
+        second.id = "icloud-2"
+        second.sourceIdentifier = "icloud-2"
+
+        let clusters = DuplicateMatcher().findClusters(in: [first, second])
+        let cluster = try #require(clusters.first)
+        #expect(clusters.count == 1)
+        #expect(cluster.members.map(\.id) == ["icloud-1", "icloud-2"])
+        #expect(cluster.level == .high)
+        #expect(cluster.reasons == ["same company and short code 72727"])
+
+        // The plan against those copies calls the Google contact already imported.
+        let after = planner.plan(icloud: [first, second], googleConnections: [google], googleOtherContacts: [])
+        #expect(after.toImport.isEmpty)
+        #expect(after.links.map(\.googleResourceName) == [google.resourceName])
+    }
 }

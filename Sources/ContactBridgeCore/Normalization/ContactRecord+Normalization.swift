@@ -10,4 +10,12 @@ extension ContactRecord {
 
     public var givenNameMatchKey: String { NameNormalizer.givenNameMatchKey(givenName) }
     public var familyNameMatchKey: String { NameNormalizer.familyNameMatchKey(familyName) }
+
+    /// An automated text-message sender: only SMS short-code phones, no person name, no email. Often just a company name.
+    public var isShortCodeSender: Bool {
+        let phones = normalizedPhones
+        return !phones.isEmpty && phones.allSatisfy(\.isShortCode)
+            && [givenName, middleName, familyName, nickname].allSatisfy(\.isBlank)
+            && normalizedEmails.isEmpty
+    }
 }

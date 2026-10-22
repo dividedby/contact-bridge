@@ -74,6 +74,29 @@ struct PhoneNormalizerTests {
         #expect(result.extensionDigits == nil)
     }
 
+    @Test("SMS short codes are 3 to 6 digits, unformatted or not, with no leading plus", arguments: [
+        "72727", "727-27", "(727) 27", "12345", "911", "4357", "123456", "  72727 ",
+    ])
+    func shortCodes(raw: String) {
+        let result = PhoneNormalizer.normalize(raw)
+        #expect(result.isShortCode)
+        #expect(!result.isNormalizable)
+    }
+
+    @Test("Short codes expose their digits", arguments: [("72727", "72727"), ("727-27", "72727"), ("911", "911"), ("123-456", "123456")])
+    func shortCodeDigits(raw: String, digits: String) {
+        #expect(PhoneNormalizer.normalize(raw).shortCodeDigits == digits)
+    }
+
+    @Test("Everything else is not a short code", arguments: [
+        "", "12", "1234567", "555-0199", "5550199", "555-1234", "12345678", "123456789", "+12345", "+72727", "415-555-2671", "+14155552671", "abc", "1-800-FLOWERS", "72727 x1", "12a45",
+    ])
+    func notShortCodes(raw: String) {
+        let result = PhoneNormalizer.normalize(raw)
+        #expect(!result.isShortCode)
+        #expect(result.shortCodeDigits == nil)
+    }
+
     @Test("Empty and whitespace-only input is unnormalizable and empty", arguments: ["", "   ", "\n"])
     func empty(raw: String) {
         let result = PhoneNormalizer.normalize(raw)
