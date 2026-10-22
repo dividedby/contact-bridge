@@ -16,7 +16,8 @@ public struct GoogleOAuthClient: Sendable {
     public static let authorizationEndpoint = "https://accounts.google.com/o/oauth2/v2/auth"
     public static let tokenEndpoint = URL(string: "https://oauth2.googleapis.com/token")!
     public static let revokeEndpoint = URL(string: "https://oauth2.googleapis.com/revoke")!
-    static let profileEndpoint = URL(string: "https://people.googleapis.com/v1/people/me?personFields=emailAddresses")!
+    // OpenID userinfo needs only the userinfo.email scope; People API people/me rejects it without profile scopes.
+    static let profileEndpoint = URL(string: "https://openidconnect.googleapis.com/v1/userinfo")!
 
     public let config: OAuthConfig
     let transport: any HTTPTransport
@@ -70,17 +71,14 @@ public struct GoogleOAuthClient: Sendable {
     public func fetchAccountEmail(accessToken: String) async -> String? {
         var request = URLRequest(url: Self.profileEndpoint)
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-        guard let result = try? await transport.send(request), result.isSuccess,
-              let person = try? JSONDecoder().decode(GooglePerson.self, from: result.body)
-        else { return nil }
-        return Self.accountEmail(from: person)
+        guard let result = try? await transport.send(request), result.isSuccess else { return nil }
+        return Self.accountEmail(fromUserInfo: result.body)
     }
 
-    /// The Google account address: the ACCOUNT-sourced one, else the primary, else the first.
-    static func accountEmail(from person: GooglePerson) -> String? {
-        let emails = (person.emailAddresses ?? []).filter { !($0.value ?? "").isEmpty }
-        let chosen = emails.first { $0.metadata?.source?.type == "ACCOUNT" } ?? emails.first { $0.metadata?.primary == true } ?? emails.first
-        return chosen?.value
+    static func accountEmail(fromUserInfo body: Data) -> String? {
+        struct UserInfo: Decodable { var email: String? }
+        guard let email = (try? JSONDecoder().decode(UserInfo.self, from: body))?.email, !email.isEmpty else { return nil }
+        return email
     }
 
     // MARK: internals

@@ -119,16 +119,12 @@ struct GoogleOAuthClientTests {
         await #expect(throws: GoogleAuthError.self) { try await client.revoke(token: "refresh-1") }
     }
 
-    @Test("The account email prefers the ACCOUNT-sourced address, then primary, then the first")
-    func emailSelection() throws {
-        func person(_ json: String) throws -> GooglePerson { try JSONDecoder().decode(GooglePerson.self, from: Data(json.utf8)) }
-        let account = try person(#"{"emailAddresses": [{"value": "other@x.com", "metadata": {"primary": true, "source": {"type": "CONTACT"}}}, {"value": "me@x.com", "metadata": {"source": {"type": "ACCOUNT"}}}]}"#)
-        #expect(GoogleOAuthClient.accountEmail(from: account) == "me@x.com")
-        let primary = try person(#"{"emailAddresses": [{"value": "a@x.com"}, {"value": "b@x.com", "metadata": {"primary": true}}]}"#)
-        #expect(GoogleOAuthClient.accountEmail(from: primary) == "b@x.com")
-        let first = try person(#"{"emailAddresses": [{"value": "a@x.com"}]}"#)
-        #expect(GoogleOAuthClient.accountEmail(from: first) == "a@x.com")
-        #expect(GoogleOAuthClient.accountEmail(from: try person("{}")) == nil)
+    @Test("The account email comes from the userinfo response; missing or empty means nil")
+    func emailSelection() {
+        #expect(GoogleOAuthClient.accountEmail(fromUserInfo: Data(#"{"sub": "1", "email": "me@x.com", "email_verified": true}"#.utf8)) == "me@x.com")
+        #expect(GoogleOAuthClient.accountEmail(fromUserInfo: Data(#"{"sub": "1", "email": ""}"#.utf8)) == nil)
+        #expect(GoogleOAuthClient.accountEmail(fromUserInfo: Data(#"{"sub": "1"}"#.utf8)) == nil)
+        #expect(GoogleOAuthClient.accountEmail(fromUserInfo: Data("not json".utf8)) == nil)
     }
 }
 
@@ -224,7 +220,7 @@ struct GoogleAuthSessionTests {
         let transport = FakeHTTPTransport()
         await transport.route("POST", "/token", [invalidGrant], bodyContains: "grant_type=refresh_token")
         await transport.route("POST", "/token", [.json(200, tokenJSON(access: "fresh-access", refresh: "fresh-refresh"))], bodyContains: "grant_type=authorization_code")
-        await transport.route("GET", "people/me", [.json(200, #"{"emailAddresses": [{"value": "me@example.com"}]}"#)])
+        await transport.route("GET", "openidconnect.googleapis.com/v1/userinfo", [.json(200, #"{"sub": "1", "email": "me@example.com", "email_verified": true}"#)])
         let session = makeSession(store: store, transport: transport, openURL: browser())
         await #expect(throws: GoogleAuthError.needsReauthorization) { _ = try await session.validAccessToken() }
         _ = try await session.signIn()
@@ -278,7 +274,7 @@ struct GoogleAuthSessionTests {
         let transport = FakeHTTPTransport()
         await transport.route("POST", "/revoke", [.json(200)], delay: .milliseconds(500))
         await transport.route("POST", "/token", [.json(200, tokenJSON(access: "fresh-access", refresh: "fresh-refresh"))], bodyContains: "grant_type=authorization_code")
-        await transport.route("GET", "people/me", [.json(200, #"{"emailAddresses": [{"value": "new@example.com"}]}"#)])
+        await transport.route("GET", "openidconnect.googleapis.com/v1/userinfo", [.json(200, #"{"sub": "1", "email": "new@example.com", "email_verified": true}"#)])
         let session = makeSession(store: store, transport: transport, openURL: browser())
 
         let signOut = Task { try await session.signOut() }
@@ -297,7 +293,7 @@ struct GoogleAuthSessionTests {
         let transport = FakeHTTPTransport()
         await transport.route("POST", "/token", [.json(200, tokenJSON(access: "fresh-access", refresh: "fresh-refresh"))], bodyContains: "grant_type=authorization_code")
         await transport.route("POST", "/token", [.json(200, tokenJSON(access: "stale-access", refresh: "stale-refresh"))], bodyContains: "grant_type=refresh_token", delay: .milliseconds(400))
-        await transport.route("GET", "people/me", [.json(200, #"{"emailAddresses": [{"value": "new@example.com"}]}"#)])
+        await transport.route("GET", "openidconnect.googleapis.com/v1/userinfo", [.json(200, #"{"sub": "1", "email": "new@example.com", "email_verified": true}"#)])
         let session = makeSession(store: store, transport: transport, openURL: browser())
         let refresh = Task { try await session.validAccessToken() }
         try await Task.sleep(for: .milliseconds(60))
@@ -370,7 +366,7 @@ struct GoogleAuthSessionTests {
     private func signInTransport(scope: String? = nil) async -> FakeHTTPTransport {
         let transport = FakeHTTPTransport()
         await transport.route("POST", "/token", [.json(200, tokenJSON(access: "fresh-access", refresh: "fresh-refresh", scope: scope))])
-        await transport.route("GET", "people.googleapis.com/v1/people/me", [.json(200, #"{"resourceName": "people/me", "emailAddresses": [{"value": "me@example.com", "metadata": {"primary": true, "source": {"type": "ACCOUNT"}}}]}"#)])
+        await transport.route("GET", "openidconnect.googleapis.com/v1/userinfo", [.json(200, #"{"sub": "1", "email": "me@example.com", "email_verified": true}"#)])
         return transport
     }
 
@@ -393,9 +389,8 @@ struct GoogleAuthSessionTests {
         let challenge = await capture.query["code_challenge"]
         #expect(PKCE.challenge(forVerifier: try #require(exchange.form["code_verifier"])) == challenge)
         #expect(exchange.form["redirect_uri"] == (await capture.query["redirect_uri"]))
-        let profile = try #require(await transport.requests(containing: "people/me").first)
+        let profile = try #require(await transport.requests(containing: "/userinfo").first)
         #expect(profile.headers["Authorization"] == "Bearer fresh-access")
-        #expect(profile.query["personFields"] == "emailAddresses")
         // Now signed in without further network calls.
         #expect(try await session.validAccessToken() == "fresh-access")
     }
@@ -405,7 +400,7 @@ struct GoogleAuthSessionTests {
         let store = InMemoryTokenStore()
         let transport = FakeHTTPTransport()
         await transport.route("POST", "/token", [.json(200, tokenJSON())])
-        await transport.route("GET", "people/me", [.json(403, #"{"error": {"code": 403, "message": "no"}}"#)])
+        await transport.route("GET", "/userinfo", [.json(403, #"{"error": {"code": 403, "message": "no"}}"#)])
         let session = makeSession(store: store, transport: transport, openURL: browser())
         let account = try await session.signIn()
         #expect(account.email == nil)
