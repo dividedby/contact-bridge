@@ -274,4 +274,30 @@ struct ImportPlannerTests {
         #expect(result.otherContactCandidates.map(\.record.givenName) == ["Cara"])
         #expect(result.otherContactCandidates[0].record.source == .googleOther)
     }
+
+    // MARK: known links
+
+    @Test("A connection the app already imported is never offered again, even when nothing matches")
+    func knownLinkIsAlreadyInICloud() throws {
+        // The saved copy shares nothing with the Google contact, so only the link can say they belong together.
+        let result = planner.plan(
+            icloud: [icloud("i9", "", "")],
+            connections: [google("people/c1", "Ann", "Lee", phones: ["415-555-2671"])],
+            otherContacts: [],
+            knownLinks: ["people/c1": "i9"]
+        )
+        #expect(result.toImport.isEmpty)
+        let link = try #require(result.links.first)
+        #expect(link.icloudID == "i9" && link.googleResourceName == "people/c1")
+        #expect(link.reasons == ["imported by Contact Bridge"] && !link.isNameOnly)
+    }
+
+    @Test("A link whose iCloud contact is gone no longer hides the Google contact")
+    func staleKnownLinkIsIgnored() {
+        let result = planner.plan(
+            icloud: [], connections: [google("people/c1", "Ann", "Lee")], otherContacts: [], knownLinks: ["people/c1": "gone"]
+        )
+        #expect(result.toImport.map(\.googleResourceName) == ["people/c1"])
+        #expect(result.links.isEmpty)
+    }
 }

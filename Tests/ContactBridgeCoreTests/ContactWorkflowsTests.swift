@@ -92,6 +92,17 @@ struct ContactWorkflowsTests {
         #expect(plan.links.count == 1 && plan.toImport.map(\.record.givenName) == ["Bob"] && plan.otherContactCandidates.map(\.record.givenName) == ["Cara"])
     }
 
+    @Test("The import plan uses saved links: an imported contact is never offered again, even if it no longer matches")
+    func importPlanUsesSavedLinks() async throws {
+        let rig = try Rig(records: [icloud("i9", "", "")], people: [gperson("Ann", "Lee", phone: "415-555-2671")])
+        defer { rig.cleanUp() }
+        let resourceName = try #require(try await rig.google.listConnections(syncToken: nil, pageToken: nil).people.first?.resourceName)
+        try rig.links.add([ImportedLink(icloudID: "i9", googleResourceName: resourceName)], at: Date())
+        let plan = try await rig.workflows.loadImportPlan()
+        #expect(plan.toImport.isEmpty)
+        #expect(plan.links.map(\.icloudID) == ["i9"])
+    }
+
     @Test("Without Google there is nothing to plan")
     func importWithoutGoogle() async throws {
         let rig = try Rig(records: [])

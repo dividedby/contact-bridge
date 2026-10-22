@@ -80,7 +80,10 @@ public struct ContactWorkflows: Sendable {
         let records = try await store.fetchAll()
         let connections = try await google.allConnections()
         let others = try await google.allOtherContacts()
-        return ImportPlanner(matcher: matcher).plan(icloud: records, googleConnections: connections, googleOtherContacts: others)
+        let known = Dictionary(try links.load().links.map { ($0.value.googleResourceName, $0.key) }, uniquingKeysWith: min)
+        return ImportPlanner(matcher: matcher).plan(
+            icloud: records, googleConnections: connections, googleOtherContacts: others, knownLinks: known
+        )
     }
 
     /// Creates the selected candidates after making sure a fresh backup exists.

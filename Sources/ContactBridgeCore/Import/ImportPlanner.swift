@@ -17,17 +17,36 @@ public struct ImportPlanner: Sendable {
     }
 
     /// Same, from People API shapes. Deleted stubs and people without a resource name are dropped.
-    public func plan(icloud: [ContactRecord], googleConnections: [GooglePerson], googleOtherContacts: [GooglePerson]) -> ImportPlan {
+    public func plan(
+        icloud: [ContactRecord], googleConnections: [GooglePerson], googleOtherContacts: [GooglePerson],
+        knownLinks: [String: String] = [:]
+    ) -> ImportPlan {
         plan(
             icloud: icloud,
             connections: googleConnections.compactMap { GooglePersonMapper.record(from: $0, source: .google) },
-            otherContacts: googleOtherContacts.compactMap { GooglePersonMapper.record(from: $0, source: .googleOther) }
+            otherContacts: googleOtherContacts.compactMap { GooglePersonMapper.record(from: $0, source: .googleOther) },
+            knownLinks: knownLinks
         )
     }
 
     /// Record ids must be unique across the three inputs (CN identifiers and Google resource names never collide). Google
     /// records with no data at all are not offered.
-    public func plan(icloud: [ContactRecord], connections: [ContactRecord], otherContacts: [ContactRecord]) -> ImportPlan {
+    /// - Parameter knownLinks: Google resource name → iCloud id for contacts the app already imported. Those are linked
+    ///   outright, whatever the matcher says, so a contact can never be imported twice.
+    public func plan(
+        icloud: [ContactRecord], connections: [ContactRecord], otherContacts: [ContactRecord], knownLinks: [String: String] = [:]
+    ) -> ImportPlan {
+        let icloudByID = Dictionary(icloud.map { ($0.sourceIdentifier, $0) }, uniquingKeysWith: { first, _ in first })
+        var linked: [ImportLink] = []
+        let connections = connections.filter { connection in
+            guard let id = knownLinks[connection.sourceIdentifier], let saved = icloudByID[id] else { return true }
+            linked.append(ImportLink(
+                icloudID: id, googleResourceName: connection.sourceIdentifier, confidence: 1, reasons: ["imported by Contact Bridge"],
+                icloudName: saved.displayName, googleName: connection.displayName, importAnywayCandidate: nil
+            ))
+            return false
+        }
+
         enum Role { case icloud, connection, other }
         var records: [String: ContactRecord] = [:]
         var roles: [String: Role] = [:]
@@ -70,6 +89,7 @@ public struct ImportPlanner: Sendable {
 
         let floor = matcher.options.minimumConfidence
         var plan = ImportPlan(diagnostics: analysis.diagnostics)
+        plan.links = linked
 
         func possibleMatches(for google: ContactRecord, edges: [(icloud: ContactRecord, edge: ClusterEdge)]) -> [PossibleMatch] {
             edges.filter { !$0.edge.joinsCluster && $0.edge.match.confidence >= floor }.map {
