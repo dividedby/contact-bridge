@@ -1,0 +1,12 @@
+.build/
+build/
+*.app
+DerivedData/
+.swiftpm/
+*.xcodeproj/xcuserdata
+.DS_Store
+Config/*.local.plist
+Config/*.local.json
+*.p12
+backups/
+*.vcf
