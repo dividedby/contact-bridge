@@ -1,0 +1,8 @@
+{
+  "error": {
+    "code": 403,
+    "message": "People API has not been used in project 123 before or it is disabled.",
+    "errors": [{ "message": "Access Not Configured", "domain": "usageLimits", "reason": "accessNotConfigured" }],
+    "status": "PERMISSION_DENIED"
+  }
+}

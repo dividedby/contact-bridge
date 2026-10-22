@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": 400,
+    "message": "Contact group is full. Remove members before adding more.",
+    "status": "FAILED_PRECONDITION"
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "resourceName": "people/c3141592653589793",
+  "etag": "%EgcBAj0LNy43Pw==",
+  "metadata": {
+    "sources": [
+      { "type": "CONTACT", "id": "3141592653589793", "etag": "#profileMix==" },
+      { "type": "PROFILE", "id": "108123456789012345678" }
+    ],
+    "objectType": "PERSON"
+  },
+  "names": [
+    {
+      "metadata": { "primary": true, "source": { "type": "PROFILE", "id": "108123456789012345678" } },
+      "displayName": "Robert B. Profile",
+      "givenName": "Robert",
+      "familyName": "Profile"
+    },
+    {
+      "metadata": { "source": { "type": "CONTACT", "id": "3141592653589793" } },
+      "displayName": "Bo Contact",
+      "givenName": "Bo",
+      "familyName": "Contact"
+    }
+  ],
+  "organizations": [
+    { "metadata": { "primary": true, "source": { "type": "DOMAIN_PROFILE", "id": "1" } }, "name": "Corp Inc", "title": "VP" },
+    { "metadata": { "source": { "type": "CONTACT", "id": "3141592653589793" } }, "name": "Side Gig", "title": "Advisor" }
+  ],
+  "phoneNumbers": [
+    { "metadata": { "primary": true, "source": { "type": "CONTACT", "id": "3141592653589793" } }, "value": "+1 415 555 0001", "type": "mobile" },
+    { "metadata": { "source": { "type": "PROFILE", "id": "108123456789012345678" } }, "value": "+1 415 555 0002", "type": "work" }
+  ],
+  "emailAddresses": [
+    { "metadata": { "primary": true, "source": { "type": "CONTACT", "id": "3141592653589793" } }, "value": "bo@home.example", "type": "home" },
+    { "metadata": { "source": { "type": "PROFILE", "id": "108123456789012345678" } }, "value": "bo@corp.com", "type": "work" }
+  ],
+  "addresses": [
+    { "metadata": { "source": { "type": "PROFILE", "id": "108123456789012345678" } }, "streetAddress": "100 Corp Way", "city": "Redmond", "type": "work" },
+    { "metadata": { "source": { "type": "CONTACT", "id": "3141592653589793" } }, "streetAddress": "5 Home St", "city": "Austin", "type": "home" }
+  ],
+  "urls": [
+    { "metadata": { "source": { "type": "DOMAIN_PROFILE", "id": "1" } }, "value": "https://corp.example/bo", "type": "work" },
+    { "metadata": { "source": { "type": "CONTACT", "id": "3141592653589793" } }, "value": "https://bo.example", "type": "homePage" }
+  ],
+  "birthdays": [
+    { "metadata": { "primary": true, "source": { "type": "PROFILE", "id": "108123456789012345678" } }, "date": { "year": 1980, "month": 7, "day": 4 } }
+  ],
+  "nicknames": [
+    { "metadata": { "primary": true, "source": { "type": "PROFILE", "id": "108123456789012345678" } }, "value": "Bobby Profile" }
+  ]
+}

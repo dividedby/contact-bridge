@@ -1,0 +1,29 @@
+{
+  "otherContacts": [
+    {
+      "resourceName": "otherContacts/c7410852096318274",
+      "etag": "%EgUBAj0LNy4=",
+      "metadata": {
+        "sources": [{ "type": "OTHER_CONTACT", "id": "7410852096318274", "etag": "#oTh3r=" }],
+        "objectType": "PERSON"
+      },
+      "names": [
+        { "metadata": { "primary": true }, "displayName": "carol@mail.example", "unstructuredName": "carol@mail.example" }
+      ],
+      "emailAddresses": [
+        { "metadata": { "primary": true }, "value": "carol@mail.example" }
+      ]
+    },
+    {
+      "resourceName": "otherContacts/c1596357428901234",
+      "etag": "%EgUBAj0LNy4=",
+      "names": [
+        { "metadata": { "primary": true }, "displayName": "Dan Poe", "givenName": "Dan", "familyName": "Poe" }
+      ],
+      "emailAddresses": [{ "value": "dan@mail.example" }],
+      "phoneNumbers": [{ "value": "212-555-3344", "canonicalForm": "+12125553344" }]
+    }
+  ],
+  "nextPageToken": "CgwIsecondPage",
+  "totalSize": 3
+}
