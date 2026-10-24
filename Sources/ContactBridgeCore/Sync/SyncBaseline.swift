@@ -61,6 +61,9 @@ public struct SyncState: Sendable, Hashable, Codable {
     public var googleAccount: String?
     /// Resource names of Google contacts the user chose not to import.
     public var ignoredGoogle: Set<String>
+    /// `"<iCloud id>|<Google resource name>"` pairs the user said are different people, so the matching pass never offers
+    /// them again (`SyncPlanner.plan(keepSeparate:)`). Missing in files written before stage 5; read as empty.
+    public var keepSeparate: Set<String>
     public var firstSyncApproved: Bool
     public var pause: PauseReason?
 
@@ -68,7 +71,7 @@ public struct SyncState: Sendable, Hashable, Codable {
         version: Int = SyncState.currentVersion, baselines: [String: SyncBaseline] = [:], googleSyncToken: String? = nil,
         fieldsVersion: String? = nil, icloudChangeToken: Data? = nil, icloudContainerID: String? = nil,
         lastNotesReadAt: Date? = nil, googleAccount: String? = nil, ignoredGoogle: Set<String> = [],
-        firstSyncApproved: Bool = false, pause: PauseReason? = nil
+        keepSeparate: Set<String> = [], firstSyncApproved: Bool = false, pause: PauseReason? = nil
     ) {
         self.version = version
         self.baselines = baselines
@@ -79,8 +82,26 @@ public struct SyncState: Sendable, Hashable, Codable {
         self.lastNotesReadAt = lastNotesReadAt
         self.googleAccount = googleAccount
         self.ignoredGoogle = ignoredGoogle
+        self.keepSeparate = keepSeparate
         self.firstSyncApproved = firstSyncApproved
         self.pause = pause
+    }
+
+    // Adding `keepSeparate` needs no version bump: a file without it decodes as before, with none kept apart.
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        version = try values.decode(Int.self, forKey: .version)
+        baselines = try values.decode([String: SyncBaseline].self, forKey: .baselines)
+        googleSyncToken = try values.decodeIfPresent(String.self, forKey: .googleSyncToken)
+        fieldsVersion = try values.decodeIfPresent(String.self, forKey: .fieldsVersion)
+        icloudChangeToken = try values.decodeIfPresent(Data.self, forKey: .icloudChangeToken)
+        icloudContainerID = try values.decodeIfPresent(String.self, forKey: .icloudContainerID)
+        lastNotesReadAt = try values.decodeIfPresent(Date.self, forKey: .lastNotesReadAt)
+        googleAccount = try values.decodeIfPresent(String.self, forKey: .googleAccount)
+        ignoredGoogle = try values.decode(Set<String>.self, forKey: .ignoredGoogle)
+        keepSeparate = try values.decodeIfPresent(Set<String>.self, forKey: .keepSeparate) ?? []
+        firstSyncApproved = try values.decode(Bool.self, forKey: .firstSyncApproved)
+        pause = try values.decodeIfPresent(PauseReason.self, forKey: .pause)
     }
 }
 

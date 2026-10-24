@@ -16,7 +16,7 @@ public struct ReviewItem: Sendable, Hashable, Codable, Identifiable {
     public var fields: [SyncField]
     /// Set for a conflict between two contacts that were only just linked. Their baselines were taken from both sides as
     /// they are, so no later plan derives the conflict again and its absence says nothing: only the user resolving it
-    /// (`ReviewStoring.remove`) removes the item.
+    /// (`ReviewStoring.remove`), or the contact vanishing from either side (`reconcile`), removes the item.
     public var pinned: Bool
     public var createdAt: Date
     public var updatedAt: Date
@@ -96,6 +96,13 @@ public struct ReviewList: Sendable, Hashable, Codable, VersionedFileContents {
         remove(where: { $0.kind == .newInGoogle && $0.resourceName.map(ignoredGoogle.contains) == true }, into: &result)
         let candidates = plan.review.filter { !($0.kind == .newInGoogle && $0.resourceName.map(ignoredGoogle.contains) == true) }
         upsert(candidates, pinned: Set(plan.links.map(\.icloudID)), at: now, into: &result)
+        // A conflict about a contact that is gone from either side is moot, and a pinned one would never be derived away.
+        let gone = Set(plan.droppedLinks).union(plan.deletes.map(\.icloudID)).union(
+            plan.review.filter { $0.kind == .deletedInGoogle || $0.kind == .deletedInICloudEditedInGoogle }.compactMap(\.icloudID)
+        )
+        remove(
+            where: { ($0.kind == .googleEdited || $0.kind == .bothEdited) && $0.icloudID.map(gone.contains) == true }, into: &result
+        )
         // A conflict missing from a plan that did not look at everything is unseen, not resolved.
         if plan.reviewIsComplete {
             let current = Set(plan.review.map(\.id))

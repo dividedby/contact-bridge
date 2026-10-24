@@ -18,6 +18,8 @@ struct SyncView: View {
                 }
             } else if !snapshot.firstSyncApproved {
                 FirstSyncView(model: model, app: app)
+            } else if app.review.isOpen {
+                SyncReviewView(model: app.review, app: app)
             } else {
                 SyncStatusView(model: model, app: app)
             }
@@ -75,6 +77,15 @@ private extension SyncPreview {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     Text("First sync preview").font(.title2)
+                    if case .failed(let message) = snapshot.status {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Label("The preview could not be refreshed: \(message)", systemImage: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.red)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Text("What is shown is from \(generatedAt.formatted(date: .omitted, time: .shortened)) and may be out of date. Press Refresh preview to try again.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
                     Text("Nothing has been changed yet. This is what Contact Bridge would do the first time it syncs. Nothing starts until you press Start syncing.")
                         .foregroundStyle(.secondary)
 
@@ -225,7 +236,7 @@ private struct PreviewList: View {
     }
 }
 
-// MARK: - review list (read-only)
+// MARK: - review list
 
 extension ReviewKind {
     var title: String {
@@ -241,7 +252,7 @@ extension ReviewKind {
 }
 
 /// One review item: what kind it is, who it is about, and what differs.
-private struct ReviewRow: View {
+struct ReviewRow: View {
     let item: SyncReviewSummary
 
     var body: some View {
@@ -260,7 +271,7 @@ private struct ReviewRow: View {
     }
 }
 
-/// The open review items, kind and name. Deciding on them comes in a later update.
+/// The review items of the first-sync preview, kind and name. Nothing can be decided before syncing is approved.
 private struct ReviewListView: View {
     let title: String
     let explanation: String
@@ -290,6 +301,13 @@ private struct ReviewListView: View {
 private struct SyncStatusView: View {
     let model: SyncModel
     let app: AppModel
+    @Bindable private var review: ReviewModel
+
+    init(model: SyncModel, app: AppModel) {
+        self.model = model
+        self.app = app
+        review = app.review
+    }
 
     var body: some View {
         let snapshot = model.snapshot
@@ -344,20 +362,49 @@ private struct SyncStatusView: View {
 
             warningsSection(snapshot)
 
-            Section("Needs your review") {
-                if snapshot.reviewItems.isEmpty {
-                    Text("Nothing to review.").foregroundStyle(.secondary)
-                } else {
-                    Text("\(ContactText.count(snapshot.pendingReviews, "item")) waiting. Deciding on them comes in a later update; nothing is changed for them in the meantime.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    ForEach(snapshot.reviewItems.prefix(SyncPreview.listLimit)) { item in ReviewRow(item: item) }
-                    if snapshot.reviewItems.count > SyncPreview.listLimit {
-                        Text("and \(snapshot.reviewItems.count - SyncPreview.listLimit) more").font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-            }
+            reviewSection(snapshot)
         }
         .formStyle(.grouped)
+        .sheet(isPresented: $review.showingBulk) { KeepICloudSheet(model: review) }
+        .sheet(isPresented: $review.showingIgnored) { IgnoredSheet(model: review) }
+    }
+
+    // MARK: review list
+
+    @ViewBuilder private func reviewSection(_ snapshot: SyncSnapshot) -> some View {
+        let items = review.items
+        let firstLink = review.firstLinkItems
+        Section("Needs your review") {
+            if let message = review.resultMessage {
+                Label(message, systemImage: "checkmark.circle.fill").foregroundStyle(.green).fixedSize(horizontal: false, vertical: true)
+            }
+            if items.isEmpty {
+                Text("Nothing to review.").foregroundStyle(.secondary)
+            } else {
+                Text("\(ContactText.count(items.count, "item")) waiting. Open one to decide. Nothing is changed for them until you do.")
+                    .font(.caption).foregroundStyle(.secondary)
+                ForEach(items.prefix(SyncPreview.listLimit)) { item in
+                    Button { Task { await review.open(item.id) } } label: {
+                        HStack {
+                            ReviewRow(item: item)
+                            Spacer()
+                            Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+                if items.count > SyncPreview.listLimit {
+                    Text("and \(items.count - SyncPreview.listLimit) more").font(.caption).foregroundStyle(.secondary)
+                }
+                if firstLink.count > 1 {
+                    Button("Keep iCloud for all \(firstLink.count) first-link conflicts…") { review.startBulk() }
+                        .help("Two contacts that were linked for the first time disagree. Keep iCloud's values, send them to Google, and keep what only Google has.")
+                }
+            }
+            Button("Show ignored contacts…") { Task { await review.showIgnored() } }
+                .help("Google contacts you chose not to import, with a way to bring them back")
+        }
     }
 
     // MARK: status

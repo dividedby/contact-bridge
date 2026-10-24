@@ -2,7 +2,9 @@ import Foundation
 
 /// Everything the app needs to run without touching real data: fakes seeded with sample contacts that exercise every
 /// screen (clear duplicates, a household phone, a three-way cluster, conflicting fields, safe and tick-by-hand groups for bulk merge, Google-only contacts including a business and a text-message sender, other
-/// contacts, a possible match, notes) and for Clean up (text-message senders, nameless and empty contacts, imported contacts).
+/// contacts, a possible match, notes), for Clean up (text-message senders, nameless and empty contacts, imported contacts) and for the
+/// Sync review list (after Start syncing: Leo edited in Google, Mia deleted in Google, David edited on both sides, Priya and others
+/// new in Google, Janet a possible match for the Carters, Ann Lee a conflict from linking two contacts for the first time).
 public struct DemoEnvironment: Sendable {
     public let store: InMemoryContactStore
     public let google: FakeGoogleClient
@@ -61,7 +63,8 @@ public enum DemoData {
             icloud("", "", phones: [("work", "415-555-0266")], org: "Wong Bakery"),
             // Not duplicates of anything.
             icloud("Carol", "White", phones: [("mobile", "415-555-0190")], emails: ["carol@example.com"]),
-            icloud("David", "Brown", phones: [("mobile", "415-555-0123")], emails: ["david.brown@example.com"]),
+            // Edited on both sides since the last sync (see the seeded baselines below): his company differs in iCloud and Google.
+            icloud("David", "Brown", phones: [("mobile", "415-555-0123")], emails: ["david.brown@example.com"], org: "Brown & Co"),
             icloud("Emma", "Stone", emails: ["emma.stone@example.com"]),
             // Clean up: automated text-message senders (short-code phones, no person name), one of them with no name at all.
             icloud("", "", phones: [("mobile", "72727")], org: "Acme Rewards"),
@@ -73,7 +76,7 @@ public enum DemoData {
             icloud("", "", org: "Walsh Plumbing"),
             icloud("", ""),
             // Created by a Contact Bridge import: linked to their Google contact below.
-            icloud("Leo", "Fischer", phones: [("mobile", "415-555-0401")], emails: ["leo.fischer@example.com"]),
+            icloud("Leo", "Fischer", phones: [("mobile", "415-555-0401"), ("home", "415-555-0402")], emails: ["leo.fischer@example.com"]),
             icloud("Mia", "Chen", emails: ["mia.chen@example.com"]),
         ]
 
@@ -86,14 +89,41 @@ public enum DemoData {
             ))
         }
 
+        /// A Google contact with labelled entries, as it would be listed (resource name and etag come from the fake).
+        func labelledPerson(
+            _ given: String, _ family: String, phones: [(String, String)] = [], emails: [(String, String)] = [], org: String = "", job: String = ""
+        ) -> GooglePerson {
+            GooglePersonMapper.createPayload(for: ContactRecord(
+                id: "x", source: .google, sourceIdentifier: "x", givenName: given, familyName: family, organization: org, jobTitle: job,
+                phones: phones.map { Labeled(label: $0.0, value: $0.1) }, emails: emails.map { Labeled(label: $0.0, value: $0.1) }
+            ))
+        }
+
+        // What the Google contacts of Leo and David looked like at the last sync, and what they say now. Leo was edited in
+        // Google only; David was edited in iCloud (company "Brown & Co") and in Google (company "Brown Consulting").
+        let leoThen = labelledPerson(
+            "Leo", "Fischer", phones: [("mobile", "415-555-0401"), ("home", "415-555-0402")],
+            emails: [("home", "leo.fischer@example.com"), ("work", "leo@fischerdesign.example")]
+        )
+        let leoNow = labelledPerson(
+            "Leo", "Fischer", phones: [("mobile", "415-555-0401")],
+            emails: [("home", "leo.fischer@example.com"), ("work", "leo@fischerdesign.example"), ("home", "leo.f@gmail.example")],
+            org: "Fischer Design", job: "Creative Director"
+        )
+        let davidThen = labelledPerson("David", "Brown", phones: [("mobile", "415-555-0123")], emails: [("home", "david.brown@example.com")])
+        let davidNow = labelledPerson(
+            "David", "Brown", phones: [("mobile", "415-555-0123")], emails: [("home", "david.brown@example.com")], org: "Brown Consulting"
+        )
+
+        // Mia was imported and then deleted in Google: her link stays and points at a contact that is no longer listed.
+        let miaResource = "people/c99999"
         let connections = [
             googlePerson("Ann", "Lee", phones: ["+1 415 555 2671"], emails: ["ann.lee@example.com"]), // already in iCloud
-            googlePerson("David", "Brown", phones: ["415-555-0123"]), // already in iCloud
+            davidNow, // imported earlier, edited on both sides since
             googlePerson("Priya", "Patel", phones: ["415-555-0301"], emails: ["priya@example.com"]), // new
             googlePerson("Tom", "Nguyen", emails: ["tom.nguyen@example.com"]), // new
             googlePerson("Janet", "Carter", emails: ["john.carter@example.com"]), // new, but resembles the Carters
-            googlePerson("Leo", "Fischer", phones: ["415-555-0401"], emails: ["leo.fischer@example.com"]), // imported earlier
-            googlePerson("Mia", "Chen", emails: ["mia.chen@example.com"]), // imported earlier
+            leoNow, // imported earlier, edited in Google since
             googlePerson("", "", phones: ["415-555-0302"], emails: ["front.desk@lakesidedental.example"], org: "Lakeside Dental"), // new, a business
             googlePerson("", "", phones: ["48012"], org: "Parcel Express Alerts"), // new, a text-message sender
         ].enumerated().map { index, person in
@@ -116,12 +146,34 @@ public enum DemoData {
 
         // Past imports, so the Imported filter in Clean up shows something. In-memory, so adding cannot fail.
         let links = InMemoryLinkStore()
-        let imported = [("Mia", "Chen", 6), ("Leo", "Fischer", 5), ("David", "Brown", 1)].compactMap { given, family, connection in
-            book.first { $0.givenName == given && $0.familyName == family }.map {
-                ImportedLink(icloudID: $0.sourceIdentifier, googleResourceName: "people/c\(connection + 1)")
-            }
+        let imported = [("Mia", miaResource), ("Leo", "people/c6"), ("David", "people/c2")].compactMap { given, resource in
+            book.first { $0.givenName == given }.map { ImportedLink(icloudID: $0.sourceIdentifier, googleResourceName: resource) }
         }
         try? links.add(imported, at: Date(timeIntervalSince1970: 1_790_000_000))
+
+        // Leo and David have synced before, so Start syncing finds their edits as ordinary changes rather than as two
+        // contacts to compare for the first time. A baseline's etag is one the fake never issues, so Google's copy reads as edited.
+        func googleRecord(_ person: GooglePerson, _ resource: String) -> ContactRecord {
+            var person = person
+            person.resourceName = resource
+            return GooglePersonMapper.record(from: person) ?? ContactRecord(id: resource, source: .google, sourceIdentifier: resource)
+        }
+        func baseline(_ name: String, icloud: ContactRecord, google: ContactRecord) -> (String, SyncBaseline) {
+            (icloud.sourceIdentifier, SyncBaseline(
+                icloud: icloud, google: google, googleEtag: "demo-synced-\(name)", icloudNoteHash: NoteHash.hash(""),
+                googleNoteHash: NoteHash.hash(""), syncedAt: Date(timeIntervalSince1970: 1_790_000_000)
+            ))
+        }
+        /// The iCloud contact as it was at the last sync: without the company it has now.
+        func iCloudThen(_ given: String) -> ContactRecord {
+            var record = book.first { $0.givenName == given } ?? ContactRecord(id: "", source: .icloud, sourceIdentifier: "")
+            record.organization = ""
+            return record
+        }
+        let baselines = Dictionary(uniqueKeysWithValues: [
+            baseline("leo", icloud: iCloudThen("Leo"), google: googleRecord(leoThen, "people/c6")),
+            baseline("david", icloud: iCloudThen("David"), google: googleRecord(davidThen, "people/c2")),
+        ])
 
         return DemoEnvironment(
             store: InMemoryContactStore(records: book),
@@ -129,7 +181,7 @@ public enum DemoData {
             notes: InMemoryNotesStore(notes: notes),
             links: links,
             dismissals: InMemoryDismissalStore(),
-            syncState: InMemorySyncStateStore(),
+            syncState: InMemorySyncStateStore(SyncState(baselines: baselines)),
             reviews: InMemoryReviewStore(),
             journal: InMemorySyncJournalStore(),
             history: InMemorySyncHistoryStore(),

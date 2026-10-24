@@ -472,7 +472,7 @@ public actor SyncEngine {
         }
         let at = clock.now()
         var plan = planner.plan(
-            icloud: scan, google: feed, state: planState, links: table,
+            icloud: scan, google: feed, state: planState, links: table, keepSeparate: planState.keepSeparate,
             allowMassGoogleDeletions: options.confirmedSummary?.hasPrefix(SyncPlanner.googleMissingSummaryPrefix) == true, now: at
         )
         if let confirmed = options.confirmedSummary, case .needsConfirmation(let summary)? = plan.pause, summary == confirmed {
@@ -607,12 +607,13 @@ public actor SyncEngine {
     }
 
     private func summary(
-        id: String, kind: ReviewKind, icloudID: String?, resourceName: String?, fields: [SyncField], baselines: [String: SyncBaseline]
+        id: String, kind: ReviewKind, icloudID: String?, resourceName: String?, fields: [SyncField], pinned: Bool = false,
+        baselines: [String: SyncBaseline]
     ) -> SyncReviewSummary {
         let mayBe = kind == .possibleLink ? resourceName.flatMap { googleNames[$0] } : nil
         return SyncReviewSummary(
             id: id, kind: kind, name: name(icloudID: icloudID, resourceName: resourceName, baselines: baselines), detail: mayBe,
-            fields: fields
+            fields: fields, isFirstLink: pinned
         )
     }
 
@@ -631,7 +632,10 @@ public actor SyncEngine {
             }
         }
         return items.map {
-            summary(id: $0.id, kind: $0.kind, icloudID: $0.icloudID, resourceName: $0.resourceName, fields: $0.fields, baselines: baselines)
+            summary(
+                id: $0.id, kind: $0.kind, icloudID: $0.icloudID, resourceName: $0.resourceName, fields: $0.fields, pinned: $0.pinned,
+                baselines: baselines
+            )
         }
     }
 

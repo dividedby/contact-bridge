@@ -472,6 +472,38 @@ struct SyncEngineTests {
         await rig.engine.stop()
     }
 
+    @Test("A preview refresh that fails keeps the old preview and reports the failure, so the screen can show both")
+    func failedPreviewRefresh() async throws {
+        let rig = try firstSyncRig()
+        defer { rig.cleanUp() }
+        await rig.start()
+        await rig.engine.refreshPreview()
+        let shown = try #require(await rig.snapshot.preview)
+
+        rig.google.failListings(with: .other(status: 503, message: "Backend unavailable"))
+        await rig.engine.refreshPreview()
+        let snapshot = await rig.snapshot
+        guard case .failed(let message) = snapshot.status else { Issue.record("expected a failure, got \(snapshot.status)"); return }
+        #expect(message.contains("503") || message.contains("Backend unavailable"))
+        #expect(snapshot.preview == shown)
+        await rig.engine.stop()
+    }
+
+    @Test("Pairs the user chose to keep separate are handed to the planner: the iCloud contact is created, not offered as a match")
+    func keepSeparateHonoured() async throws {
+        let world = SyncWorld(
+            icloud: [SyncFixtures.icloud("I1", "Ann", "Lee", phones: ["415-555-2671"])], google: [SyncFixtures.person("Ann", "Lee")]
+        )
+        world.state.keepSeparate = ["I1|people/c1"]
+        let rig = EngineRig(try ExecutorRig(world))
+        defer { rig.cleanUp() }
+        await rig.start()
+        await rig.engine.refreshPreview()
+        let preview = try #require(await rig.snapshot.preview)
+        #expect(preview.creates.map(\.name) == ["Ann Lee"] && preview.reviews.map(\.kind) == [.newInGoogle])
+        await rig.engine.stop()
+    }
+
     // MARK: not ready, lock
 
     @Test("Without a usable environment the run says what is missing and touches nothing; fixing it lets the next trigger run")

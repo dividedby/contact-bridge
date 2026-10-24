@@ -16,7 +16,7 @@ struct SyncStateStoreTests {
         return SyncState(
             baselines: ["I1": SyncBaseline(icloud: record, google: record, googleEtag: "e1", icloudNoteHash: NoteHash.hash("n"), syncedAt: t0)],
             googleSyncToken: "tok", fieldsVersion: "fv", icloudChangeToken: Data([1, 2]), icloudContainerID: "c1", lastNotesReadAt: t0,
-            googleAccount: "me@example.com", ignoredGoogle: ["people/c9"], firstSyncApproved: true, pause: .needsConfirmation(summary: "x")
+            googleAccount: "me@example.com", ignoredGoogle: ["people/c9"], keepSeparate: ["I1|people/c9"], firstSyncApproved: true, pause: .needsConfirmation(summary: "x")
         )
     }
 
@@ -50,6 +50,16 @@ struct SyncStateStoreTests {
         try Data(#"{"version":1,"baselines":{},"ignoredGoogle":[],"firstSyncApproved":true}"#.utf8).write(to: url)
         let state = try SyncStateStore(url: url).load()
         #expect(state.firstSyncApproved && state.icloudContainerID == nil && state.lastNotesReadAt == nil)
+        #expect(state.keepSeparate.isEmpty, "a file from before keep-separate was saved still loads")
+    }
+
+    @Test("Keep-separate pairs are saved and read back")
+    func keepSeparatePersists() throws {
+        let directory = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = SyncStateStore(url: directory.appendingPathComponent("sync-state.json"))
+        try store.update { $0.keepSeparate.insert("I1|people/c1") }
+        #expect(try SyncStateStore(url: directory.appendingPathComponent("sync-state.json")).load().keepSeparate == ["I1|people/c1"])
     }
 
     @Test("update is one read-modify-write; a throwing change or an unchanged state writes nothing")

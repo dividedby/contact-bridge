@@ -105,19 +105,20 @@ struct DemoSyncTests {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("demo-sync-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let engine = engine(demo, directory: directory)
+        let seeded = try demo.syncState.load()
         await engine.start()
         await engine.refreshPreview()
 
         let shown = await engine.current
         let preview = try #require(shown.preview)
         #expect(!shown.firstSyncApproved && preview.pause == nil)
-        #expect(preview.links.count >= 3 && preview.creates.count >= 5)
+        #expect(!preview.links.isEmpty && preview.creates.count >= 5)
         let kinds = Set(preview.reviews.map(\.kind))
         #expect(kinds.isSuperset(of: [.bothEdited, .possibleLink, .newInGoogle]))
         #expect(preview.reviews.allSatisfy { $0.name != "Unknown contact" })
         #expect(preview.links.contains { $0.name == "Ann Lee" } && preview.reviews.contains { $0.kind == .newInGoogle && $0.name == "Priya Patel" })
         let before = await demo.google.allPeople.count
-        #expect(try demo.syncState.load() == SyncState() && demo.links.load().links.count == 3, "the preview changed nothing")
+        #expect(try demo.syncState.load() == seeded && demo.links.load().links.count == 3, "the preview changed nothing")
 
         #expect(await engine.approveFirstSync() == .started)
         let after = await engine.current
@@ -126,6 +127,115 @@ struct DemoSyncTests {
         #expect(after.pendingReviews == preview.reviews.count)
         let people = await demo.google.allPeople.count
         #expect(people == before + preview.creates.count)
+        await engine.stop()
+    }
+
+    private func approved(_ demo: DemoEnvironment, directory: URL) async -> SyncEngine {
+        let engine = engine(demo, directory: directory)
+        await engine.start()
+        await engine.refreshPreview()
+        _ = await engine.approveFirstSync()
+        return engine
+    }
+
+    private func workflows(_ demo: DemoEnvironment, directory: URL) -> ReviewWorkflows {
+        let store = demo.store, google = demo.google, notes = demo.notes
+        let backups = BackupCoordinator(makeSetup: {
+            BackupSetup(writer: BackupWriter(store: store, google: google, notes: notes, baseDirectory: directory), containerID: "demo-icloud")
+        })
+        return ReviewWorkflows(
+            store: store, google: google, notes: notes, backups: backups, links: demo.links, state: demo.syncState, reviews: demo.reviews,
+            journal: demo.journal, history: demo.history, gate: WriteGate(), containerID: "demo-icloud"
+        )
+    }
+
+    @Test("After Start syncing the demo's review list holds one of every kind a person can decide on")
+    func reviewKinds() async throws {
+        let demo = DemoData.make()
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("demo-review-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let engine = await approved(demo, directory: directory)
+        let items = await engine.current.reviewItems
+        func has(_ kind: ReviewKind, _ name: String) -> Bool { items.contains { $0.kind == kind && $0.name == name } }
+
+        #expect(has(.googleEdited, "Leo Fischer"), "edited in Google")
+        #expect(has(.deletedInGoogle, "Mia Chen"), "deleted in Google")
+        #expect(has(.bothEdited, "David Brown"), "edited on both sides")
+        #expect(has(.newInGoogle, "Priya Patel"), "new in Google")
+        #expect(items.contains { $0.kind == .possibleLink }, "a possible match")
+        #expect(items.contains { $0.kind == .bothEdited && $0.isFirstLink }, "a conflict from linking two contacts for the first time")
+        #expect(items.filter { $0.kind == .bothEdited && !$0.isFirstLink }.map(\.name) == ["David Brown"])
+        #expect(items.allSatisfy { $0.name != "Unknown contact" })
+        await engine.stop()
+    }
+
+    @Test("Leo's review shows a phone removed in Google, a Google-only email and a new one, and deciding on it settles the demo")
+    func leoReview() async throws {
+        let demo = DemoData.make()
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("demo-leo-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let engine = await approved(demo, directory: directory)
+        let workflows = workflows(demo, directory: directory)
+        let item = try #require(try demo.reviews.load().first { $0.kind == .googleEdited })
+        #expect(item.fields == [.organization, .phones, .emails])
+
+        let detail = try await workflows.loadDetail(item)
+        let draft = try #require(detail.draft)
+        let phones = try #require(draft.lists.first { $0.field == .phones }).rows
+        #expect(phones.contains { $0.status == .removedInGoogle })
+        let emails = try #require(draft.lists.first { $0.field == .emails }).rows
+        #expect(emails.contains { $0.status == .googleOnly } && emails.contains { $0.status == .addedInGoogle })
+
+        #expect(try await workflows.apply(detail) == .done(warnings: []))
+        await engine.syncNow()
+        let leo = try #require(try await demo.store.fetchAll().first { $0.givenName == "Leo" })
+        #expect(leo.organization == "Fischer Design" && leo.phones.map(\.value) == ["415-555-0401"])
+        #expect(leo.emails.map(\.value).contains("leo.f@gmail.example") && !leo.emails.map(\.value).contains("leo@fischerdesign.example"))
+        let after = await engine.current
+        #expect(!after.reviewItems.contains { $0.kind == .googleEdited } && after.lastRun?.updated == 0)
+        await engine.stop()
+    }
+
+    @Test("Every kind of demo review can be decided, and the next run finds nothing left to send back for it")
+    func decideEachKind() async throws {
+        let demo = DemoData.make()
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("demo-each-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let engine = await approved(demo, directory: directory)
+        let workflows = workflows(demo, directory: directory)
+        func item(_ kind: ReviewKind, _ name: String? = nil) async throws -> ReviewItem {
+            let open = Set(try demo.reviews.load().map(\.id))
+            let summaries = await engine.current.reviewItems.filter { open.contains($0.id) }
+            let id = try #require(summaries.first { $0.kind == kind && (name == nil || $0.name == name) }?.id)
+            return try #require(try demo.reviews.load().first { $0.id == id })
+        }
+
+        // David: both edited, iCloud's company wins.
+        let david = try await workflows.loadDetail(try await item(.bothEdited, "David Brown"))
+        #expect(try await workflows.apply(david) == .done(warnings: []))
+        // Mia: deleted in Google, so she is deleted here too.
+        let mia = try await workflows.loadDetail(try await item(.deletedInGoogle))
+        #expect(try await workflows.deleteFromICloud(mia) == .done(warnings: []))
+        // Priya: imported.
+        let priya = try await workflows.loadDetail(try await item(.newInGoogle, "Priya Patel"))
+        #expect(try await workflows.importToICloud(priya) == .done(warnings: []))
+        // Tom: ignored.
+        try await workflows.ignore(try await item(.newInGoogle, "Tom Nguyen"))
+        // Janet resembles both Carters; she is kept apart from each.
+        try await workflows.keepSeparate(try await item(.possibleLink))
+        try await workflows.keepSeparate(try await item(.possibleLink))
+        await engine.syncNow()
+
+        let records = try await demo.store.fetchAll()
+        #expect(records.contains { $0.givenName == "Priya" } && !records.contains { $0.givenName == "Mia" })
+        #expect(records.first { $0.givenName == "David" }?.organization == "Brown & Co")
+        let people = await demo.google.allPeople
+        #expect(people.first { $0.names?.first?.givenName == "David" }?.organizations?.first?.name == "Brown & Co")
+        let remaining = await engine.current.reviewItems
+        #expect(!remaining.contains { $0.name == "David Brown" || $0.name == "Mia Chen" || $0.name == "Priya Patel" || $0.name == "Tom Nguyen" })
+        #expect(!remaining.contains { $0.kind == .possibleLink } && remaining.contains { $0.kind == .newInGoogle && $0.name == "Janet Carter" })
+        let state = try demo.syncState.load()
+        #expect(state.ignoredGoogle.count == 1 && state.keepSeparate.count == 2)
         await engine.stop()
     }
 }

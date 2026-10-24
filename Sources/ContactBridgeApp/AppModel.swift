@@ -47,6 +47,7 @@ final class AppModel {
     @ObservationIgnored private(set) var dedupe: DedupeModel!
     @ObservationIgnored private(set) var cleanup: CleanupModel!
     @ObservationIgnored private(set) var sync: SyncModel!
+    @ObservationIgnored private(set) var review: ReviewModel!
     @ObservationIgnored private var cachedStore: (id: String, store: any ContactStoring)?
     @ObservationIgnored private(set) lazy var backupCoordinator = BackupCoordinator(makeSetup: { [self] in try await makeBackupSetup() })
 
@@ -58,6 +59,7 @@ final class AppModel {
         dedupe = DedupeModel(app: self)
         cleanup = CleanupModel(app: self)
         sync = SyncModel(app: self)
+        review = ReviewModel(app: self)
     }
 
     static func make() -> AppModel {
@@ -110,6 +112,17 @@ final class AppModel {
         )
     }
 
+    /// The decisions on the sync screen's review list. Needs a signed-in Google account as well as contacts access.
+    func makeReviewWorkflows() throws -> ReviewWorkflows {
+        guard let store else { throw ContactStoreError.accessDenied }
+        guard let google = googleClient else { throw GoogleAuthError.notSignedIn }
+        return ReviewWorkflows(
+            store: store, google: google, notes: notesAreAccessible ? deps.notes : nil, backups: backupCoordinator, links: deps.links,
+            state: deps.syncState, reviews: deps.reviews, journal: deps.syncJournal, history: deps.syncHistory, gate: deps.writeGate,
+            containerID: setup.selectedContainer?.id
+        )
+    }
+
     /// What a sync run works on right now, or what is missing. Asked at the start of every run.
     func syncEnvironment() -> SyncEnvironmentState {
         if let reason = notReadyReason { return .notReady(reason) }
@@ -135,6 +148,7 @@ final class AppModel {
         importing.reset()
         dedupe.reset()
         cleanup.reset()
+        review.reset()
         sync.servicesChanged()
     }
 
@@ -796,4 +810,261 @@ final class SyncModel {
     func resume() async { await engine.resume() }
     func confirm() async { await engine.confirmAndContinue() }
     func keepPaused() async { await engine.keepPaused() }
+}
+
+// MARK: - sync review
+
+/// What the user is asked to confirm before it happens.
+enum ReviewConfirmation: String, Identifiable {
+    case deleteFromICloud
+    case keepDeleted
+
+    var id: Self { self }
+}
+
+/// The review list's open item and the decisions on it. Every decision goes through `ReviewWorkflows` (inside the write gate),
+/// then asks the engine for a run so the list and the baselines settle.
+@MainActor
+@Observable
+final class ReviewModel {
+    /// The item on screen, with the live data its decision needs.
+    private(set) var detail: ReviewDetail?
+    private(set) var isLoading = false
+    private(set) var isWorking = false
+    /// Said above the open item when it moved while the user was looking.
+    var notice: String?
+    /// Said on the list after a decision.
+    private(set) var resultMessage: String?
+    var confirming: ReviewConfirmation?
+    /// Items decided on, hidden until the engine's next list no longer has them.
+    private(set) var hidden: Set<String> = []
+
+    var showingBulk = false
+    private(set) var isBulkWorking = false
+    private(set) var bulkReport: BulkKeepReport?
+
+    var showingIgnored = false
+    private(set) var ignored: [IgnoredContact] = []
+    private(set) var isLoadingIgnored = false
+
+    @ObservationIgnored private unowned let app: AppModel
+
+    init(app: AppModel) {
+        self.app = app
+    }
+
+    func reset() {
+        detail = nil
+        notice = nil
+    }
+
+    var isOpen: Bool { detail != nil || isLoading }
+
+    /// The engine's list without what was just decided.
+    var items: [SyncReviewSummary] { app.sync.snapshot.reviewItems.filter { !hidden.contains($0.id) } }
+    /// First-link conflicts, which "Keep iCloud for all" settles together.
+    var firstLinkItems: [SyncReviewSummary] { items.filter { $0.kind == .bothEdited && $0.isFirstLink } }
+
+    // MARK: what is possible
+
+    /// Why decisions cannot be made right now, or nil.
+    var blockReason: String? {
+        if let reason = app.notReadyReason { return reason }
+        if app.googleClient == nil { return "Sign in with Google in Setup first." }
+        switch app.sync.snapshot.status {
+        case .paused: return "Syncing is paused. Resume it, or clear the pause, before deciding on these."
+        case .disabled: return "Syncing is off in this copy of Contact Bridge."
+        default: return nil
+        }
+    }
+
+    /// Saving, Import, Delete, Put back and Restore read or write notes; Link, Keep separate, Ignore and Keep deleted never do.
+    func needsNotes(_ action: ReviewAction) -> Bool {
+        switch action {
+        case .save, .importContact, .deleteFromICloud, .putBack, .restore: true
+        case .ignore, .link, .keepSeparate, .keepDeleted: false
+        }
+    }
+
+    func block(for action: ReviewAction) -> String? {
+        if let reason = blockReason { return reason }
+        if needsNotes(action), !app.notesAreAccessible {
+            return "Grant notes access in Setup first, so no note is lost."
+        }
+        return nil
+    }
+
+    // MARK: opening
+
+    func open(_ id: String) async {
+        guard !isLoading, !isWorking else { return }
+        if let reason = blockReason {
+            app.alert = AlertInfo(title: "Cannot open this yet", message: reason)
+            return
+        }
+        isLoading = true
+        notice = nil
+        resultMessage = nil
+        defer { isLoading = false }
+        do {
+            guard let item = try app.deps.reviews.load().first(where: { $0.id == id }) else {
+                resultMessage = "That item was already settled."
+                return
+            }
+            detail = try await app.makeReviewWorkflows().loadDetail(item)
+        } catch {
+            app.present(error, title: "Could not open this item")
+        }
+    }
+
+    func close() {
+        detail = nil
+        notice = nil
+    }
+
+    /// Reads the open item's contacts again.
+    func reload() async {
+        guard let item = detail?.item, !isWorking else { return }
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            detail = try await app.makeReviewWorkflows().loadDetail(item)
+            notice = nil
+        } catch {
+            app.present(error, title: "Could not read this item again")
+        }
+    }
+
+    // MARK: the draft
+
+    func pick(_ field: SyncField, _ side: SyncReviewDraft.Side) { detail?.draft?.pick(field, side) }
+    func setAction(_ action: SyncReviewDraft.EntryAction, forEntry id: String) { detail?.draft?.setAction(action, forEntry: id) }
+    func pickNote(_ pick: SyncReviewDraft.NotePick) { detail?.draft?.pickNote(pick) }
+    func chooseICloudEverywhere() { detail?.draft?.chooseICloudEverywhere() }
+
+    // MARK: deciding
+
+    func save() async { await decide(.save, done: "Saved to iCloud and Google.") { try await $0.apply($1) } }
+    func importContact() async { await decide(.importContact, done: "Imported to iCloud.") { try await $0.importToICloud($1) } }
+    func deleteFromICloud() async { await decide(.deleteFromICloud, done: "Deleted from iCloud.") { try await $0.deleteFromICloud($1) } }
+    func putBack() async { await decide(.putBack, done: "Put back in Google.") { try await $0.putBackInGoogle($1) } }
+    func keepDeleted() async { await decide(.keepDeleted, done: "Deleted from Google too.") { try await $0.keepDeleted($1) } }
+    func restore() async { await decide(.restore, done: "Restored to iCloud.") { try await $0.restoreToICloud($1) } }
+    func link() async { await decide(.link, done: "Linked. The next sync compares the two and asks about anything that differs.") { try await $0.link($1) } }
+
+    func ignore() async {
+        await decide(.ignore, done: "Ignored. Use Show ignored to bring it back.") { workflows, detail in
+            try await workflows.ignore(detail.item)
+            return .done(warnings: [])
+        }
+    }
+
+    func keepSeparate() async {
+        await decide(.keepSeparate, done: "Kept separate. The iCloud contact is created in Google on the next sync.") { workflows, detail in
+            try await workflows.keepSeparate(detail.item)
+            return .done(warnings: [])
+        }
+    }
+
+    private func decide(
+        _ action: ReviewAction, done message: String, _ run: (ReviewWorkflows, ReviewDetail) async throws -> ReviewOutcome
+    ) async {
+        guard let current = detail, !isWorking, block(for: action) == nil else { return }
+        isWorking = true
+        defer { isWorking = false }
+        do {
+            switch try await run(try app.makeReviewWorkflows(), current) {
+            case .done(let warnings):
+                hidden.insert(current.id)
+                detail = nil
+                notice = nil
+                resultMessage = message
+                if !warnings.isEmpty { app.alert = AlertInfo(title: "Done, with a note", message: warnings.joined(separator: "\n")) }
+                await settle()
+            case .changedSinceShown(let fresh):
+                notice = "This changed since you looked, so nothing was done. Check it again."
+                if let fresh {
+                    detail = fresh
+                } else {
+                    detail = nil
+                    resultMessage = "That item changed and was refreshed. Nothing was done."
+                    await settle()
+                }
+            }
+        } catch {
+            app.present(error, title: "Could not save that decision")
+            if detail != nil { await reload() }
+        }
+    }
+
+    /// After a change to contacts: other screens' lists are stale, and the engine settles baselines and the review list.
+    private func settle() async {
+        await app.backup.refresh()
+        app.importing.reset()
+        app.dedupe.reset()
+        app.cleanup.reset()
+        await app.sync.syncNow()
+        hidden = []
+    }
+
+    // MARK: keep iCloud for all
+
+    func startBulk() {
+        bulkReport = nil
+        showingBulk = true
+    }
+
+    func keepICloudForAll() async {
+        guard !isBulkWorking, block(for: .save) == nil else { return }
+        let ids = Set(firstLinkItems.map(\.id))
+        isBulkWorking = true
+        defer { isBulkWorking = false }
+        do {
+            let items = try app.deps.reviews.load().filter { ids.contains($0.id) }
+            let report = try await app.makeReviewWorkflows().keepICloudForAll(items)
+            bulkReport = report
+            hidden.formUnion(report.applied)
+            await settle()
+        } catch {
+            showingBulk = false
+            app.present(error, title: "Could not keep iCloud for all")
+        }
+    }
+
+    // MARK: ignored contacts
+
+    func showIgnored() async {
+        guard blockReason == nil else {
+            app.alert = AlertInfo(title: "Cannot list ignored contacts", message: blockReason ?? "")
+            return
+        }
+        showingIgnored = true
+        await loadIgnored()
+    }
+
+    private func loadIgnored() async {
+        isLoadingIgnored = true
+        defer { isLoadingIgnored = false }
+        do {
+            ignored = try await app.makeReviewWorkflows().loadIgnored()
+        } catch {
+            app.present(error, title: "Could not read the ignored contacts")
+        }
+    }
+
+    func unignore(_ contact: IgnoredContact) async {
+        do {
+            try await app.makeReviewWorkflows().unignore([contact.resourceName])
+            ignored.removeAll { $0.id == contact.id }
+            resultMessage = "\(contact.name) will be offered again on the next sync."
+            await settle()
+        } catch {
+            app.present(error, title: "Could not show that contact again")
+        }
+    }
+}
+
+/// What the buttons on an open item do.
+enum ReviewAction {
+    case save, importContact, ignore, deleteFromICloud, putBack, keepDeleted, restore, link, keepSeparate
 }

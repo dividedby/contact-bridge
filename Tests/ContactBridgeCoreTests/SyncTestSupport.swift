@@ -67,7 +67,7 @@ final class SyncWorld: @unchecked Sendable {
             .fetch(state: state, accountEmail: account, requireFullListing: full)
         lastScan = scan
         lastFeed = feed
-        return planner.plan(icloud: scan, google: feed, state: state, links: links, now: clock)
+        return planner.plan(icloud: scan, google: feed, state: state, links: links, keepSeparate: state.keepSeparate, now: clock)
     }
 
     /// Stores the links, baselines and checkpoint of `plan`, as a completed run would, and approves syncing.

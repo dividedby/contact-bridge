@@ -96,6 +96,43 @@ struct ReviewStoreTests {
         #expect(try store.load().isEmpty)
     }
 
+    @Test("A pinned conflict (and any other edit conflict) is dropped once the contact is gone from either side, even in a partial plan")
+    func goneContactsClearConflicts() throws {
+        let record = ContactRecord(id: "I1", source: .icloud, sourceIdentifier: "I1", givenName: "Ann")
+        let baseline = SyncBaseline(icloud: record, google: record, googleEtag: "e1", syncedAt: t0)
+        func pinned(_ id: String) -> ReviewCandidate { ReviewCandidate(kind: .bothEdited, icloudID: id, resourceName: "people/\(id)", fields: [.nickname]) }
+        func linking(_ ids: [String]) -> SyncPlan {
+            var plan = plan(ids.map(pinned), complete: true)
+            plan.links = ids.map { PlannedLink(icloudID: $0, resourceName: "people/\($0)", origin: .matched, isNewLink: true, baseline: baseline, reasons: []) }
+            return plan
+        }
+
+        let cases: [(String, (inout SyncPlan) -> Void)] = [
+            ("gone from both", { $0.droppedLinks = ["A"] }),
+            ("deleted in iCloud", { $0.deletes = [PlannedDelete(icloudID: "A", resourceName: "people/A", baseline: baseline)] }),
+            ("deleted in Google", { $0.review = [ReviewCandidate(kind: .deletedInGoogle, icloudID: "A", resourceName: "people/A")] }),
+            ("deleted here, edited there", { $0.review = [ReviewCandidate(kind: .deletedInICloudEditedInGoogle, icloudID: "A", resourceName: "people/A")] }),
+        ]
+        for (name, gone) in cases {
+            let store = InMemoryReviewStore()
+            try store.reconcile(with: linking(["A", "B"]), at: t0)
+            #expect(try store.load().count == 2 && store.load().allSatisfy(\.pinned))
+            var next = plan([], complete: false)
+            gone(&next)
+            try store.reconcile(with: next, at: t1)
+            let left = try store.load().map(\.id)
+            #expect(left.contains("bothEdited|B|people/B") && !left.contains("bothEdited|A|people/A"), "\(name)")
+        }
+
+        // An ordinary edit conflict goes too, even though the partial plan could not tell it was resolved.
+        let store = InMemoryReviewStore()
+        try store.reconcile(with: plan([edited], complete: true), at: t0)
+        var partial = plan([ReviewCandidate(kind: .deletedInGoogle, icloudID: "I1", resourceName: "people/c1")], complete: false)
+        partial.droppedLinks = []
+        try store.reconcile(with: partial, at: t1)
+        #expect(try store.load().map(\.kind) == [.deletedInGoogle])
+    }
+
     @Test("Ignored Google contacts are never offered again, even by a plan that still lists them")
     func ignoredStayIgnored() throws {
         let store = InMemoryReviewStore()

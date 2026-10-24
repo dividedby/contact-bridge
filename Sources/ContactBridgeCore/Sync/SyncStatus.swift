@@ -200,7 +200,7 @@ public struct SyncRunSummary: Sendable, Hashable {
     }
 }
 
-/// One open question, as the sync screen lists it (read-only until the review screen exists).
+/// One open question, as the sync screen lists it.
 public struct SyncReviewSummary: Sendable, Hashable, Identifiable {
     public var id: String
     public var kind: ReviewKind
@@ -208,6 +208,8 @@ public struct SyncReviewSummary: Sendable, Hashable, Identifiable {
     /// For a possible link, the Google contact it might be.
     public var detail: String?
     public var fields: [SyncField]
+    /// A conflict found when the two contacts were first linked ("Keep iCloud for all" applies to these).
+    public var isFirstLink = false
 }
 
 /// The first-sync plan, in words. Nothing in it has been done.

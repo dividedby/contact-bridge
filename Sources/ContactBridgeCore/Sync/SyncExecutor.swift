@@ -144,7 +144,10 @@ public struct SyncExecutor: Sendable {
 
     // MARK: execute
 
-    public func execute(plan: SyncPlan) async throws -> SyncRunReport {
+    /// - Parameter approvedDeletes: iCloud id to the Google etag the user saw and decided to delete (`deletedInICloudEditedInGoogle`).
+    ///   Those deletes skip the "open review item" check and the "Google changed" check, but only for that version: if
+    ///   Google's etag has moved since, nothing is deleted and the review item is refreshed instead.
+    public func execute(plan: SyncPlan, approvedDeletes: [String: String] = [:]) async throws -> SyncRunReport {
         guard !plan.isPreview, try state.load().firstSyncApproved else { throw SyncExecutorError.previewPlan }
         if let pause = plan.pause { throw SyncExecutorError.paused(pause) }
         guard plan.creates.isEmpty || plan.createsVerifiedAgainstFullListing else { throw SyncExecutorError.createsNotVerified }
@@ -165,7 +168,7 @@ public struct SyncExecutor: Sendable {
 
         try await runUpdates(plan.updates, retrying: false, reviewed: plan.review, report: &report)
         if report.halted == nil { try await runCreates(plan.creates, held: heldCreates, report: &report) }
-        if report.halted == nil { try await runDeletes(plan.deletes, report: &report) }
+        if report.halted == nil { try await runDeletes(plan.deletes, approved: approvedDeletes, report: &report) }
 
         // The iCloud change token stays as the scan read it: this executor makes no iCloud writes, and re-reading the
         // token here would swallow edits made since the scan.
@@ -514,7 +517,7 @@ public struct SyncExecutor: Sendable {
 
     // MARK: deletes
 
-    private func runDeletes(_ deletes: [PlannedDelete], report: inout SyncRunReport) async throws {
+    private func runDeletes(_ deletes: [PlannedDelete], approved: [String: String], report: inout SyncRunReport) async throws {
         for chunk in deletes.chunked(into: GoogleBatchLimits.maxItemsPerCall) {
             guard report.halted == nil else {
                 for delete in chunk { skip(delete.icloudID, delete.resourceName, .notAttempted(report.halted ?? ""), &report) }
@@ -534,7 +537,8 @@ public struct SyncExecutor: Sendable {
                     skip(delete.icloudID, delete.resourceName, .notLinked, &report)
                     continue
                 }
-                if open.contains(where: { $0.concerns(icloudID: delete.icloudID, resourceName: delete.resourceName) }) {
+                if approved[delete.icloudID] == nil,
+                   open.contains(where: { $0.concerns(icloudID: delete.icloudID, resourceName: delete.resourceName) }) {
                     report.blockedByReview.append(delete.icloudID)
                     continue
                 }
@@ -551,7 +555,13 @@ public struct SyncExecutor: Sendable {
                     if let api = error as? GoogleAPIError { report.halted = report.halted ?? Self.haltReason(for: api) }
                     continue
                 }
-                if ThreeWayDiff.googleChanged(person, since: baseline, at: now()) {
+                let changed: Bool
+                if let approvedEtag = approved[delete.icloudID] {
+                    changed = person.etag != approvedEtag
+                } else {
+                    changed = ThreeWayDiff.googleChanged(person, since: baseline, at: now())
+                }
+                if changed {
                     candidates.append(ReviewCandidate(
                         kind: .deletedInICloudEditedInGoogle, icloudID: delete.icloudID, resourceName: delete.resourceName, googleEtag: person.etag
                     ))
