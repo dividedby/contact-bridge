@@ -1,6 +1,7 @@
 import AppKit
 import ContactBridgeCore
 import Observation
+import Synchronization
 
 enum SidebarSection: String, CaseIterable, Identifiable {
     case setup = "Setup"
@@ -335,6 +336,13 @@ final class ImportModel {
 
 // MARK: - dedupe
 
+/// Set from the main actor, read by the bulk merge between groups from another thread.
+private final class StopSignal: Sendable {
+    private let requested = Mutex(false)
+    var isRequested: Bool { requested.withLock { $0 } }
+    func request() { requested.withLock { $0 = true } }
+}
+
 @MainActor
 @Observable
 final class DedupeModel {
@@ -351,6 +359,17 @@ final class DedupeModel {
     var isMerging = false
     var mergeRun: MergeRun?
 
+    /// Each group as the matcher suggests it, by cluster id: what a bulk merge would do.
+    private(set) var suggestedDrafts: [String: MergeDraft] = [:]
+    private(set) var eligibility: [String: BulkEligibility] = [:]
+    var checkedClusterIDs: Set<String> = []
+    var showingBulkSheet = false
+    var isBulkMerging = false
+    var isStopRequested = false
+    var bulkProgress: BulkProgress?
+    var bulkReport: BulkMergeReport?
+    @ObservationIgnored private var stopSignal = StopSignal()
+
     @ObservationIgnored private unowned let app: AppModel
 
     init(app: AppModel) {
@@ -361,9 +380,38 @@ final class DedupeModel {
         scan = nil
         draft = nil
         selectedClusterID = nil
+        checkedClusterIDs = []
+        suggestedDrafts = [:]
+        eligibility = [:]
     }
 
     var blockReason: String? { app.notReadyReason }
+
+    // MARK: bulk selection
+
+    var safeClusterIDs: [String] { (scan?.clusters ?? []).map(\.id).filter { eligibility[$0] == .safe } }
+    /// The ticked groups in list order, as the matcher suggests merging them.
+    var checkedDrafts: [MergeDraft] { (scan?.clusters ?? []).compactMap { checkedClusterIDs.contains($0.id) ? suggestedDrafts[$0.id] : nil } }
+    var checkedDeleteCount: Int { checkedDrafts.reduce(0) { $0 + $1.others.count } }
+
+    func isChecked(_ clusterID: String) -> Bool { checkedClusterIDs.contains(clusterID) }
+
+    func setChecked(_ clusterID: String, _ on: Bool) {
+        guard eligibility[clusterID] != .needsReview else { return }
+        if on { checkedClusterIDs.insert(clusterID) } else { checkedClusterIDs.remove(clusterID) }
+    }
+
+    func selectAllSafe() { checkedClusterIDs = Set(safeClusterIDs) }
+    func selectNone() { checkedClusterIDs = [] }
+
+    /// Why a bulk merge is unavailable, or nil. (Not duplicates only needs the list.)
+    var bulkMergeBlockReason: String? {
+        if let reason = app.notReadyReason { return reason }
+        if !app.notesAreAccessible {
+            return "Grant notes access in Setup first, so notes on the contacts that get deleted are kept."
+        }
+        return nil
+    }
 
     /// Why Merge is unavailable for the open draft, or nil.
     var mergeBlockReason: String? {
@@ -387,6 +435,9 @@ final class DedupeModel {
             let workflows = try app.makeWorkflows()
             let loaded = try await workflows.loadDuplicates()
             scan = loaded
+            suggestedDrafts = Dictionary(loaded.clusters.map { ($0.id, MergeDraft(cluster: $0)) }, uniquingKeysWith: { first, _ in first })
+            eligibility = suggestedDrafts.mapValues(\.bulkEligibility)
+            checkedClusterIDs = checkedClusterIDs.filter { eligibility[$0] != nil && eligibility[$0] != .needsReview }
             recordsByID = Dictionary(loaded.records.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
             if app.notesAreAccessible {
                 do {
@@ -423,6 +474,18 @@ final class DedupeModel {
         }
     }
 
+    func dismissChecked() async {
+        let drafts = checkedDrafts
+        guard !drafts.isEmpty else { return }
+        do {
+            try app.makeWorkflows().dismiss(drafts)
+            checkedClusterIDs = []
+            await load()
+        } catch {
+            app.present(error, title: "Could not save that choice")
+        }
+    }
+
     func restoreDismissed() async {
         do {
             try app.makeWorkflows().restoreDismissed()
@@ -445,5 +508,42 @@ final class DedupeModel {
             showingConfirmation = false
             app.present(error, title: "Merge failed")
         }
+    }
+
+    // MARK: bulk merge
+
+    func bulkMerge() async {
+        let drafts = checkedDrafts
+        guard !drafts.isEmpty, !isBulkMerging, bulkMergeBlockReason == nil else { return }
+        stopSignal = StopSignal()
+        let signal = stopSignal
+        isStopRequested = false
+        bulkProgress = nil
+        isBulkMerging = true
+        defer {
+            isBulkMerging = false
+            bulkProgress = nil
+        }
+        do {
+            let report = try await app.makeWorkflows().runBulkMerge(
+                drafts,
+                progress: { [weak self] update in Task { @MainActor in if self?.isBulkMerging == true { self?.bulkProgress = update } } },
+                isCancelled: { signal.isRequested }
+            )
+            bulkReport = report
+            checkedClusterIDs = []
+            await app.backup.refresh()
+            await load()
+            app.importing.reset()
+        } catch {
+            showingBulkSheet = false
+            app.present(error, title: "Merge failed")
+        }
+    }
+
+    /// Takes effect after the group being merged.
+    func stopBulkMerge() {
+        isStopRequested = true
+        stopSignal.request()
     }
 }

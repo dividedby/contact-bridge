@@ -18,6 +18,15 @@ struct DemoDataTests {
         #expect(notes.count >= 2)
     }
 
+    @Test("The demo book has safe groups, tick-by-hand groups and groups that need review for bulk actions")
+    func bulkScenarios() async throws {
+        let demo = DemoData.make()
+        let clusters = DuplicateMatcher().analyze(try await demo.store.fetchAll()).clusters
+        #expect(clusters.filter { $0.bulkEligibility == .safe }.count >= 3)
+        #expect(clusters.contains { $0.bulkEligibility == .eligible })
+        #expect(clusters.contains { $0.bulkEligibility == .needsReview })
+    }
+
     @Test("The demo Google account yields links, imports, other-contact candidates and a possible match")
     func importScenarios() async throws {
         let demo = DemoData.make()

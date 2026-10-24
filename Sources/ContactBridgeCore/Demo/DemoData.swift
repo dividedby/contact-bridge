@@ -1,7 +1,7 @@
 import Foundation
 
 /// Everything the app needs to run without touching real data: fakes seeded with sample contacts that exercise every
-/// screen (clear duplicates, a household phone, a three-way cluster, conflicting fields, Google-only contacts, other
+/// screen (clear duplicates, a household phone, a three-way cluster, conflicting fields, safe and tick-by-hand groups for bulk merge, Google-only contacts, other
 /// contacts, a possible match, notes).
 public struct DemoEnvironment: Sendable {
     public let store: InMemoryContactStore
@@ -41,6 +41,19 @@ public enum DemoData {
             icloud("Maria", "Garcia", phones: [("mobile", "415-555-0177")], emails: ["maria.g@example.com"]),
             icloud("Maria", "Garcia", emails: ["maria.g@example.com"], org: "Garcia & Co"),
             icloud("Maria", "Garcia", phones: [("home", "415-555-0177")]),
+            // Plain duplicates with nothing to decide: what "Select all safe groups" picks up.
+            icloud("Liam", "OConnor", phones: [("mobile", "415-555-0211")], emails: ["liam.oconnor@example.com"]),
+            icloud("Liam", "OConnor", phones: [("mobile", "(415) 555-0211")], emails: ["liam.oconnor@example.com"], org: "Harbor Logistics"),
+            icloud("Sofia", "Martinez", phones: [("mobile", "415-555-0222")], emails: ["sofia.m@example.com"]),
+            icloud("Sofia", "Martinez", phones: [("work", "415-555-0222")], emails: ["sofia.m@example.com"], job: "Architect"),
+            icloud("Noah", "Kim", phones: [("mobile", "415-555-0233")]),
+            icloud("Noah", "Kim", phones: [("home", "415-555-0233")], emails: ["noah.kim@example.com"]),
+            // Same name but nothing shared to confirm it, and a person next to a nameless record on one phone: both are
+            // likely matches that carry a caveat, so they can be ticked by hand but not by "Select all safe groups".
+            icloud("Owen", "Hayes", phones: [("mobile", "415-555-0255")]),
+            icloud("Owen", "Hayes", emails: ["owen.hayes@example.com"]),
+            icloud("Priscilla", "Wong", phones: [("mobile", "415-555-0266")], emails: ["priscilla.wong@example.com"]),
+            icloud("", "", phones: [("work", "415-555-0266")], org: "Wong Bakery"),
             // Not duplicates of anything.
             icloud("Carol", "White", phones: [("mobile", "415-555-0190")], emails: ["carol@example.com"]),
             icloud("David", "Brown", phones: [("mobile", "415-555-0123")], emails: ["david.brown@example.com"]),

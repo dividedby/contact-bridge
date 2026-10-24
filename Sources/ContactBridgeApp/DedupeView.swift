@@ -50,6 +50,10 @@ struct DedupeView: View {
         .sheet(isPresented: $model.showingConfirmation, onDismiss: { model.mergeRun = nil }) {
             MergeConfirmationSheet(model: model, containerName: app.setup.selectedContainer?.name ?? "iCloud")
         }
+        .sheet(isPresented: $model.showingBulkSheet, onDismiss: { model.bulkReport = nil }) {
+            BulkMergeSheet(model: model, containerName: app.setup.selectedContainer?.name ?? "iCloud")
+                .interactiveDismissDisabled(model.isBulkMerging)
+        }
     }
 
     @ViewBuilder private func content(_ scan: DuplicateScan) -> some View {
@@ -64,13 +68,28 @@ struct DedupeView: View {
             if model.draft != nil {
                 ClusterDetail(model: model, containerName: app.setup.selectedContainer?.name ?? "iCloud")
             } else {
-                List(selection: $model.selectedClusterID) {
-                    Section {
-                        ForEach(scan.clusters) { cluster in
-                            ClusterRow(cluster: cluster).tag(cluster.id)
+                VStack(spacing: 0) {
+                    BulkBar(model: model)
+                    Divider()
+                    List(selection: $model.selectedClusterID) {
+                        Section {
+                            ForEach(scan.clusters) { cluster in
+                                let eligibility = model.eligibility[cluster.id] ?? .eligible
+                                HStack(alignment: .top, spacing: 8) {
+                                    Toggle("Include in bulk actions", isOn: Binding(
+                                        get: { model.isChecked(cluster.id) }, set: { model.setChecked(cluster.id, $0) }
+                                    ))
+                                    .toggleStyle(.checkbox)
+                                    .labelsHidden()
+                                    .disabled(eligibility == .needsReview)
+                                    .help(eligibility == .needsReview ? "Open this group to review it. It can't be merged in bulk." : "Include in bulk actions")
+                                    ClusterRow(cluster: cluster, eligibility: eligibility)
+                                }
+                                .tag(cluster.id)
+                            }
+                        } header: {
+                            Text("\(ContactText.count(scan.clusters.count, "possible duplicate group")). Select one to review; nothing merges until you confirm.")
                         }
-                    } header: {
-                        Text("\(ContactText.count(scan.clusters.count, "possible duplicate group")). Select one to review; nothing merges until you confirm.")
                     }
                 }
             }
@@ -78,14 +97,48 @@ struct DedupeView: View {
     }
 }
 
+/// Select-all-safe / none, the count, and the actions on the ticked groups.
+struct BulkBar: View {
+    @Bindable var model: DedupeModel
+
+    var body: some View {
+        let checked = model.checkedClusterIDs.count
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Button("Select all safe groups (\(model.safeClusterIDs.count))") { model.selectAllSafe() }
+                    .disabled(model.safeClusterIDs.isEmpty)
+                    .help("Tick every high-confidence group with no warnings and no fields that disagree")
+                Button("Select none") { model.selectNone() }.disabled(checked == 0)
+                Text(checked == 0 ? "None selected" : "\(checked) selected").foregroundStyle(.secondary)
+                Spacer()
+                if checked > 0 {
+                    Button("Not duplicates (\(checked))") { Task { await model.dismissChecked() } }
+                        .help("Hide the selected groups from now on. You can bring hidden groups back from the toolbar.")
+                    Button("Merge \(ContactText.count(checked, "group"))…") { model.showingBulkSheet = true }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(model.bulkMergeBlockReason != nil)
+                }
+            }
+            if checked > 0, let reason = model.bulkMergeBlockReason { Text(reason).font(.caption).foregroundStyle(.orange) }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+    }
+}
+
 struct ClusterRow: View {
     let cluster: DuplicateCluster
+    var eligibility: BulkEligibility = .eligible
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text(cluster.members.map(\.displayName).joined(separator: " · ")).lineLimit(2)
                 Spacer()
+                if eligibility == .needsReview {
+                    Text("Needs review").font(.caption.weight(.medium)).padding(.horizontal, 8).padding(.vertical, 2)
+                        .background(Color.orange.opacity(0.25), in: Capsule())
+                }
                 ConfidenceBadge(confidence: cluster.confidence)
             }
             Text("\(cluster.members.count) contacts · \(cluster.reasons.joined(separator: ", "))")
@@ -420,6 +473,147 @@ struct MergeConfirmationSheet: View {
         HStack {
             Spacer()
             Button("Done") { model.showingConfirmation = false }.keyboardShortcut(.defaultAction)
+        }
+    }
+}
+
+/// Confirm, then progress, then the per-group summary of a bulk merge.
+struct BulkMergeSheet: View {
+    @Bindable var model: DedupeModel
+    let containerName: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if model.isBulkMerging {
+                progressView
+            } else if let report = model.bulkReport {
+                summary(report)
+            } else {
+                confirmation
+            }
+        }
+        .padding(20)
+        .frame(width: 560)
+    }
+
+    /// A plain stack for a few rows; a scroller of a definite height beyond that (a ScrollView has no intrinsic height in a sheet).
+    @ViewBuilder private func rows(_ content: some View, count: Int) -> some View {
+        if count <= 6 {
+            content
+        } else {
+            ScrollView { content }.frame(height: min(CGFloat(count) * 40, 280))
+        }
+    }
+
+    private var confirmation: some View {
+        let drafts = model.checkedDrafts
+        let deleting = model.checkedDeleteCount
+        return VStack(alignment: .leading, spacing: 12) {
+            Text("Merge \(ContactText.count(drafts.count, "group"))?").font(.title2)
+            rows(
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(drafts, id: \.cluster.id) { draft in
+                        Label("Keep **\(draft.survivor.displayName)** · delete \(draft.others.map(\.displayName).joined(separator: ", "))", systemImage: "person.2")
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading),
+                count: drafts.count
+            )
+            Text("\(ContactText.count(drafts.count, "group")) merged in “\(containerName)”, \(ContactText.count(deleting, "contact")) deleted in total.").font(.headline)
+            Text("A new backup, including notes, is taken first. Phone, email and address entries from the deleted contacts are folded into the kept ones. If a group fails, the run stops and the rest are left untouched.")
+                .font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Spacer()
+                Button("Cancel", role: .cancel) { model.showingBulkSheet = false }
+                Button("Merge \(ContactText.count(drafts.count, "group")) (delete \(ContactText.count(deleting, "contact")))", role: .destructive) {
+                    Task { await model.bulkMerge() }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(drafts.isEmpty || model.bulkMergeBlockReason != nil)
+            }
+        }
+    }
+
+    private var progressView: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            let progress = model.bulkProgress
+            switch progress?.phase {
+            case .merging:
+                let total = progress?.total ?? 0
+                Text("Merging \(min((progress?.completed ?? 0) + 1, total)) of \(total)").font(.title2)
+                ProgressView(value: Double(progress?.completed ?? 0), total: Double(max(total, 1)))
+            default:
+                Text("Taking a backup first…").font(.title2)
+                ProgressView()
+            }
+            Text(model.isStopRequested ? "Stopping after this group…" : "Stop finishes the group being merged, then leaves the rest untouched.")
+                .font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Spacer()
+                Button("Stop") { model.stopBulkMerge() }.disabled(model.isStopRequested)
+            }
+        }
+    }
+
+    private func summary(_ report: BulkMergeReport) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            switch report.stop {
+            case .completed:
+                Text("Merged \(ContactText.count(report.mergedCount, "group"))").font(.title2)
+            case .stoppedByUser:
+                Text("Stopped after \(ContactText.count(report.mergedCount, "group"))").font(.title2)
+            case .stoppedOnProblem:
+                Text("Stopped at a problem").font(.title2)
+            case .backupFailed(let reason):
+                Text("Nothing was merged").font(.title2)
+                Label("The backup could not be taken: \(reason)", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+            }
+            if report.mergedCount > 0 {
+                Text("\(ContactText.count(report.deletedCount, "duplicate contact")) deleted.\(report.receipt.map { " A backup was taken first (\(ContactText.count($0.manifest.counts.icloud ?? 0, "contact")))." } ?? "")")
+            }
+            if report.notRunCount > 0, report.receipt != nil { // no receipt: the backup failed and the title says so
+                Text("\(ContactText.count(report.notRunCount, "group")) not run.").foregroundStyle(.secondary)
+            }
+            rows(
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(Array(report.entries.enumerated()), id: \.offset) { _, entry in entryRow(entry) }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading),
+                count: report.entries.count
+            )
+            HStack {
+                Spacer()
+                Button("Done") { model.showingBulkSheet = false }.keyboardShortcut(.defaultAction)
+            }
+        }
+    }
+
+    @ViewBuilder private func entryRow(_ entry: BulkMergeReport.Entry) -> some View {
+        let draft = entry.draft
+        switch entry.outcome {
+        case .merged(let survivor, let deleted, let notes):
+            if case .writeFailed(let combined, let reason) = notes {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("Merged: kept \(survivor.displayName), deleted \(deleted.map(\.displayName).joined(separator: ", ")). The combined note was not saved: \(reason)", systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+                    BoundedText(text: combined, maxHeight: 100)
+                    Button("Copy combined note") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(combined, forType: .string)
+                    }
+                    Text("Paste it into the contact's note yourself. It is also in the backup.").font(.caption).foregroundStyle(.secondary)
+                }
+            } else {
+                Label("Merged: kept \(survivor.displayName), deleted \(deleted.map(\.displayName).joined(separator: ", "))", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green).fixedSize(horizontal: false, vertical: true)
+            }
+        case .failed(let reason):
+            Label("Failed: \(draft.survivor.displayName) and \(draft.others.map(\.displayName).joined(separator: ", ")). \(reason)", systemImage: "xmark.octagon.fill")
+                .foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+        case .notRun:
+            Label("Not run: \(draft.members.map(\.displayName).joined(separator: ", "))", systemImage: "minus.circle")
+                .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
     }
 }

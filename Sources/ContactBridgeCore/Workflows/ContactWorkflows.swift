@@ -27,6 +27,10 @@ public enum WorkflowError: Error, Sendable, Equatable {
     case nothingToMerge
     /// Merging deletes contacts, and their notes would be lost without being read first.
     case notesUnavailable
+    /// Bulk merge only takes groups that need no decisions; these (by cluster id) have conflicts to look at.
+    case needsReview(groupIDs: [String])
+    /// A group's contacts changed since it was found, so it was left alone.
+    case membersGone(names: [String])
 }
 
 extension WorkflowError: LocalizedError {
@@ -35,6 +39,10 @@ extension WorkflowError: LocalizedError {
         case .nothingToMerge: "A merge needs at least two contacts. Use Not duplicates instead."
         case .notesUnavailable:
             "Merging needs notes access, so notes on the contacts that get deleted are kept. Grant notes access in Setup, then try again."
+        case .needsReview(let ids):
+            "\(ids.count == 1 ? "1 group needs" : "\(ids.count) groups need") a closer look before merging. Open them one at a time instead."
+        case .membersGone(let names):
+            "\(names.joined(separator: ", ")) \(names.count == 1 ? "is" : "are") no longer in your address book, so this group was left as it is. Reload and look again."
         }
     }
 }
@@ -122,6 +130,11 @@ public struct ContactWorkflows: Sendable {
         try dismissals.clear()
     }
 
+    /// Several groups in one atomic write: the members still in each draft, as `dismiss(_:)` does for one.
+    public func dismiss(_ drafts: [MergeDraft]) throws {
+        try dismissals.dismiss(groups: drafts.map { $0.members.map(\.id) }, at: now())
+    }
+
     /// Merges the draft's survivor with the others after a fresh backup that includes notes. Throws before doing anything
     /// if there is no notes store; if notes cannot be read, nothing is merged.
     @concurrent
@@ -129,10 +142,78 @@ public struct ContactWorkflows: Sendable {
         guard draft.canMerge else { throw WorkflowError.nothingToMerge }
         guard notes != nil else { throw WorkflowError.notesUnavailable }
         let receipt = try await backups.freshReceipt(requiring: BackupRequirement(containerID: containerID, needsNotes: true))
+        return try await merge(draft, receipt: receipt)
+    }
+
+    private func merge(_ draft: MergeDraft, receipt: BackupReceipt) async throws -> MergeRun {
         let plan = draft.plan
         let deleted = draft.others
         let outcome = try await MergeExecutor(store: store, notes: notes)
             .execute(survivor: plan.merged, absorbing: draft.deleteSourceIdentifiers, backup: receipt, now: now())
         return MergeRun(receipt: receipt, outcome: outcome, survivor: plan.merged, deleted: deleted)
+    }
+
+    /// Merges the groups one after another, each with the suggested survivor and values, behind one brand-new backup that
+    /// includes notes (taken even if a recent one exists). Throws before doing anything for a group that `needsReview`, one
+    /// that cannot merge, or when there is no notes store; everything after that is in the report, never thrown.
+    ///
+    /// Stops at the first problem: a group whose members are no longer all there, a failed merge, or a merge whose combined
+    /// note could not be saved. Groups after it are `notRun`. `isCancelled` is asked before each group, so a stop takes
+    /// effect after the current one. A run that outlives the backup's freshness takes another backup between groups.
+    @concurrent
+    public func runBulkMerge(
+        _ drafts: [MergeDraft], progress: @escaping @Sendable (BulkProgress) -> Void = { _ in },
+        isCancelled: @escaping @Sendable () -> Bool = { false }
+    ) async throws -> BulkMergeReport {
+        guard !drafts.isEmpty, drafts.allSatisfy(\.canMerge) else { throw WorkflowError.nothingToMerge }
+        guard notes != nil else { throw WorkflowError.notesUnavailable }
+        let review = drafts.filter { $0.bulkEligibility == .needsReview }
+        guard review.isEmpty else { throw WorkflowError.needsReview(groupIDs: review.map(\.cluster.id)) }
+
+        let total = drafts.count
+        var entries = drafts.map { BulkMergeReport.Entry(draft: $0, outcome: .notRun) }
+        let requirement = BackupRequirement(containerID: containerID, needsNotes: true)
+
+        progress(BulkProgress(phase: .backingUp, completed: 0, total: total))
+        var receipts: [BackupReceipt]
+        do {
+            receipts = [try await backups.newBackup(requiring: requirement)]
+        } catch {
+            return BulkMergeReport(entries: entries, stop: .backupFailed(reason: error.localizedDescription), receipts: [])
+        }
+
+        var stop = BulkMergeReport.Stop.completed
+        for index in drafts.indices {
+            if isCancelled() || Task.isCancelled {
+                stop = .stoppedByUser
+                break
+            }
+            progress(BulkProgress(phase: .merging, completed: index, total: total))
+            let draft = drafts[index]
+            do {
+                try await requireMembersExist(draft)
+                // The cached receipt is the one just taken; this only differs once it has aged out.
+                let receipt = try await backups.freshReceipt(requiring: requirement)
+                if receipt != receipts.last { receipts.append(receipt) }
+                let run = try await merge(draft, receipt: receipt)
+                entries[index].outcome = .merged(survivor: run.survivor, deleted: run.deleted, notes: run.outcome.notes)
+                if case .writeFailed = run.outcome.notes {
+                    stop = .stoppedOnProblem
+                    break
+                }
+            } catch {
+                entries[index].outcome = .failed(reason: error.localizedDescription)
+                stop = .stoppedOnProblem
+                break
+            }
+        }
+        progress(BulkProgress(phase: .merging, completed: entries.count { $0.outcome != .notRun }, total: total))
+        return BulkMergeReport(entries: entries, stop: stop, receipts: receipts)
+    }
+
+    private func requireMembersExist(_ draft: MergeDraft) async throws {
+        let present = Set(try await store.fetchAll().map(\.sourceIdentifier))
+        let missing = draft.members.filter { !present.contains($0.sourceIdentifier) }
+        guard missing.isEmpty else { throw WorkflowError.membersGone(names: missing.map(\.displayName)) }
     }
 }

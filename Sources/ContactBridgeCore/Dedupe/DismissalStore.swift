@@ -69,6 +69,8 @@ public struct DismissalTable: Sendable, Hashable, Codable {
 public protocol DismissalStoring: Sendable {
     func load() throws -> DismissalTable
     func dismiss(memberIDs: [String], at date: Date) throws
+    /// Several groups in one read-modify-write: either all are saved or none.
+    func dismiss(groups: [[String]], at date: Date) throws
     /// Forgets every dismissal.
     func clear() throws
 }
@@ -93,6 +95,15 @@ public final class DismissalStore: DismissalStoring, Sendable {
             var table = try read()
             let before = table
             table.dismiss(memberIDs, at: date)
+            if table != before { try write(table) }
+        }
+    }
+
+    public func dismiss(groups: [[String]], at date: Date) throws {
+        try lock.withLock { _ in
+            var table = try read()
+            let before = table
+            for ids in groups { table.dismiss(ids, at: date) }
             if table != before { try write(table) }
         }
     }
@@ -146,5 +157,8 @@ public final class InMemoryDismissalStore: DismissalStoring, Sendable {
 
     public func load() throws -> DismissalTable { table.withLock { $0 } }
     public func dismiss(memberIDs: [String], at date: Date) throws { table.withLock { $0.dismiss(memberIDs, at: date) } }
+    public func dismiss(groups: [[String]], at date: Date) throws {
+        table.withLock { table in for ids in groups { table.dismiss(ids, at: date) } }
+    }
     public func clear() throws { table.withLock { $0 = DismissalTable() } }
 }

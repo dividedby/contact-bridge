@@ -92,6 +92,12 @@ public actor BackupCoordinator {
         if let cached, cached.receipt.isFresh(maxAge: maxAge, now: now()), Self.meets(requirement, cached.coverage) {
             return cached.receipt
         }
+        return try await newBackup(requiring: requirement)
+    }
+
+    /// Always takes a new backup (or joins one already running for the same container) and checks it covers `requirement`.
+    /// The new receipt replaces the cached one, so `freshReceipt` hands it out until it ages.
+    public func newBackup(requiring requirement: BackupRequirement) async throws -> BackupReceipt {
         let (receipt, coverage) = try await takeBackup(joining: .container(requirement.containerID))
         guard coverage.containerID == requirement.containerID else {
             throw BackupCoordinatorError.requirementNotMet("the selected contacts account")
