@@ -9,6 +9,11 @@ public struct DemoEnvironment: Sendable {
     public let notes: InMemoryNotesStore
     public let links: InMemoryLinkStore
     public let dismissals: InMemoryDismissalStore
+    /// The sync files, in memory: the demo runs the real engine against the fakes above, and nothing reaches the disk.
+    public let syncState: InMemorySyncStateStore
+    public let reviews: InMemoryReviewStore
+    public let journal: InMemorySyncJournalStore
+    public let history: InMemorySyncHistoryStore
     public let containers: [ContactContainer]
     public let accountEmail: String
 }
@@ -124,6 +129,10 @@ public enum DemoData {
             notes: InMemoryNotesStore(notes: notes),
             links: links,
             dismissals: InMemoryDismissalStore(),
+            syncState: InMemorySyncStateStore(),
+            reviews: InMemoryReviewStore(),
+            journal: InMemorySyncJournalStore(),
+            history: InMemorySyncHistoryStore(),
             containers: [ContactContainer(id: "demo-icloud", name: "iCloud", kind: .cardDAV, isDefault: true)],
             accountEmail: "demo.user@example.com"
         )

@@ -25,7 +25,7 @@ struct RootView: View {
             case .importContacts: ImportView(model: model.importing, app: model)
             case .dedupe: DedupeView(model: model.dedupe, app: model)
             case .cleanUp: CleanupView(model: model.cleanup, app: model)
-            case .sync: SyncPlaceholderView(app: model)
+            case .sync: SyncView(model: model.sync, app: model)
             }
         }
         .task { await model.start() }

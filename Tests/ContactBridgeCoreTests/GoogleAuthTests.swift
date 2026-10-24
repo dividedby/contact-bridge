@@ -139,6 +139,16 @@ struct GoogleAuthSessionTests {
         )
     }
 
+    /// Returns once the transport has received a request to `fragment`, i.e. the call under test is in flight. Waits on that
+    /// fact, not on elapsed time, so machine load cannot move the test's interleaving.
+    private func waitForRequest(_ transport: FakeHTTPTransport, containing fragment: String, body: String? = nil) async throws {
+        for _ in 0..<2000 {
+            if await transport.requests(containing: fragment).contains(where: { body.map($0.bodyString.contains) ?? true }) { return }
+            try await Task.sleep(for: .milliseconds(1))
+        }
+        Issue.record("The request to \(fragment) never arrived")
+    }
+
     @Test("A token with plenty of life is returned without any network call")
     func freshToken() async throws {
         let store = InMemoryTokenStore(storedToken())
@@ -231,12 +241,14 @@ struct GoogleAuthSessionTests {
     func signOutDuringRefresh() async throws {
         let store = InMemoryTokenStore(storedToken(expiry: now.addingTimeInterval(-10)))
         let transport = FakeHTTPTransport()
-        await transport.route("POST", "/token", [.json(200, tokenJSON(access: "late"))], delay: .milliseconds(250))
+        let (answer, answerNow) = AsyncStream<Void>.makeStream()
+        await transport.route("POST", "/token", [.json(200, tokenJSON(access: "late"))], hold: answer)
         await transport.route("POST", "/revoke", [.json(200)])
         let session = makeSession(store: store, transport: transport)
         let refresh = Task { try await session.validAccessToken() }
-        try await Task.sleep(for: .milliseconds(60))
+        try await waitForRequest(transport, containing: "/token")
         _ = try await session.signOut()
+        answerNow.yield(())
         await #expect(throws: GoogleAuthError.notSignedIn) { _ = try await refresh.value }
         #expect(try store.load() == nil)
         await #expect(throws: GoogleAuthError.notSignedIn) { _ = try await session.validAccessToken() }
@@ -272,14 +284,16 @@ struct GoogleAuthSessionTests {
     func signInDuringSignOut() async throws {
         let store = InMemoryTokenStore(storedToken())
         let transport = FakeHTTPTransport()
-        await transport.route("POST", "/revoke", [.json(200)], delay: .milliseconds(500))
+        let (answer, answerNow) = AsyncStream<Void>.makeStream()
+        await transport.route("POST", "/revoke", [.json(200)], hold: answer)
         await transport.route("POST", "/token", [.json(200, tokenJSON(access: "fresh-access", refresh: "fresh-refresh"))], bodyContains: "grant_type=authorization_code")
         await transport.route("GET", "openidconnect.googleapis.com/v1/userinfo", [.json(200, #"{"sub": "1", "email": "new@example.com", "email_verified": true}"#)])
         let session = makeSession(store: store, transport: transport, openURL: browser())
 
         let signOut = Task { try await session.signOut() }
-        try await Task.sleep(for: .milliseconds(100))
+        try await waitForRequest(transport, containing: "/revoke")
         _ = try await session.signIn()
+        answerNow.yield(())
         _ = try await signOut.value
 
         let saved = try #require(try store.load())
@@ -292,12 +306,14 @@ struct GoogleAuthSessionTests {
         let store = InMemoryTokenStore(storedToken(expiry: now.addingTimeInterval(-10)))
         let transport = FakeHTTPTransport()
         await transport.route("POST", "/token", [.json(200, tokenJSON(access: "fresh-access", refresh: "fresh-refresh"))], bodyContains: "grant_type=authorization_code")
-        await transport.route("POST", "/token", [.json(200, tokenJSON(access: "stale-access", refresh: "stale-refresh"))], bodyContains: "grant_type=refresh_token", delay: .milliseconds(400))
+        let (answer, answerNow) = AsyncStream<Void>.makeStream()
+        await transport.route("POST", "/token", [.json(200, tokenJSON(access: "stale-access", refresh: "stale-refresh"))], bodyContains: "grant_type=refresh_token", hold: answer)
         await transport.route("GET", "openidconnect.googleapis.com/v1/userinfo", [.json(200, #"{"sub": "1", "email": "new@example.com", "email_verified": true}"#)])
         let session = makeSession(store: store, transport: transport, openURL: browser())
         let refresh = Task { try await session.validAccessToken() }
-        try await Task.sleep(for: .milliseconds(60))
+        try await waitForRequest(transport, containing: "/token", body: "grant_type=refresh_token")
         _ = try await session.signIn()
+        answerNow.yield(())
         #expect(try await refresh.value == "fresh-access")
         let saved = try #require(try store.load())
         #expect(saved.refreshToken == "fresh-refresh" && saved.accessToken == "fresh-access" && saved.email == "new@example.com")

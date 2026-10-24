@@ -81,6 +81,7 @@ public struct ContactWorkflows: Sendable {
     private let backups: BackupCoordinator
     private let links: any LinkStoring
     private let syncState: (any SyncStateStoring)?
+    private let gate: WriteGate?
     private let dismissals: any DismissalStoring
     private let matcher: DuplicateMatcher
     private let containerID: String?
@@ -91,10 +92,12 @@ public struct ContactWorkflows: Sendable {
     ///   - notes: nil means notes cannot be read: previews show none and `runMerge` refuses.
     ///   - syncState: nil means sync was never set up. Once it holds an approved first sync, Clean up keeps the links of
     ///     the contacts it deletes so the sync can remove their Google copies.
+    ///   - gate: the write gate shared with the sync engine. Import, Merge (single and bulk) and Clean up run inside it, so
+    ///     they never interleave with a sync run. Nil means no sync engine to wait for.
     ///   - containerID: the container `store` writes to; backups must cover exactly this one.
     public init(
         store: any ContactStoring, google: (any GoogleContactsClient)?, notes: (any NotesStoring)?, backups: BackupCoordinator,
-        links: any LinkStoring, syncState: (any SyncStateStoring)? = nil, dismissals: any DismissalStoring,
+        links: any LinkStoring, syncState: (any SyncStateStoring)? = nil, gate: WriteGate? = nil, dismissals: any DismissalStoring,
         matcher: DuplicateMatcher = DuplicateMatcher(), containerID: String? = nil, now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.containerID = containerID
@@ -104,6 +107,7 @@ public struct ContactWorkflows: Sendable {
         self.backups = backups
         self.links = links
         self.syncState = syncState
+        self.gate = gate
         self.dismissals = dismissals
         self.matcher = matcher
         self.now = now
@@ -126,9 +130,11 @@ public struct ContactWorkflows: Sendable {
     /// Creates the selected candidates after making sure a fresh backup exists.
     @concurrent
     public func runImport(_ candidates: [ImportCandidate]) async throws -> ImportRun {
-        let receipt = try await backups.freshReceipt(requiring: BackupRequirement(containerID: containerID, needsGoogle: google != nil))
-        let result = try await ImportExecutor(store: store, receipt: receipt, links: links).execute(candidates, now: now())
-        return ImportRun(result: result, receipt: receipt)
+        try await exclusively {
+            let receipt = try await backups.freshReceipt(requiring: BackupRequirement(containerID: containerID, needsGoogle: google != nil))
+            let result = try await ImportExecutor(store: store, receipt: receipt, links: links).execute(candidates, now: now())
+            return ImportRun(result: result, receipt: receipt)
+        }
     }
 
     // MARK: dedupe
@@ -170,8 +176,10 @@ public struct ContactWorkflows: Sendable {
     public func runMerge(_ draft: MergeDraft) async throws -> MergeRun {
         guard draft.canMerge else { throw WorkflowError.nothingToMerge }
         guard notes != nil else { throw WorkflowError.notesUnavailable }
-        let receipt = try await backups.freshReceipt(requiring: BackupRequirement(containerID: containerID, needsNotes: true))
-        return try await merge(draft, receipt: receipt)
+        return try await exclusively {
+            let receipt = try await backups.freshReceipt(requiring: BackupRequirement(containerID: containerID, needsNotes: true))
+            return try await merge(draft, receipt: receipt)
+        }
     }
 
     private func merge(_ draft: MergeDraft, receipt: BackupReceipt) async throws -> MergeRun {
@@ -193,6 +201,12 @@ public struct ContactWorkflows: Sendable {
     public func runBulkMerge(
         _ drafts: [MergeDraft], progress: @escaping @Sendable (BulkProgress) -> Void = { _ in },
         isCancelled: @escaping @Sendable () -> Bool = { false }
+    ) async throws -> BulkMergeReport {
+        try await exclusively { try await bulkMerge(drafts, progress: progress, isCancelled: isCancelled) }
+    }
+
+    private func bulkMerge(
+        _ drafts: [MergeDraft], progress: @escaping @Sendable (BulkProgress) -> Void, isCancelled: @escaping @Sendable () -> Bool
     ) async throws -> BulkMergeReport {
         guard !drafts.isEmpty, drafts.allSatisfy(\.canMerge) else { throw WorkflowError.nothingToMerge }
         guard notes != nil else { throw WorkflowError.notesUnavailable }
@@ -266,6 +280,10 @@ public struct ContactWorkflows: Sendable {
     /// Contacts that never synced, and every contact before sync was approved, lose their link as before.
     @concurrent
     public func deleteContacts(ids: [String], progress: @escaping @Sendable (CleanupPhase) -> Void = { _ in }) async throws -> CleanupRun {
+        try await exclusively { try await deleteNow(ids: ids, progress: progress) }
+    }
+
+    private func deleteNow(ids: [String], progress: @escaping @Sendable (CleanupPhase) -> Void) async throws -> CleanupRun {
         var seen = Set<String>()
         let ids = ids.filter { seen.insert($0).inserted }
         guard !ids.isEmpty else { throw WorkflowError.nothingToDelete }
@@ -315,6 +333,12 @@ public struct ContactWorkflows: Sendable {
     /// A link without a baseline has no Google copy the sync could delete safely; it goes with the contact.
     private static func googleCopiesToRemove(among linked: Set<String>, state: SyncState?) -> Set<String> {
         linked.filter { state?.baselines[$0] != nil }
+    }
+
+    /// Runs `body` inside the write gate, if there is one.
+    private func exclusively<T: Sendable>(_ body: @Sendable () async throws -> T) async throws -> T {
+        guard let gate else { return try await body() }
+        return try await gate.withLock(body)
     }
 
     private func requireMembersExist(_ draft: MergeDraft) async throws {

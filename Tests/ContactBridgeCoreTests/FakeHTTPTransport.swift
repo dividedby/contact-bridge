@@ -44,14 +44,22 @@ actor FakeHTTPTransport: HTTPTransport {
         var bodyContains: String?
         var responses: [HTTPResult]
         var delay: Duration?
+        var hold: AsyncStream<Void>?
         var used = 0
     }
 
     private var routes: [Route] = []
     private(set) var requests: [Recorded] = []
 
-    func route(_ method: String, _ urlContains: String, _ responses: [HTTPResult], bodyContains: String? = nil, delay: Duration? = nil) {
-        routes.append(Route(method: method, urlContains: urlContains, bodyContains: bodyContains, responses: responses, delay: delay))
+    /// - Parameters:
+    ///   - delay: answers this long after the request arrived.
+    ///   - hold: answers only once this stream yields (or finishes). Unlike `delay` it does not depend on how fast the
+    ///     rest of the test runs, so a test can order events around the answer exactly.
+    func route(
+        _ method: String, _ urlContains: String, _ responses: [HTTPResult], bodyContains: String? = nil, delay: Duration? = nil,
+        hold: AsyncStream<Void>? = nil
+    ) {
+        routes.append(Route(method: method, urlContains: urlContains, bodyContains: bodyContains, responses: responses, delay: delay, hold: hold))
     }
 
     func requests(_ method: String? = nil, containing fragment: String) -> [Recorded] {
@@ -72,7 +80,12 @@ actor FakeHTTPTransport: HTTPTransport {
         }
         routes[index].used += 1
         let route = routes[index]
-        if let delay = route.delay { try await Task.sleep(for: delay) }
+        if let hold = route.hold {
+            for await _ in hold { break }
+            try Task.checkCancellation()
+        } else if let delay = route.delay {
+            try await Task.sleep(for: delay)
+        }
         let response = route.responses[min(route.used, route.responses.count) - 1]
         if response.status == 0 { throw URLError(.notConnectedToInternet) }
         return response

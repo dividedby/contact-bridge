@@ -1,5 +1,6 @@
 import AppKit
 import ContactBridgeCore
+import Network
 import Observation
 import Synchronization
 
@@ -45,6 +46,7 @@ final class AppModel {
     @ObservationIgnored private(set) var importing: ImportModel!
     @ObservationIgnored private(set) var dedupe: DedupeModel!
     @ObservationIgnored private(set) var cleanup: CleanupModel!
+    @ObservationIgnored private(set) var sync: SyncModel!
     @ObservationIgnored private var cachedStore: (id: String, store: any ContactStoring)?
     @ObservationIgnored private(set) lazy var backupCoordinator = BackupCoordinator(makeSetup: { [self] in try await makeBackupSetup() })
 
@@ -55,6 +57,7 @@ final class AppModel {
         importing = ImportModel(app: self)
         dedupe = DedupeModel(app: self)
         cleanup = CleanupModel(app: self)
+        sync = SyncModel(app: self)
     }
 
     static func make() -> AppModel {
@@ -68,6 +71,7 @@ final class AppModel {
         // granted access before; then macOS answers silently (or reports a revoke). Demo has no permission to ask for.
         if deps.isDemo || deps.defaults.bool(forKey: SetupModel.notesGrantedKey) { await setup.checkNotes() }
         await backup.refresh()
+        await sync.start()
     }
 
     // MARK: shared services
@@ -101,8 +105,21 @@ final class AppModel {
         guard let store else { throw ContactStoreError.accessDenied }
         return ContactWorkflows(
             store: store, google: googleClient, notes: notesAreAccessible ? deps.notes : nil, backups: backupCoordinator,
-            links: deps.links, dismissals: deps.dismissals, containerID: setup.selectedContainer?.id
+            links: deps.links, syncState: deps.syncState, gate: deps.writeGate, dismissals: deps.dismissals,
+            containerID: setup.selectedContainer?.id
         )
+    }
+
+    /// What a sync run works on right now, or what is missing. Asked at the start of every run.
+    func syncEnvironment() -> SyncEnvironmentState {
+        if let reason = notReadyReason { return .notReady(reason) }
+        guard case .signedIn(let email) = signIn.status, let store, let google = googleClient else {
+            return .notReady("Sign in with Google in Setup first.")
+        }
+        return .ready(SyncEnvironment(
+            store: store, notes: notesAreAccessible ? deps.notes : nil, google: google, accountEmail: email,
+            containerID: setup.selectedContainer?.id
+        ))
     }
 
     private func makeBackupSetup() throws -> BackupSetup {
@@ -118,6 +135,7 @@ final class AppModel {
         importing.reset()
         dedupe.reset()
         cleanup.reset()
+        sync.servicesChanged()
     }
 
     func present(_ error: any Error, title: String) {
@@ -573,6 +591,10 @@ final class CleanupModel {
     var isDeleting = false
     var phase: CleanupPhase?
     var run: CleanupRun?
+    /// How many of the ticked contacts the next sync would also remove from Google; set when the confirmation opens.
+    private(set) var googleRemovalsPending = 0
+    /// Whether syncing is approved: deleted contacts then keep their import link until the sync has removed the Google copy.
+    private(set) var syncIsOn = false
 
     @ObservationIgnored private unowned let app: AppModel
 
@@ -610,6 +632,12 @@ final class CleanupModel {
 
     func selectAllShown() { selection.formUnion(shownRows.map(\.id)) }
     func selectNone() { selection = [] }
+
+    func confirmDelete() {
+        googleRemovalsPending = (try? app.makeWorkflows().googleRemovalsPending(ifDeleting: selectedRows.map(\.id))) ?? 0
+        syncIsOn = (try? app.deps.syncState.load().firstSyncApproved) == true
+        showingConfirmation = true
+    }
 
     func loadIfNeeded() async {
         if !hasLoaded, blockReason == nil, !isLoading { await load() }
@@ -652,4 +680,120 @@ final class CleanupModel {
             app.present(error, title: "Delete failed")
         }
     }
+}
+
+// MARK: - sync
+
+/// The sync engine's state for the screen, plus the system events that wake it (store changes, wake, network).
+@MainActor
+@Observable
+final class SyncModel {
+    private(set) var snapshot = SyncSnapshot()
+    /// Said after "Start syncing" when the plan moved on since the preview was shown.
+    var notice: String?
+    private(set) var isApproving = false
+
+    @ObservationIgnored let engine: SyncEngine
+    @ObservationIgnored private unowned let app: AppModel
+    @ObservationIgnored private var observing: Task<Void, Never>?
+    @ObservationIgnored private var storeWatch: Task<Void, Never>?
+    @ObservationIgnored private var wakeObserver: (any NSObjectProtocol)?
+    @ObservationIgnored private var pathMonitor: NWPathMonitor?
+
+    init(app: AppModel) {
+        self.app = app
+        let deps = app.deps
+        engine = SyncEngine(
+            environment: { [weak app] in await app?.syncEnvironment() ?? .notReady("Contact Bridge is closing.") },
+            links: deps.links, state: deps.syncState, reviews: deps.reviews, journal: deps.syncJournal, history: deps.syncHistory,
+            backups: app.backupCoordinator, gate: deps.writeGate, contactsAppRunning: deps.contactsAppRunning,
+            acquireLock: deps.acquireSyncLock
+        )
+    }
+
+    /// Changes when something that decides whether sync can run changes, so the screen builds its preview again.
+    var readyKey: String {
+        [
+            String(describing: snapshot.status == .notStarted), app.notReadyReason ?? "", String(describing: app.signIn.status),
+            app.setup.selectedContainer?.id ?? "", String(app.notesAreAccessible),
+        ].joined(separator: "|")
+    }
+
+    func start() async {
+        guard observing == nil else { return }
+        observing = Task { [engine] in
+            for await next in await engine.snapshots() { snapshot = next }
+        }
+        await engine.start()
+        watchStore()
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
+        ) { [engine] _ in
+            Task { await engine.trigger(.wake) }
+        }
+        let monitor = NWPathMonitor()
+        let reachable = Mutex(true)
+        monitor.pathUpdateHandler = { [engine] path in
+            let online = path.status == .satisfied
+            let wasOnline = reachable.withLock { state in
+                defer { state = online }
+                return state
+            }
+            if online, !wasOnline { Task { await engine.trigger(.networkBack) } }
+        }
+        monitor.start(queue: DispatchQueue(label: "dev.dividedby.contactbridge.network"))
+        pathMonitor = monitor
+    }
+
+    /// The chosen account, sign-in or notes access changed.
+    func servicesChanged() {
+        watchStore()
+        Task { await engine.trigger(.settingsChanged) }
+    }
+
+    private func watchStore() {
+        storeWatch?.cancel()
+        guard let store = app.store else { return }
+        storeWatch = Task { [engine] in
+            for await _ in store.changes() { await engine.trigger(.storeChanged) }
+        }
+    }
+
+    /// Builds the first-sync preview when the screen shows one that is missing. Once syncing is approved, a change in what
+    /// sync works on (sign-in, account, notes access) asks for a run.
+    func screenAppeared() async {
+        guard snapshot.status != .notStarted else { return }
+        if snapshot.firstSyncApproved {
+            await engine.trigger(.settingsChanged)
+        } else if snapshot.preview == nil, !snapshot.isRunning {
+            await engine.refreshPreview()
+        }
+    }
+
+    func refreshPreview() async {
+        notice = nil
+        await engine.refreshPreview()
+    }
+
+    func approve() async {
+        guard !isApproving else { return }
+        isApproving = true
+        notice = nil
+        defer { isApproving = false }
+        switch await engine.approveFirstSync() {
+        case .started, .alreadyApproved: break
+        case .previewChanged:
+            notice = "Your contacts changed while you were looking, so the numbers above are new. Check them, then press Start syncing again."
+        case .noPreview:
+            notice = "The preview is not ready yet."
+        case .unavailable(let reason):
+            app.alert = AlertInfo(title: "Cannot start syncing", message: reason)
+        }
+    }
+
+    func syncNow() async { await engine.syncNow() }
+    func pause() async { await engine.pause() }
+    func resume() async { await engine.resume() }
+    func confirm() async { await engine.confirmAndContinue() }
+    func keepPaused() async { await engine.keepPaused() }
 }

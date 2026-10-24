@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import ContactBridgeCore
 
@@ -82,5 +83,49 @@ struct DemoDataTests {
         #expect(ContainerSelection.choose(from: demo.containers) == .selected(demo.containers[0]))
         #expect(try demo.dismissals.load().dismissed.isEmpty)
         #expect(demo.accountEmail.contains("@"))
+    }
+}
+
+/// The Sync screen's demo: the real engine over the demo fakes must show a first sync with something of each kind in it.
+struct DemoSyncTests {
+    private func engine(_ demo: DemoEnvironment, directory: URL) -> SyncEngine {
+        let store = demo.store, google = demo.google, notes = demo.notes, email = demo.accountEmail
+        let backups = BackupCoordinator(makeSetup: {
+            BackupSetup(writer: BackupWriter(store: store, google: google, notes: notes, baseDirectory: directory), containerID: "demo-icloud")
+        })
+        return SyncEngine(
+            environment: { .ready(SyncEnvironment(store: store, notes: notes, google: google, accountEmail: email, containerID: "demo-icloud")) },
+            links: demo.links, state: demo.syncState, reviews: demo.reviews, journal: demo.journal, history: demo.history, backups: backups
+        )
+    }
+
+    @Test("The demo's first-sync preview links, creates and asks about each kind of review; Start syncing then really runs it")
+    func firstSync() async throws {
+        let demo = DemoData.make()
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("demo-sync-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let engine = engine(demo, directory: directory)
+        await engine.start()
+        await engine.refreshPreview()
+
+        let shown = await engine.current
+        let preview = try #require(shown.preview)
+        #expect(!shown.firstSyncApproved && preview.pause == nil)
+        #expect(preview.links.count >= 3 && preview.creates.count >= 5)
+        let kinds = Set(preview.reviews.map(\.kind))
+        #expect(kinds.isSuperset(of: [.bothEdited, .possibleLink, .newInGoogle]))
+        #expect(preview.reviews.allSatisfy { $0.name != "Unknown contact" })
+        #expect(preview.links.contains { $0.name == "Ann Lee" } && preview.reviews.contains { $0.kind == .newInGoogle && $0.name == "Priya Patel" })
+        let before = await demo.google.allPeople.count
+        #expect(try demo.syncState.load() == SyncState() && demo.links.load().links.count == 3, "the preview changed nothing")
+
+        #expect(await engine.approveFirstSync() == .started)
+        let after = await engine.current
+        #expect(after.firstSyncApproved && after.status == .idle && after.preview == nil)
+        #expect(after.lastRun?.created == preview.creates.count)
+        #expect(after.pendingReviews == preview.reviews.count)
+        let people = await demo.google.allPeople.count
+        #expect(people == before + preview.creates.count)
+        await engine.stop()
     }
 }

@@ -22,6 +22,10 @@ public struct SyncPlanner: Sendable {
         public init() {}
     }
 
+    /// Starts the summary of the pause for a full listing that lacks many linked contacts. The engine lets the user
+    /// confirm only that pause by allowing mass deletions, so it recognises it by this text.
+    public static let googleMissingSummaryPrefix = "Google no longer lists "
+
     public var matcher: DuplicateMatcher
     public var limits: Limits
 
@@ -102,7 +106,7 @@ public struct SyncPlanner: Sendable {
         let limit = max(Double(limits.minDeletes), limits.deleteFraction * Double(linked))
         guard !confirmed, Double(missing) > limit else { return nil }
         return .needsConfirmation(
-            summary: "Google no longer lists \(missing) of \(linked) linked contacts (more than \(Int(limit)) at once). They may have been deleted in Google, or the listing may be incomplete."
+            summary: "\(Self.googleMissingSummaryPrefix)\(missing) of \(linked) linked contacts (more than \(Int(limit)) at once). They may have been deleted in Google, or the listing may be incomplete."
         )
     }
 

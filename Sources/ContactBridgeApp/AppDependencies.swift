@@ -1,3 +1,4 @@
+import AppKit
 import ContactBridgeCore
 import Foundation
 
@@ -10,6 +11,17 @@ struct AppDependencies {
     var notes: any NotesStoring
     var links: any LinkStoring
     var dismissals: any DismissalStoring
+    /// The sync files (baselines and switches, review list, journal, history).
+    var syncState: any SyncStateStoring
+    var reviews: any ReviewStoring
+    var syncJournal: any SyncJournalStoring
+    var syncHistory: any SyncHistoryStoring
+    /// Held by sync runs and by Import, Merge and Clean up, so they never interleave.
+    var writeGate: WriteGate
+    /// The second-instance guard, taken when sync starts. Nil in demo mode, which must not claim the real lock.
+    var acquireSyncLock: (@Sendable () throws -> any SyncLockHolding)?
+    /// Whether Contacts is running, so a background sync may read notes without launching it.
+    var contactsAppRunning: @Sendable () -> Bool
     var backupDirectory: URL
     var defaults: UserDefaults
     var signIn: SignInController
@@ -33,6 +45,13 @@ struct AppDependencies {
             notes: ContactsAppNotesProvider(),
             links: LinkStore(),
             dismissals: DismissalStore(),
+            syncState: SyncStateStore(),
+            reviews: ReviewStore(),
+            syncJournal: SyncJournalStore(),
+            syncHistory: SyncHistoryStore(),
+            writeGate: WriteGate(),
+            acquireSyncLock: { try SyncProcessLock.acquire() },
+            contactsAppRunning: { !NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.AddressBook").isEmpty },
             backupDirectory: BackupWriter.defaultDirectory,
             defaults: .standard,
             signIn: SignInController(),
@@ -44,7 +63,7 @@ struct AppDependencies {
     }
 
     /// Fakes seeded with sample data. Backups go to a temporary folder, the saved container choice to a separate defaults
-    /// suite, and nothing real is read or written.
+    /// suite, the sync files stay in memory, and nothing real is read or written. The real sync engine runs against the fakes.
     @MainActor
     static func demo() -> AppDependencies {
         let demo = DemoData.make()
@@ -60,6 +79,13 @@ struct AppDependencies {
             notes: demo.notes,
             links: demo.links,
             dismissals: demo.dismissals,
+            syncState: demo.syncState,
+            reviews: demo.reviews,
+            syncJournal: demo.journal,
+            syncHistory: demo.history,
+            writeGate: WriteGate(),
+            acquireSyncLock: nil,
+            contactsAppRunning: { false },
             backupDirectory: backups,
             defaults: defaults,
             signIn: SignInController(demoEmail: demo.accountEmail),

@@ -89,7 +89,7 @@ struct CleanupBar: View {
                 Text(selected == 0 ? "None selected" : "\(selected) selected").foregroundStyle(.secondary)
                 Spacer()
                 if selected > 0 {
-                    Button("Delete \(ContactText.count(selected, "contact"))…", role: .destructive) { model.showingConfirmation = true }
+                    Button("Delete \(ContactText.count(selected, "contact"))…", role: .destructive) { model.confirmDelete() }
                         .buttonStyle(.borderedProminent)
                         .tint(.red)
                         .disabled(model.deleteBlockReason != nil)
@@ -178,8 +178,14 @@ struct CleanupSheet: View {
             Text("Delete \(ContactText.count(doomed.count, "contact"))?").font(.title2)
             Text(doomed.count == 1 ? "This contact will be deleted:" : "These \(doomed.count) contacts will be deleted:").font(.headline)
             doomedList(doomed)
-            Text("A new backup, including notes, is taken first, so you can get these contacts back from it. Deleted contacts are also removed from the import links Contact Bridge keeps.")
+            Text("A new backup, including notes, is taken first, so you can get these contacts back from it."
+                + (model.syncIsOn ? "" : " Deleted contacts are also removed from the import links Contact Bridge keeps."))
                 .font(.caption).foregroundStyle(.secondary)
+            if model.googleRemovalsPending > 0 {
+                Label("Also removed from Google on the next sync (\(ContactText.count(model.googleRemovalsPending, "contact"))).", systemImage: "arrow.triangle.2.circlepath")
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             HStack {
                 Spacer()
                 Button("Cancel", role: .cancel) { model.showingConfirmation = false }
@@ -205,6 +211,10 @@ struct CleanupSheet: View {
             Text("A backup with notes was taken first (\(ContactText.count(run.receipt.manifest.counts.icloud ?? 0, "contact"))).")
             if run.linksRemoved > 0 {
                 Text("\(ContactText.count(run.linksRemoved, "import link")) removed.").foregroundStyle(.secondary)
+            }
+            if run.googleRemovalsPending > 0 {
+                Label("Also removed from Google on the next sync (\(ContactText.count(run.googleRemovalsPending, "contact"))).", systemImage: "arrow.triangle.2.circlepath")
+                    .foregroundStyle(.orange)
             }
             ForEach(run.followUpWarnings, id: \.self) { warning in
                 Label(warning, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
