@@ -32,6 +32,7 @@ struct ErrorDescriptionTests {
     @Test("Workflow and backup-coordinator errors tell the user what to do")
     func workflowErrors() {
         #expect(text(WorkflowError.notesUnavailable).contains("notes access"))
+        #expect(text(WorkflowError.nothingToDelete).contains("Tick"))
         #expect(text(BackupCoordinatorError.requirementNotMet("notes")).contains("notes"))
     }
 

@@ -60,6 +60,28 @@ public struct DismissalTable: Sendable, Hashable, Codable {
         dismissed.append(Entry(memberIDs: sorted, dismissedAt: date))
     }
 
+    /// Takes deleted contacts out of every dismissed set; a set left with fewer than two ids is dropped. Returns how many
+    /// sets were changed or dropped.
+    @discardableResult
+    public mutating func remove(_ ids: some Collection<String>) -> Int {
+        let gone = Set(ids)
+        var affected = 0
+        var kept: [Entry] = []
+        for var entry in dismissed {
+            let remaining = entry.memberIDs.filter { !gone.contains($0) }
+            if remaining.count == entry.memberIDs.count {
+                kept.append(entry)
+                continue
+            }
+            affected += 1
+            guard remaining.count >= 2 else { continue }
+            entry.memberIDs = remaining
+            kept.append(entry)
+        }
+        dismissed = kept
+        return affected
+    }
+
     /// The clusters that are not dismissed, in their given order.
     public func visible(from clusters: [DuplicateCluster]) -> [DuplicateCluster] {
         clusters.filter { !isDismissed($0.members.map(\.id)) }
@@ -73,6 +95,10 @@ public protocol DismissalStoring: Sendable {
     func dismiss(groups: [[String]], at date: Date) throws
     /// Forgets every dismissal.
     func clear() throws
+    /// Takes contacts that no longer exist out of the dismissed sets, dropping sets that fall below two. Returns how many
+    /// sets were changed or dropped.
+    @discardableResult
+    func forget(ids: [String]) throws -> Int
 }
 
 /// `dismissed-clusters.json` next to `links.json`, rewritten atomically on every change.
@@ -112,6 +138,16 @@ public final class DismissalStore: DismissalStoring, Sendable {
         try lock.withLock { _ in
             let table = try read()
             if !table.dismissed.isEmpty { try write(DismissalTable()) }
+        }
+    }
+
+    @discardableResult
+    public func forget(ids: [String]) throws -> Int {
+        try lock.withLock { _ in
+            var table = try read()
+            let affected = table.remove(ids)
+            if affected > 0 { try write(table) }
+            return affected
         }
     }
 
@@ -161,4 +197,6 @@ public final class InMemoryDismissalStore: DismissalStoring, Sendable {
         table.withLock { table in for ids in groups { table.dismiss(ids, at: date) } }
     }
     public func clear() throws { table.withLock { $0 = DismissalTable() } }
+    @discardableResult
+    public func forget(ids: [String]) throws -> Int { table.withLock { $0.remove(ids) } }
 }

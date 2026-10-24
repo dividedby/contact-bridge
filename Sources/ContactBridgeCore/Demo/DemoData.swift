@@ -2,7 +2,7 @@ import Foundation
 
 /// Everything the app needs to run without touching real data: fakes seeded with sample contacts that exercise every
 /// screen (clear duplicates, a household phone, a three-way cluster, conflicting fields, safe and tick-by-hand groups for bulk merge, Google-only contacts, other
-/// contacts, a possible match, notes).
+/// contacts, a possible match, notes) and for Clean up (text-message senders, nameless and empty contacts, imported contacts).
 public struct DemoEnvironment: Sendable {
     public let store: InMemoryContactStore
     public let google: FakeGoogleClient
@@ -58,6 +58,18 @@ public enum DemoData {
             icloud("Carol", "White", phones: [("mobile", "415-555-0190")], emails: ["carol@example.com"]),
             icloud("David", "Brown", phones: [("mobile", "415-555-0123")], emails: ["david.brown@example.com"]),
             icloud("Emma", "Stone", emails: ["emma.stone@example.com"]),
+            // Clean up: automated text-message senders (short-code phones, no person name), one of them with no name at all.
+            icloud("", "", phones: [("mobile", "72727")], org: "Acme Rewards"),
+            icloud("", "", phones: [("mobile", "32665")], org: "Harbor Bank Alerts"),
+            icloud("", "", phones: [("mobile", "227898")]),
+            // A phone number with nothing else, a person and a business with no way to reach them, and an empty card.
+            icloud("", "", phones: [("mobile", "415-555-0300")]),
+            icloud("Henry", "Walsh"),
+            icloud("", "", org: "Walsh Plumbing"),
+            icloud("", ""),
+            // Created by a Contact Bridge import: linked to their Google contact below.
+            icloud("Leo", "Fischer", phones: [("mobile", "415-555-0401")], emails: ["leo.fischer@example.com"]),
+            icloud("Mia", "Chen", emails: ["mia.chen@example.com"]),
         ]
 
         func googlePerson(_ given: String, _ family: String, phones: [String] = [], emails: [String] = []) -> GooglePerson {
@@ -73,7 +85,13 @@ public enum DemoData {
             googlePerson("Priya", "Patel", phones: ["415-555-0301"], emails: ["priya@example.com"]), // new
             googlePerson("Tom", "Nguyen", emails: ["tom.nguyen@example.com"]), // new
             googlePerson("Janet", "Carter", emails: ["john.carter@example.com"]), // new, but resembles the Carters
-        ]
+            googlePerson("Leo", "Fischer", phones: ["415-555-0401"], emails: ["leo.fischer@example.com"]), // imported earlier
+            googlePerson("Mia", "Chen", emails: ["mia.chen@example.com"]), // imported earlier
+        ].enumerated().map { index, person in
+            var person = person
+            person.resourceName = "people/c\(index + 1)"
+            return person
+        }
         let others = [
             googlePerson("Sam", "Rivera", emails: ["sam.rivera@example.com"]),
             googlePerson("Dana", "Kim", emails: ["dana.kim@example.com"]),
@@ -87,11 +105,20 @@ public enum DemoData {
             book[6].id: "Send a birthday card.",
         ]
 
+        // Past imports, so the Imported filter in Clean up shows something. In-memory, so adding cannot fail.
+        let links = InMemoryLinkStore()
+        let imported = [("Mia", "Chen", 6), ("Leo", "Fischer", 5), ("David", "Brown", 1)].compactMap { given, family, connection in
+            book.first { $0.givenName == given && $0.familyName == family }.map {
+                ImportedLink(icloudID: $0.sourceIdentifier, googleResourceName: "people/c\(connection + 1)")
+            }
+        }
+        try? links.add(imported, at: Date(timeIntervalSince1970: 1_790_000_000))
+
         return DemoEnvironment(
             store: InMemoryContactStore(records: book),
             google: FakeGoogleClient(people: connections, otherContacts: others),
             notes: InMemoryNotesStore(notes: notes),
-            links: InMemoryLinkStore(),
+            links: links,
             dismissals: InMemoryDismissalStore(),
             containers: [ContactContainer(id: "demo-icloud", name: "iCloud", kind: .cardDAV, isDefault: true)],
             accountEmail: "demo.user@example.com"

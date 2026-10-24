@@ -262,6 +262,7 @@ struct BulkMergeTests {
             try inner.dismiss(groups: groups, at: date)
         }
         func clear() throws { try inner.clear() }
+        func forget(ids: [String]) throws -> Int { try inner.forget(ids: ids) }
     }
 
     @Test("Not duplicates for several groups is one write that hides them all")

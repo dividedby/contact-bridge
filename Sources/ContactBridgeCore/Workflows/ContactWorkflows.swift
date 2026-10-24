@@ -23,9 +23,30 @@ public struct MergeRun: Sendable {
     public var deleted: [ContactRecord]
 }
 
+/// What a bulk delete is doing, for progress display.
+public enum CleanupPhase: Sendable, Equatable {
+    case backingUp
+    case deleting
+}
+
+public struct CleanupRun: Sendable {
+    /// The brand-new backup (with notes) taken just before the delete.
+    public var receipt: BackupReceipt
+    public var deletedIDs: [String]
+    /// Import links dropped because their contact is gone.
+    public var linksRemoved: Int
+    /// Dismissed "not duplicates" groups that mentioned a deleted contact and were trimmed or dropped.
+    public var dismissalsPruned: Int
+    /// The contacts are deleted regardless; these say what tidying afterwards did not work.
+    public var followUpWarnings: [String]
+
+    public var deletedCount: Int { deletedIDs.count }
+}
+
 public enum WorkflowError: Error, Sendable, Equatable {
     case nothingToMerge
-    /// Merging deletes contacts, and their notes would be lost without being read first.
+    case nothingToDelete
+    /// Merging and deleting remove contacts, and their notes would be lost without being read first.
     case notesUnavailable
     /// Bulk merge only takes groups that need no decisions; these (by cluster id) have conflicts to look at.
     case needsReview(groupIDs: [String])
@@ -37,8 +58,9 @@ extension WorkflowError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .nothingToMerge: "A merge needs at least two contacts. Use Not duplicates instead."
+        case .nothingToDelete: "Tick at least one contact to delete."
         case .notesUnavailable:
-            "Merging needs notes access, so notes on the contacts that get deleted are kept. Grant notes access in Setup, then try again."
+            "Merging and deleting need notes access, so notes on the contacts that get deleted are kept. Grant notes access in Setup, then try again."
         case .needsReview(let ids):
             "\(ids.count == 1 ? "1 group needs" : "\(ids.count) groups need") a closer look before merging. Open them one at a time instead."
         case .membersGone(let names):
@@ -209,6 +231,59 @@ public struct ContactWorkflows: Sendable {
         }
         progress(BulkProgress(phase: .merging, completed: entries.count { $0.outcome != .notRun }, total: total))
         return BulkMergeReport(entries: entries, stop: stop, receipts: receipts)
+    }
+
+    // MARK: clean up
+
+    /// Every contact as a Clean up row, sorted by name.
+    @concurrent
+    public func loadCleanupRows() async throws -> [CleanupRow] {
+        let records = try await store.fetchAll()
+        let imported = Set(try links.load().links.keys)
+        return records.map { CleanupRow(record: $0, isImported: imported.contains($0.sourceIdentifier)) }
+            .sorted {
+                let order = $0.displayName.localizedStandardCompare($1.displayName)
+                return order == .orderedSame ? $0.id < $1.id : order == .orderedAscending
+            }
+    }
+
+    /// Deletes the contacts (by store identifier) in one all-or-nothing call, after a brand-new backup that includes notes
+    /// (taken even if a recent one exists). Throws before deleting anything if there is no notes store, a contact is no
+    /// longer there, or the backup fails.
+    ///
+    /// Afterwards the deleted ids leave the import links and the dismissed groups. If that tidying fails the deletion still
+    /// stands: the run reports it in `followUpWarnings` instead of throwing.
+    @concurrent
+    public func deleteContacts(ids: [String], progress: @escaping @Sendable (CleanupPhase) -> Void = { _ in }) async throws -> CleanupRun {
+        var seen = Set<String>()
+        let ids = ids.filter { seen.insert($0).inserted }
+        guard !ids.isEmpty else { throw WorkflowError.nothingToDelete }
+        guard notes != nil else { throw WorkflowError.notesUnavailable }
+        let present = Set(try await store.fetchAll().map(\.sourceIdentifier))
+        let missing = ids.filter { !present.contains($0) }
+        guard missing.isEmpty else { throw ContactStoreError.notFound(missing) }
+
+        progress(.backingUp)
+        let receipt = try await backups.newBackup(requiring: BackupRequirement(containerID: containerID, needsNotes: true))
+        progress(.deleting)
+        try await store.delete(ids: ids, backup: receipt)
+
+        var run = CleanupRun(receipt: receipt, deletedIDs: ids, linksRemoved: 0, dismissalsPruned: 0, followUpWarnings: [])
+        do {
+            let linked = Set(try links.load().links.keys).intersection(ids)
+            if !linked.isEmpty {
+                try links.remove(icloudIDs: ids.filter(linked.contains))
+                run.linksRemoved = linked.count
+            }
+        } catch {
+            run.followUpWarnings.append("The contacts are deleted, but their import links could not be removed: \(error.localizedDescription)")
+        }
+        do {
+            run.dismissalsPruned = try dismissals.forget(ids: ids)
+        } catch {
+            run.followUpWarnings.append("The contacts are deleted, but the groups you marked as not duplicates could not be updated: \(error.localizedDescription)")
+        }
+        return run
     }
 
     private func requireMembersExist(_ draft: MergeDraft) async throws {

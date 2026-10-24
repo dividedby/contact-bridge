@@ -24,6 +24,7 @@ struct RootView: View {
             case .backup: BackupView(model: model.backup, setup: model.setup)
             case .importContacts: ImportView(model: model.importing, app: model)
             case .dedupe: DedupeView(model: model.dedupe, app: model)
+            case .cleanUp: CleanupView(model: model.cleanup, app: model)
             case .sync: SyncPlaceholderView(app: model)
             }
         }

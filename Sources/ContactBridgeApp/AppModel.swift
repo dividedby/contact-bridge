@@ -8,6 +8,7 @@ enum SidebarSection: String, CaseIterable, Identifiable {
     case backup = "Backup"
     case importContacts = "Import"
     case dedupe = "Dedupe"
+    case cleanUp = "Clean up"
     case sync = "Sync"
 
     var id: Self { self }
@@ -18,6 +19,7 @@ enum SidebarSection: String, CaseIterable, Identifiable {
         case .backup: "externaldrive"
         case .importContacts: "square.and.arrow.down"
         case .dedupe: "person.2.crop.square.stack"
+        case .cleanUp: "trash"
         case .sync: "arrow.triangle.2.circlepath"
         }
     }
@@ -42,6 +44,7 @@ final class AppModel {
     @ObservationIgnored private(set) var backup: BackupModel!
     @ObservationIgnored private(set) var importing: ImportModel!
     @ObservationIgnored private(set) var dedupe: DedupeModel!
+    @ObservationIgnored private(set) var cleanup: CleanupModel!
     @ObservationIgnored private var cachedStore: (id: String, store: any ContactStoring)?
     @ObservationIgnored private(set) lazy var backupCoordinator = BackupCoordinator(makeSetup: { [self] in try await makeBackupSetup() })
 
@@ -51,6 +54,7 @@ final class AppModel {
         backup = BackupModel(app: self)
         importing = ImportModel(app: self)
         dedupe = DedupeModel(app: self)
+        cleanup = CleanupModel(app: self)
     }
 
     static func make() -> AppModel {
@@ -113,6 +117,7 @@ final class AppModel {
         Task { await backupCoordinator.invalidate() }
         importing.reset()
         dedupe.reset()
+        cleanup.reset()
     }
 
     func present(_ error: any Error, title: String) {
@@ -327,6 +332,7 @@ final class ImportModel {
             importAnyway.subtract(created)
             await load()
             app.dedupe.reset()
+            app.cleanup.reset()
         } catch {
             showingConfirmation = false
             app.present(error, title: "Import failed")
@@ -504,6 +510,7 @@ final class DedupeModel {
             await app.backup.refresh()
             await load()
             app.importing.reset()
+            app.cleanup.reset()
         } catch {
             showingConfirmation = false
             app.present(error, title: "Merge failed")
@@ -535,6 +542,7 @@ final class DedupeModel {
             await app.backup.refresh()
             await load()
             app.importing.reset()
+            app.cleanup.reset()
         } catch {
             showingBulkSheet = false
             app.present(error, title: "Merge failed")
@@ -545,5 +553,103 @@ final class DedupeModel {
     func stopBulkMerge() {
         isStopRequested = true
         stopSignal.request()
+    }
+}
+
+// MARK: - clean up
+
+@MainActor
+@Observable
+final class CleanupModel {
+    /// Every contact in the account, sorted by name.
+    private(set) var rows: [CleanupRow] = [] { didSet { refilter() } }
+    private(set) var shownRows: [CleanupRow] = []
+    private(set) var hasLoaded = false
+    var filter = CleanupFilter() { didSet { if filter != oldValue { refilter() } } }
+    /// Contact ids. Kept when the filter or search changes, so the count is everything ticked, shown or not.
+    var selection: Set<String> = []
+    var isLoading = false
+    var showingConfirmation = false
+    var isDeleting = false
+    var phase: CleanupPhase?
+    var run: CleanupRun?
+
+    @ObservationIgnored private unowned let app: AppModel
+
+    init(app: AppModel) {
+        self.app = app
+    }
+
+    private func refilter() { shownRows = filter.apply(to: rows) }
+
+    func reset() {
+        rows = []
+        hasLoaded = false
+        selection = []
+    }
+
+    var blockReason: String? { app.notReadyReason }
+
+    /// Why Delete is unavailable, or nil: the backup that makes it safe must include notes.
+    var deleteBlockReason: String? {
+        if let reason = app.notReadyReason { return reason }
+        if !app.notesAreAccessible {
+            return "Grant notes access in Setup first, so notes on the contacts that get deleted are kept in the backup."
+        }
+        return nil
+    }
+
+    /// The ticked contacts in list order.
+    var selectedRows: [CleanupRow] { rows.filter { selection.contains($0.id) } }
+
+    func isSelected(_ id: String) -> Bool { selection.contains(id) }
+
+    func setSelected(_ id: String, _ on: Bool) {
+        if on { selection.insert(id) } else { selection.remove(id) }
+    }
+
+    func selectAllShown() { selection.formUnion(shownRows.map(\.id)) }
+    func selectNone() { selection = [] }
+
+    func loadIfNeeded() async {
+        if !hasLoaded, blockReason == nil, !isLoading { await load() }
+    }
+
+    func load() async {
+        guard blockReason == nil else { return }
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            rows = try await app.makeWorkflows().loadCleanupRows()
+            hasLoaded = true
+            selection.formIntersection(Set(rows.map(\.id)))
+        } catch {
+            app.present(error, title: "Could not load contacts")
+        }
+    }
+
+    func deleteSelected() async {
+        let ids = selectedRows.map(\.id)
+        guard !ids.isEmpty, !isDeleting, deleteBlockReason == nil else { return }
+        run = nil
+        phase = .backingUp
+        isDeleting = true
+        defer {
+            isDeleting = false
+            phase = nil
+        }
+        do {
+            run = try await app.makeWorkflows().deleteContacts(
+                ids: ids, progress: { [weak self] update in Task { @MainActor in if self?.isDeleting == true { self?.phase = update } } }
+            )
+            selection = []
+            await app.backup.refresh()
+            await load()
+            app.dedupe.reset()
+            app.importing.reset()
+        } catch {
+            showingConfirmation = false
+            app.present(error, title: "Delete failed")
+        }
     }
 }
