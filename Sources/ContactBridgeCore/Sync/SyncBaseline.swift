@@ -34,6 +34,9 @@ public enum PauseReason: Sendable, Hashable, Codable {
     case user
     case accountChanged
     case containerChanged
+    /// A full Google listing came back empty while contacts are linked: the account or the listing is wrong, not every
+    /// contact deleted.
+    case googleEmpty
     /// Contacts notes cannot be read, so the note field is skipped.
     case notesUnavailable
     /// A run would exceed the delete or update guard; `summary` says what it wanted to do.
@@ -51,6 +54,10 @@ public struct SyncState: Sendable, Hashable, Codable {
     /// Hash of the `personFields` the sync token was issued for; a mismatch forces a full listing.
     public var fieldsVersion: String?
     public var icloudChangeToken: Data?
+    /// The iCloud container the baselines were taken from; a different one pauses sync.
+    public var icloudContainerID: String?
+    /// When the notes were last read from Contacts; drives the once-a-day refresh.
+    public var lastNotesReadAt: Date?
     public var googleAccount: String?
     /// Resource names of Google contacts the user chose not to import.
     public var ignoredGoogle: Set<String>
@@ -59,14 +66,17 @@ public struct SyncState: Sendable, Hashable, Codable {
 
     public init(
         version: Int = SyncState.currentVersion, baselines: [String: SyncBaseline] = [:], googleSyncToken: String? = nil,
-        fieldsVersion: String? = nil, icloudChangeToken: Data? = nil, googleAccount: String? = nil,
-        ignoredGoogle: Set<String> = [], firstSyncApproved: Bool = false, pause: PauseReason? = nil
+        fieldsVersion: String? = nil, icloudChangeToken: Data? = nil, icloudContainerID: String? = nil,
+        lastNotesReadAt: Date? = nil, googleAccount: String? = nil, ignoredGoogle: Set<String> = [],
+        firstSyncApproved: Bool = false, pause: PauseReason? = nil
     ) {
         self.version = version
         self.baselines = baselines
         self.googleSyncToken = googleSyncToken
         self.fieldsVersion = fieldsVersion
         self.icloudChangeToken = icloudChangeToken
+        self.icloudContainerID = icloudContainerID
+        self.lastNotesReadAt = lastNotesReadAt
         self.googleAccount = googleAccount
         self.ignoredGoogle = ignoredGoogle
         self.firstSyncApproved = firstSyncApproved

@@ -85,6 +85,23 @@ public enum GooglePersonMapper {
         )
     }
 
+    /// The contact's note: the `biographies` entries from the contact itself (read through `extras`, since the person
+    /// model does not declare them), joined by a blank line if there are several. Empty when there is none.
+    public static func note(of person: GooglePerson) -> String {
+        guard case .array(let entries)? = person.extras["biographies"] else { return "" }
+        return entries.compactMap { entry -> String? in
+            guard case .object(let fields) = entry, case .string(let value)? = fields["value"], !value.isBlank else { return nil }
+            if case .object(let metadata)? = fields["metadata"], case .object(let source)? = metadata["source"],
+               case .string(let type)? = source["type"], type != "CONTACT", type != "OTHER_CONTACT" {
+                return nil
+            }
+            return value
+        }.joined(separator: "\n\n")
+    }
+
+    /// `NoteHash.hash` of `note(of:)`. A person without biographies is a known empty note, never unknown.
+    public static func noteHash(of person: GooglePerson) -> String { NoteHash.hash(note(of: person)) }
+
     private static func primary<T: GoogleMetadataCarrying>(_ items: [T]) -> T? {
         items.first { $0.metadata?.primary == true } ?? items.first
     }

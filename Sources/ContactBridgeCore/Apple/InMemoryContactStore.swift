@@ -21,6 +21,9 @@ public final class InMemoryContactStore: ContactStoring {
         var records: [ContactRecord]
         var authorization: ContactAuthorization
         var nextID = 1
+        /// Bumped by every mutation; the change token.
+        var version = 0
+        var containerID: String?
         var log: [StoreMutation] = []
         var subscribers: [UUID: AsyncStream<Void>.Continuation] = [:]
     }
@@ -31,14 +34,18 @@ public final class InMemoryContactStore: ContactStoring {
     public init(
         records: [ContactRecord] = [],
         authorization: ContactAuthorization = .authorized,
-        grantsAccess: Bool = true
+        grantsAccess: Bool = true,
+        containerID: String? = "mem-container"
     ) {
-        state = Mutex(State(records: records, authorization: authorization))
+        state = Mutex(State(records: records, authorization: authorization, containerID: containerID))
         self.grantsAccess = grantsAccess
     }
 
     /// Every create/update/delete so far, with the receipt that authorized it.
     public var mutationLog: [StoreMutation] { state.withLock { $0.log } }
+
+    /// Simulates the user switching to another account's container.
+    public func setContainerID(_ id: String?) { state.withLock { $0.containerID = id } }
 
     public func authorizationStatus() async -> ContactAuthorization {
         state.withLock { $0.authorization }
@@ -67,6 +74,7 @@ public final class InMemoryContactStore: ContactStoring {
             stored.source = .icloud
             state.nextID += 1
             state.records.append(stored)
+            state.version += 1
             state.log.append(StoreMutation(kind: .create, ids: [stored.id], receiptID: backup.id))
             return stored
         }
@@ -85,6 +93,7 @@ public final class InMemoryContactStore: ContactStoring {
             stored.source = state.records[index].source
             stored.sourceIdentifier = state.records[index].sourceIdentifier
             state.records[index] = stored
+            state.version += 1
             state.log.append(StoreMutation(kind: .update, ids: [stored.id], receiptID: backup.id))
         }
         notify()
@@ -98,6 +107,7 @@ public final class InMemoryContactStore: ContactStoring {
             guard missing.isEmpty else { throw ContactStoreError.notFound(missing) }
             let doomed = Set(ids)
             state.records.removeAll { doomed.contains($0.sourceIdentifier) }
+            state.version += 1
             state.log.append(StoreMutation(kind: .delete, ids: ids, receiptID: backup.id))
         }
         notify()
@@ -122,6 +132,7 @@ public final class InMemoryContactStore: ContactStoring {
             state.records[index] = stored
             let gone = Set(doomed)
             state.records.removeAll { gone.contains($0.sourceIdentifier) }
+            state.version += 1
             state.log.append(StoreMutation(kind: .merge, ids: [stored.sourceIdentifier] + doomed, receiptID: backup.id))
         }
         notify()
@@ -136,6 +147,20 @@ public final class InMemoryContactStore: ContactStoring {
             return ids.compactMap { byID[$0] }
         }
         return Data(chosen.map(Self.vCard).joined().utf8)
+    }
+
+    public func changeToken() async throws -> Data? {
+        try state.withLock { state in
+            try Self.requireAccess(state)
+            return Data("v\(state.version)".utf8)
+        }
+    }
+
+    public func containerID() async throws -> String? {
+        try state.withLock { state in
+            try Self.requireAccess(state)
+            return state.containerID
+        }
     }
 
     public func changes() -> AsyncStream<Void> {

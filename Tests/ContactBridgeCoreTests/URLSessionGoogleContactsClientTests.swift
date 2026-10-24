@@ -13,7 +13,7 @@ struct StaticTokenProvider: GoogleAccessTokenProviding {
 }
 
 let base = "https://people.googleapis.com/v1/"
-let personFields = "names,nicknames,organizations,phoneNumbers,emailAddresses,addresses,urls,birthdays,metadata,clientData,memberships"
+let personFields = "names,nicknames,organizations,phoneNumbers,emailAddresses,addresses,urls,birthdays,biographies,metadata,clientData,memberships"
 
 struct URLSessionGoogleContactsClientTests {
     private func makeClient(

@@ -197,6 +197,20 @@ public final class CNContactStoreAdapter: ContactStoring, @unchecked Sendable {
         }
     }
 
+    // MARK: change detection
+
+    /// `CNContactStore.currentHistoryToken`: moves on any change to the store, including other containers and this
+    /// process's own saves.
+    public func changeToken() async throws -> Data? {
+        try await requireAccess()
+        return try await onQueue { self.store.currentHistoryToken }
+    }
+
+    public func containerID() async throws -> String? {
+        try await requireAccess()
+        return try await onQueue { try self.resolveContainer().id }
+    }
+
     // MARK: changes
 
     public func changes() -> AsyncStream<Void> {

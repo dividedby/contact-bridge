@@ -56,7 +56,7 @@ struct SyncBaselineTests {
     @Test("Every pause reason round-trips, keeping the confirmation summary")
     func pauseReasons() throws {
         let reasons: [PauseReason] = [
-            .user, .accountChanged, .containerChanged, .notesUnavailable, .needsConfirmation(summary: "12 deletes"),
+            .user, .accountChanged, .containerChanged, .googleEmpty, .notesUnavailable, .needsConfirmation(summary: "12 deletes"),
         ]
         for reason in reasons {
             let state = SyncState(pause: reason)

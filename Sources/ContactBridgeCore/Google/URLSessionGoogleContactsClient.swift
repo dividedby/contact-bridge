@@ -11,8 +11,11 @@ public struct URLSessionGoogleContactsClient: GoogleContactsClient {
     static let maxMembersPerCall = 1000
     static let pageSize = 1000
 
-    /// Every modeled field plus the bookkeeping the sync needs. `modeledFields` stays the single source of truth.
-    static let personFields = (GooglePersonMapper.modeledFields + ["metadata", "clientData", "memberships"]).joined(separator: ",")
+    /// Every modeled field plus the notes (`biographies`, kept in `GooglePerson.extras`) and the bookkeeping the sync
+    /// needs. `modeledFields` stays the single source of truth. A sync token is only valid for the fields it was issued
+    /// for, so changing this list makes `GoogleChangeFeed` start over with a full listing.
+    static let personFields = (GooglePersonMapper.modeledFields + ["biographies", "metadata", "clientData", "memberships"])
+        .joined(separator: ",")
     /// The only fields `otherContacts.list` accepts that this app uses.
     static let otherContactsReadMask = "names,emailAddresses,phoneNumbers,metadata"
 
