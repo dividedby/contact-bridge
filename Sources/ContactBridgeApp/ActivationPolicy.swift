@@ -24,7 +24,8 @@ final class ActivationPolicyController {
     private var pendingOpen = false
     private var observers: [any NSObjectProtocol] = []
     /// Windows the user closed or this controller hid. Hiding the whole app (Cmd-H) must not make such a window count again.
-    private var closed: Set<ObjectIdentifier> = []
+    /// Weak, so a window that is gone leaves no trace a later window could be mistaken for.
+    private let closed = NSHashTable<NSWindow>.weakObjects()
     private var suppressingLaunchWindow = false
     private weak var launchHiddenWindow: NSWindow?
 
@@ -35,6 +36,8 @@ final class ActivationPolicyController {
         let names: [Notification.Name] = [
             NSWindow.didBecomeMainNotification, NSWindow.didBecomeKeyNotification, NSWindow.didDeminiaturizeNotification,
             NSWindow.willCloseNotification, NSWindow.didMiniaturizeNotification,
+            // A window of an app that is not active may never become key; these still say when it reaches the screen.
+            NSWindow.didChangeOcclusionStateNotification, NSWindow.didExposeNotification,
         ]
         for name in names {
             observers.append(center.addObserver(forName: name, object: nil, queue: .main) { note in
@@ -49,10 +52,14 @@ final class ActivationPolicyController {
     }
 
     private func windowEvent(_ name: Notification.Name, _ window: NSWindow) {
+        if name == NSWindow.didChangeOcclusionStateNotification || name == NSWindow.didExposeNotification {
+            if suppressingLaunchWindow { hideVisibleAppWindows() }
+            return
+        }
         if name == NSWindow.willCloseNotification {
-            closed.insert(ObjectIdentifier(window))
+            closed.add(window)
         } else if name != NSWindow.didMiniaturizeNotification {
-            closed.remove(ObjectIdentifier(window))
+            closed.remove(window)
             if suppressingLaunchWindow { hideForLaunch(window) }
         }
         DispatchQueue.main.async {
@@ -67,21 +74,35 @@ final class ActivationPolicyController {
         if NSApp.activationPolicy() != target { NSApp.setActivationPolicy(target) }
     }
 
-    /// For a launch at login that should start in the menu bar: keeps the window SwiftUI presents off the screen. Stops
-    /// after a few seconds, or as soon as the window is asked for.
+    /// For a launch at login that should start in the menu bar: keeps the window SwiftUI presents off the screen. The window
+    /// can appear without ever becoming key (the app is not active), so besides the window notifications the windows are
+    /// looked at every 50 ms. Stops after 10 seconds, or as soon as the window is asked for.
     func suppressLaunchWindow() {
         suppressingLaunchWindow = true
         NSApp.setActivationPolicy(.accessory)
-        for window in NSApp.windows where Self.isAppWindowKind(window) { hideForLaunch(window) }
+        hideVisibleAppWindows()
         Task { @MainActor in
-            try? await Task.sleep(for: .seconds(10))
+            let deadline = ContinuousClock.now + .seconds(10)
+            while suppressingLaunchWindow, ContinuousClock.now < deadline {
+                hideVisibleAppWindows()
+                try? await Task.sleep(for: .milliseconds(50))
+            }
             suppressingLaunchWindow = false
+        }
+    }
+
+    private func hideVisibleAppWindows() {
+        for window in NSApp.windows {
+            let basic = WindowTraits(isTitled: window.styleMask.contains(.titled), isPanel: window is NSPanel, isShownOrParked: true)
+            if ActivationRules.shouldHideForLaunch(basic, isOnScreen: window.isVisible, suppressing: suppressingLaunchWindow) {
+                hideForLaunch(window)
+            }
         }
     }
 
     private func hideForLaunch(_ window: NSWindow) {
         launchHiddenWindow = window
-        closed.insert(ObjectIdentifier(window))
+        closed.add(window)
         window.orderOut(nil)
     }
 
@@ -95,13 +116,13 @@ final class ActivationPolicyController {
             window.makeKeyAndOrderFront(nil)
         } else if let window = launchHiddenWindow {
             launchHiddenWindow = nil
-            closed.remove(ObjectIdentifier(window))
+            closed.remove(window)
             window.makeKeyAndOrderFront(nil)
         } else if let open = openMainWindow {
             open()
         } else if let window = NSApp.windows.first(where: Self.isAppWindowKind) {
             // Nobody has handed over the opener: show the closed window itself rather than nothing.
-            closed.remove(ObjectIdentifier(window))
+            closed.remove(window)
             window.makeKeyAndOrderFront(nil)
         } else {
             pendingOpen = true
@@ -115,7 +136,7 @@ final class ActivationPolicyController {
     private func traits(_ window: NSWindow) -> WindowTraits {
         WindowTraits(
             isTitled: window.styleMask.contains(.titled), isPanel: window is NSPanel,
-            isShownOrParked: !closed.contains(ObjectIdentifier(window)) && (window.isVisible || window.isMiniaturized || NSApp.isHidden)
+            isShownOrParked: !closed.contains(window) && (window.isVisible || window.isMiniaturized || NSApp.isHidden)
         )
     }
 }

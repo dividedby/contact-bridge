@@ -119,4 +119,15 @@ struct ActivationRulesTests {
         #expect(ActivationRules.showsWindowAtLaunch(launchedAtLogin: true, startInMenuBar: false))
         #expect(!ActivationRules.showsWindowAtLaunch(launchedAtLogin: true, startInMenuBar: true))
     }
+
+    @Test("While suppressing, only an app window that is on screen is put away")
+    func hideForLaunch() {
+        let panel = WindowTraits(isTitled: true, isPanel: true, isShownOrParked: true)
+        let statusItem = WindowTraits(isTitled: false, isPanel: false, isShownOrParked: true)
+        #expect(ActivationRules.shouldHideForLaunch(window, isOnScreen: true, suppressing: true))
+        #expect(!ActivationRules.shouldHideForLaunch(window, isOnScreen: false, suppressing: true))
+        #expect(!ActivationRules.shouldHideForLaunch(window, isOnScreen: true, suppressing: false))
+        #expect(!ActivationRules.shouldHideForLaunch(panel, isOnScreen: true, suppressing: true))
+        #expect(!ActivationRules.shouldHideForLaunch(statusItem, isOnScreen: true, suppressing: true))
+    }
 }

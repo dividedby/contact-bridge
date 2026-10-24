@@ -30,6 +30,11 @@ public enum ActivationRules {
         window.isTitled && !window.isPanel && window.isShownOrParked
     }
 
+    /// While a launch at login keeps the window away, any app window that is on screen is put away again.
+    public static func shouldHideForLaunch(_ window: WindowTraits, isOnScreen: Bool, suppressing: Bool) -> Bool {
+        suppressing && isOnScreen && window.isTitled && !window.isPanel
+    }
+
     /// With a window the app is a regular app; with none it drops to the menu bar and keeps syncing.
     public static func presence(for windows: [WindowTraits]) -> AppPresence {
         windows.contains(where: countsAsAppWindow) ? .regular : .menuBarOnly
