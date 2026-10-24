@@ -60,6 +60,10 @@ struct ImportView: View {
                     Spacer()
                     Button("Select all") { model.selectedConnections = Set(plan.toImport.map(\.id)) }.buttonStyle(.link)
                     Button("Select none") { model.selectedConnections = [] }.buttonStyle(.link)
+                    Button("People only") { model.selectedConnections = ImportSelection.peopleOnly(plan.toImport) }.buttonStyle(.link)
+                    Button("Exclude text-message senders") {
+                        model.selectedConnections = ImportSelection.excludingTextMessageSenders(model.selectedConnections, from: plan.toImport)
+                    }.buttonStyle(.link)
                 }
             }
             if !plan.otherContactCandidates.isEmpty {

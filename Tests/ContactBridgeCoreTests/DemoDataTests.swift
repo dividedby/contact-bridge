@@ -60,6 +60,21 @@ struct DemoDataTests {
         #expect(!plan.possibleMatches.isEmpty)
     }
 
+    @Test("The demo import list has a business and a text-message sender, so both selection shortcuts visibly do something")
+    func importSelectionShortcuts() async throws {
+        let demo = DemoData.make()
+        let plan = ImportPlanner().plan(
+            icloud: try await demo.store.fetchAll(),
+            googleConnections: try await demo.google.allConnections(),
+            googleOtherContacts: try await demo.google.allOtherContacts()
+        )
+        let everyone = Set(plan.toImport.map(\.id))
+        #expect(plan.toImport.contains { !$0.isPerson && !$0.isShortCodeSender })
+        #expect(plan.toImport.contains { $0.isShortCodeSender })
+        #expect(ImportSelection.peopleOnly(plan.toImport).count < everyone.count)
+        #expect(ImportSelection.excludingTextMessageSenders(everyone, from: plan.toImport).count < everyone.count)
+    }
+
     @Test("The demo environment is self-contained and starts authorized with a single iCloud container")
     func environment() async throws {
         let demo = DemoData.make()

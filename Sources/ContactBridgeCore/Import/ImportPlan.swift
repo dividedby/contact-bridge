@@ -18,6 +18,22 @@ public struct ImportCandidate: Sendable, Hashable, Identifiable {
     }
 
     public var googleResourceName: String { record.sourceIdentifier }
+
+    /// Has a given or family name. A business (organization only), a nickname alone and a nameless card are not people.
+    public var isPerson: Bool { !record.givenName.isBlank || !record.familyName.isBlank }
+}
+
+/// Selection shortcuts for a list of import candidates. Pure: take the current ticks, return the new ones.
+public enum ImportSelection {
+    /// Only the candidates that are people; every other tick is dropped.
+    public static func peopleOnly(_ candidates: [ImportCandidate]) -> Set<String> {
+        Set(candidates.filter(\.isPerson).map(\.id))
+    }
+
+    /// `selected` without the automated text-message senders among `candidates`; every other tick stays.
+    public static func excludingTextMessageSenders(_ selected: Set<String>, from candidates: [ImportCandidate]) -> Set<String> {
+        selected.subtracting(candidates.filter(\.isShortCodeSender).map(\.id))
+    }
 }
 
 /// A Google connection that is already in iCloud (medium confidence or better, no conflict flag).

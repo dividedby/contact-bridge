@@ -1,7 +1,7 @@
 import Foundation
 
 /// Everything the app needs to run without touching real data: fakes seeded with sample contacts that exercise every
-/// screen (clear duplicates, a household phone, a three-way cluster, conflicting fields, safe and tick-by-hand groups for bulk merge, Google-only contacts, other
+/// screen (clear duplicates, a household phone, a three-way cluster, conflicting fields, safe and tick-by-hand groups for bulk merge, Google-only contacts including a business and a text-message sender, other
 /// contacts, a possible match, notes) and for Clean up (text-message senders, nameless and empty contacts, imported contacts).
 public struct DemoEnvironment: Sendable {
     public let store: InMemoryContactStore
@@ -72,9 +72,11 @@ public enum DemoData {
             icloud("Mia", "Chen", emails: ["mia.chen@example.com"]),
         ]
 
-        func googlePerson(_ given: String, _ family: String, phones: [String] = [], emails: [String] = []) -> GooglePerson {
+        func googlePerson(
+            _ given: String, _ family: String, phones: [String] = [], emails: [String] = [], org: String = ""
+        ) -> GooglePerson {
             GooglePersonMapper.createPayload(for: ContactRecord(
-                id: "x", source: .google, sourceIdentifier: "x", givenName: given, familyName: family,
+                id: "x", source: .google, sourceIdentifier: "x", givenName: given, familyName: family, organization: org,
                 phones: phones.map { Labeled(label: "mobile", value: $0) }, emails: emails.map { Labeled(label: "home", value: $0) }
             ))
         }
@@ -87,6 +89,8 @@ public enum DemoData {
             googlePerson("Janet", "Carter", emails: ["john.carter@example.com"]), // new, but resembles the Carters
             googlePerson("Leo", "Fischer", phones: ["415-555-0401"], emails: ["leo.fischer@example.com"]), // imported earlier
             googlePerson("Mia", "Chen", emails: ["mia.chen@example.com"]), // imported earlier
+            googlePerson("", "", phones: ["415-555-0302"], emails: ["front.desk@lakesidedental.example"], org: "Lakeside Dental"), // new, a business
+            googlePerson("", "", phones: ["48012"], org: "Parcel Express Alerts"), // new, a text-message sender
         ].enumerated().map { index, person in
             var person = person
             person.resourceName = "people/c\(index + 1)"

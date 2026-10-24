@@ -328,6 +328,54 @@ struct ImportPlannerTests {
         #expect(result.links.map(\.googleResourceName) == ["people/c1"])
     }
 
+    // MARK: selection shortcuts
+
+    private func candidate(
+        _ id: String, given: String = "", family: String = "", nickname: String = "", org: String = "", phones: [String] = []
+    ) -> ImportCandidate {
+        let record = ContactRecord(
+            id: id, source: .google, sourceIdentifier: id, givenName: given, familyName: family, nickname: nickname, organization: org,
+            phones: phones.map { Labeled(label: "mobile", value: $0) }
+        )
+        return ImportCandidate(record: record, isSelected: true, isShortCodeSender: record.isShortCodeSender)
+    }
+
+    @Test("A person has a given or family name; an organization, a nickname alone or a blank name do not", arguments: [
+        ("Ann", "", "", "", true),
+        ("", "Lee", "", "", true),
+        ("Ann", "Lee", "Annie", "Northwind", true),
+        ("", "", "", "Northwind", false),
+        ("", "", "Annie", "", false),
+        ("  ", " ", "", "", false),
+        ("", "", "", "", false),
+    ])
+    func personDefinition(given: String, family: String, nickname: String, org: String, expected: Bool) {
+        #expect(candidate("c", given: given, family: family, nickname: nickname, org: org).isPerson == expected)
+    }
+
+    @Test("People only replaces the selection with people, dropping businesses, nickname-only, nameless and text-message senders")
+    func peopleOnly() {
+        let candidates = [
+            candidate("ann", given: "Ann"), candidate("lee", family: "Lee"), candidate("biz", org: "Acme"),
+            candidate("nick", nickname: "Annie"), candidate("none"), candidate("sms", org: "Acme Bank", phones: ["72727"]),
+        ]
+        #expect(ImportSelection.peopleOnly(candidates) == ["ann", "lee"])
+        #expect(ImportSelection.peopleOnly([]).isEmpty)
+    }
+
+    @Test("Exclude text-message senders unticks only the senders and keeps every other tick as it is")
+    func excludeSenders() {
+        let candidates = [
+            candidate("ann", given: "Ann"), candidate("biz", org: "Acme"),
+            candidate("sms1", org: "Acme Bank", phones: ["72727"]), candidate("sms2", phones: ["32665"]),
+        ]
+        #expect(ImportSelection.excludingTextMessageSenders(["ann", "biz", "sms1", "sms2"], from: candidates) == ["ann", "biz"])
+        #expect(ImportSelection.excludingTextMessageSenders(["biz", "sms1"], from: candidates) == ["biz"])
+        #expect(ImportSelection.excludingTextMessageSenders([], from: candidates).isEmpty)
+        // An id outside the list is not this helper's business.
+        #expect(ImportSelection.excludingTextMessageSenders(["gone"], from: candidates) == ["gone"])
+    }
+
     // MARK: known links
 
     @Test("A connection the app already imported is never offered again, even when nothing matches")
