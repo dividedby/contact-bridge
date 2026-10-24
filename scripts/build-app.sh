@@ -20,8 +20,17 @@ rm -rf "$STAGE"
 mkdir -p "$STAGE/Contents/MacOS" "$STAGE/Contents/Resources"
 cp "$BIN_DIR/$EXEC_NAME" "$STAGE/Contents/MacOS/$EXEC_NAME"
 cp Resources/Info.plist "$STAGE/Contents/Info.plist"
-# Built from Resources/AppIcon.svg by scripts/make-icon.sh; rerun that when the SVG changes.
-cp Resources/AppIcon.icns "$STAGE/Contents/Resources/AppIcon.icns"
+# Compile the Icon Composer bundle: Assets.car carries the Liquid Glass icon, AppIcon.icns the legacy fallback.
+ICON_OUT="$(mktemp -d)"
+trap 'rm -rf "$ICON_OUT"' EXIT
+xcrun actool Resources/AppIcon.icon --compile "$ICON_OUT" --app-icon AppIcon --include-all-app-icons \
+    --platform macosx --minimum-deployment-target 27.0 --enable-on-demand-resources NO \
+    --output-partial-info-plist "$ICON_OUT/partial.plist" >"$ICON_OUT/actool.log" 2>&1 \
+    || { cat "$ICON_OUT/actool.log" >&2; echo "actool failed to compile Resources/AppIcon.icon" >&2; exit 1; }
+for produced in Assets.car AppIcon.icns; do
+    [[ -f "$ICON_OUT/$produced" ]] || { cat "$ICON_OUT/actool.log" >&2; echo "actool did not produce $produced" >&2; exit 1; }
+    cp "$ICON_OUT/$produced" "$STAGE/Contents/Resources/$produced"
+done
 printf 'APPL????' > "$STAGE/Contents/PkgInfo"
 
 # Google OAuth client ID/secret: bundled as GoogleOAuth.plist when the gitignored local copy exists. Its contents are
