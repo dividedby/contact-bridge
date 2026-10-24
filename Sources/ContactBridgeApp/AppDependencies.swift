@@ -24,6 +24,12 @@ struct AppDependencies {
     var contactsAppRunning: @Sendable () -> Bool
     var backupDirectory: URL
     var defaults: UserDefaults
+    /// "Open at login". Live: `SMAppService.mainApp`. Demo: a fake that registers nothing.
+    var loginItem: any LoginItemControlling
+    /// System notifications, or nil where they must not run (demo mode, a process that is not an installed app).
+    var notifications: (any NotificationDelivering)?
+    /// Said under the "Notify me" switch when `notifications` is nil.
+    var notificationsUnavailableReason: String?
     var signIn: SignInController
     /// The People API client for the current sign-in, or nil when signed out.
     var googleClient: @MainActor (SignInController) -> (any GoogleContactsClient)?
@@ -32,6 +38,14 @@ struct AppDependencies {
     static var demoRequested: Bool {
         if CommandLine.arguments.contains("--demo") { return true }
         let value = ProcessInfo.processInfo.environment["CONTACT_BRIDGE_DEMO"] ?? ""
+        return !value.isEmpty && value != "0"
+    }
+
+    /// `--demo-notifications` (with `--demo`), or CONTACT_BRIDGE_DEMO_NOTIFICATIONS set to anything but "" and "0": a demo run
+    /// that may show real notifications, to try them out.
+    static var demoNotificationsRequested: Bool {
+        if CommandLine.arguments.contains("--demo-notifications") { return true }
+        let value = ProcessInfo.processInfo.environment["CONTACT_BRIDGE_DEMO_NOTIFICATIONS"] ?? ""
         return !value.isEmpty && value != "0"
     }
 
@@ -54,6 +68,9 @@ struct AppDependencies {
             contactsAppRunning: { !NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.AddressBook").isEmpty },
             backupDirectory: BackupWriter.defaultDirectory,
             defaults: .standard,
+            loginItem: SMAppServiceLoginItem(),
+            notifications: UserNotificationDelivery.ifInstalledApp(),
+            notificationsUnavailableReason: "Notifications need the installed Contact Bridge app, not a build run from the command line.",
             signIn: SignInController(),
             googleClient: { signIn in
                 guard case .signedIn = signIn.status, let session = signIn.session else { return nil }
@@ -88,6 +105,9 @@ struct AppDependencies {
             contactsAppRunning: { false },
             backupDirectory: backups,
             defaults: defaults,
+            loginItem: InMemoryLoginItem(),
+            notifications: demoNotificationsRequested ? UserNotificationDelivery.ifInstalledApp() : nil,
+            notificationsUnavailableReason: "Notifications are off in demo mode. Start with --demo-notifications to try them.",
             signIn: SignInController(demoEmail: demo.accountEmail),
             googleClient: { signIn in
                 if case .signedIn = signIn.status { demo.google } else { nil }

@@ -51,10 +51,57 @@ struct SetupView: View {
             Section("Google") {
                 googleContent(model.signIn)
             }
+
+            Section("Menu bar and notifications") {
+                backgroundContent()
+            }
         }
         .formStyle(.grouped)
         .navigationTitle("Setup")
-        .task { await setup.refresh() }
+        .task {
+            model.loginItem.refresh()
+            await model.notifier.refresh()
+            await setup.refresh()
+        }
+        // The user may have changed Login Items or Notifications in System Settings and come back.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            model.loginItem.refresh()
+            Task { await model.notifier.refresh() }
+        }
+    }
+
+    /// Contact Bridge keeps syncing from the menu bar after its window closes; these decide how it starts and what it says.
+    @ViewBuilder private func backgroundContent() -> some View {
+        let loginItem = model.loginItem
+        let notifier = model.notifier
+        Toggle("Open at login", isOn: Binding(get: { loginItem.isOn }, set: { loginItem.setEnabled($0) }))
+        if let explanation = loginItem.explanation {
+            Text(explanation).font(.caption).foregroundStyle(loginItem.needsApproval ? Color.orange : Color.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        } else if model.deps.isDemo {
+            Text("Demo mode: nothing is registered with macOS.").font(.caption).foregroundStyle(.secondary)
+        } else {
+            Text("Starts Contact Bridge when you log in, so syncing carries on without you opening it.").font(.caption).foregroundStyle(.secondary)
+        }
+        if loginItem.needsApproval {
+            Button("Open Login Items settings") { loginItem.openSystemSettings() }
+        }
+
+        Toggle("Start in menu bar", isOn: Binding(get: { model.shell.startInMenuBar }, set: { model.shell.startInMenuBar = $0 }))
+        Text("When Contact Bridge opens at login, keep the window closed and run from the menu bar. Opening it yourself always shows the window.")
+            .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+
+        Toggle("Notify me", isOn: Binding(get: { notifier.isOn }, set: { on in Task { await notifier.setEnabled(on) } }))
+            .disabled(notifier.unavailableReason != nil)
+        if let reason = notifier.unavailableReason {
+            Text(reason).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        } else if let message = notifier.message {
+            Text(message).font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+            Button("Open Notification settings") { notifier.openSystemSettings() }
+        } else {
+            Text("Tell me when contacts need my review or syncing stops and needs me. macOS asks for permission when you turn this on.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     @ViewBuilder private func containerContent(_ setup: SetupModel) -> some View {

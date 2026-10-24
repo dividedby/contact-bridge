@@ -48,11 +48,21 @@ final class AppModel {
     @ObservationIgnored private(set) var cleanup: CleanupModel!
     @ObservationIgnored private(set) var sync: SyncModel!
     @ObservationIgnored private(set) var review: ReviewModel!
+    @ObservationIgnored let loginItem: LoginItemSettings
+    @ObservationIgnored let shell: ShellSettings
+    @ObservationIgnored let notifier: SyncNotifier
+    @ObservationIgnored private var started = false
     @ObservationIgnored private var cachedStore: (id: String, store: any ContactStoring)?
     @ObservationIgnored private(set) lazy var backupCoordinator = BackupCoordinator(makeSetup: { [self] in try await makeBackupSetup() })
 
     init(dependencies: AppDependencies) {
         deps = dependencies
+        loginItem = LoginItemSettings(service: dependencies.loginItem)
+        shell = ShellSettings(defaults: dependencies.defaults)
+        notifier = SyncNotifier(
+            delivery: dependencies.notifications, unavailableReason: dependencies.notificationsUnavailableReason,
+            defaults: dependencies.defaults, knownReviewIDs: Set((try? dependencies.reviews.load())?.map(\.id) ?? [])
+        )
         setup = SetupModel(app: self)
         backup = BackupModel(app: self)
         importing = ImportModel(app: self)
@@ -60,13 +70,26 @@ final class AppModel {
         cleanup = CleanupModel(app: self)
         sync = SyncModel(app: self)
         review = ReviewModel(app: self)
+        // A click on a notification: the review list and the confirmation both live on the Sync screen.
+        notifier.onOpen = { [weak self] _ in self?.showWindow(.sync) }
     }
 
     static func make() -> AppModel {
         AppModel(dependencies: AppDependencies.demoRequested ? .demo() : .live())
     }
 
+    /// Brings the window to the front (creating it if it was closed), on `section` if given.
+    func showWindow(_ section: SidebarSection? = nil) {
+        if let section { selection = section }
+        ActivationPolicyController.shared.showMainWindow()
+    }
+
+    /// Starts everything that runs without a window: sign-in, setup state, the sync engine and its triggers.
     func start() async {
+        guard !started else { return }
+        started = true
+        loginItem.refresh()
+        await notifier.start()
         await signIn.restore()
         await setup.refresh()
         // The probe can raise the Automation prompt, so on a live launch it only runs on its own once the user has
@@ -736,7 +759,10 @@ final class SyncModel {
     func start() async {
         guard observing == nil else { return }
         observing = Task { [engine] in
-            for await next in await engine.snapshots() { snapshot = next }
+            for await next in await engine.snapshots() {
+                snapshot = next
+                app.notifier.observe(next)
+            }
         }
         await engine.start()
         watchStore()
