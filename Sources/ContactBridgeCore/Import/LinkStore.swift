@@ -5,10 +5,27 @@ import Synchronization
 public struct LinkEntry: Sendable, Hashable, Codable {
     public var googleResourceName: String
     public var linkedAt: Date
+    /// How the link came about. Nil in files written before Phase 2, which only ever held imports: read it as `.imported`
+    /// (`effectiveOrigin`). Adding the key needs no version bump.
+    public var origin: LinkOrigin?
 
-    public init(googleResourceName: String, linkedAt: Date) {
+    public init(googleResourceName: String, linkedAt: Date, origin: LinkOrigin? = nil) {
         self.googleResourceName = googleResourceName
         self.linkedAt = linkedAt
+        self.origin = origin
+    }
+
+    public var effectiveOrigin: LinkOrigin { origin ?? .imported }
+
+    // A missing origin and an explicit `.imported` are the same link.
+    public static func == (lhs: LinkEntry, rhs: LinkEntry) -> Bool {
+        lhs.googleResourceName == rhs.googleResourceName && lhs.linkedAt == rhs.linkedAt && lhs.effectiveOrigin == rhs.effectiveOrigin
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(googleResourceName)
+        hasher.combine(linkedAt)
+        hasher.combine(effectiveOrigin)
     }
 }
 
@@ -16,9 +33,9 @@ public struct LinkEntry: Sendable, Hashable, Codable {
 /// does not create what already exists on the other side.
 ///
 /// ```json
-/// { "version": 1, "links": { "<iCloud id>": { "googleResourceName": "people/c123", "linkedAt": "2026-10-21T15:04:05Z" } } }
+/// { "version": 1, "links": { "<iCloud id>": { "googleResourceName": "people/c123", "linkedAt": "2026-10-21T15:04:05Z", "origin": "imported" } } }
 /// ```
-/// A Google contact belongs to at most one iCloud id. Readers must refuse a version they do not know.
+/// `origin` is optional (older files lack it; read as `imported`). A Google contact belongs to at most one iCloud id. Readers must refuse a version they do not know.
 public struct LinkTable: Sendable, Hashable, Codable {
     public static let currentVersion = 1
     public var version: Int
@@ -38,7 +55,7 @@ public struct LinkTable: Sendable, Hashable, Codable {
         for link in new {
             // One owner per Google contact, so reverse lookups are unambiguous.
             links = links.filter { $0.value.googleResourceName != link.googleResourceName }
-            links[link.icloudID] = LinkEntry(googleResourceName: link.googleResourceName, linkedAt: date)
+            links[link.icloudID] = LinkEntry(googleResourceName: link.googleResourceName, linkedAt: date, origin: link.origin)
         }
     }
 

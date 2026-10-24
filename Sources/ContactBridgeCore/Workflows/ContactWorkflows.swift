@@ -35,6 +35,9 @@ public struct CleanupRun: Sendable {
     public var deletedIDs: [String]
     /// Import links dropped because their contact is gone.
     public var linksRemoved: Int
+    /// Linked contacts whose link was kept because sync is on: the next sync deletes their Google copy and then drops the
+    /// link. Show "Also removed from Google on the next sync" when this is not zero.
+    public var googleRemovalsPending: Int
     /// Dismissed "not duplicates" groups that mentioned a deleted contact and were trimmed or dropped.
     public var dismissalsPruned: Int
     /// The contacts are deleted regardless; these say what tidying afterwards did not work.
@@ -77,6 +80,7 @@ public struct ContactWorkflows: Sendable {
     private let notes: (any NotesStoring)?
     private let backups: BackupCoordinator
     private let links: any LinkStoring
+    private let syncState: (any SyncStateStoring)?
     private let dismissals: any DismissalStoring
     private let matcher: DuplicateMatcher
     private let containerID: String?
@@ -85,11 +89,13 @@ public struct ContactWorkflows: Sendable {
     /// - Parameters:
     ///   - google: nil when signed out.
     ///   - notes: nil means notes cannot be read: previews show none and `runMerge` refuses.
+    ///   - syncState: nil means sync was never set up. Once it holds an approved first sync, Clean up keeps the links of
+    ///     the contacts it deletes so the sync can remove their Google copies.
     ///   - containerID: the container `store` writes to; backups must cover exactly this one.
     public init(
         store: any ContactStoring, google: (any GoogleContactsClient)?, notes: (any NotesStoring)?, backups: BackupCoordinator,
-        links: any LinkStoring, dismissals: any DismissalStoring, matcher: DuplicateMatcher = DuplicateMatcher(),
-        containerID: String? = nil, now: @escaping @Sendable () -> Date = { Date() }
+        links: any LinkStoring, syncState: (any SyncStateStoring)? = nil, dismissals: any DismissalStoring,
+        matcher: DuplicateMatcher = DuplicateMatcher(), containerID: String? = nil, now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.containerID = containerID
         self.store = store
@@ -97,6 +103,7 @@ public struct ContactWorkflows: Sendable {
         self.notes = notes
         self.backups = backups
         self.links = links
+        self.syncState = syncState
         self.dismissals = dismissals
         self.matcher = matcher
         self.now = now
@@ -239,7 +246,7 @@ public struct ContactWorkflows: Sendable {
     @concurrent
     public func loadCleanupRows() async throws -> [CleanupRow] {
         let records = try await store.fetchAll()
-        let imported = Set(try links.load().links.keys)
+        let imported = Set(try links.load().links.filter { $0.value.effectiveOrigin == .imported }.keys)
         return records.map { CleanupRow(record: $0, isImported: imported.contains($0.sourceIdentifier)) }
             .sorted {
                 let order = $0.displayName.localizedStandardCompare($1.displayName)
@@ -253,6 +260,10 @@ public struct ContactWorkflows: Sendable {
     ///
     /// Afterwards the deleted ids leave the import links and the dismissed groups. If that tidying fails the deletion still
     /// stands: the run reports it in `followUpWarnings` instead of throwing.
+    ///
+    /// Once sync is approved (`SyncState.firstSyncApproved`) the links stay: the sync deletes the Google copy of a linked
+    /// contact that is gone from iCloud and only then drops the link and baseline (`googleRemovalsPending` counts them).
+    /// Contacts that never synced, and every contact before sync was approved, lose their link as before.
     @concurrent
     public func deleteContacts(ids: [String], progress: @escaping @Sendable (CleanupPhase) -> Void = { _ in }) async throws -> CleanupRun {
         var seen = Set<String>()
@@ -262,18 +273,25 @@ public struct ContactWorkflows: Sendable {
         let present = Set(try await store.fetchAll().map(\.sourceIdentifier))
         let missing = ids.filter { !present.contains($0) }
         guard missing.isEmpty else { throw ContactStoreError.notFound(missing) }
+        // Decided before anything is deleted: if the state cannot be read, nothing changes.
+        let state = try syncState?.load()
+        let syncOn = state?.firstSyncApproved == true
 
         progress(.backingUp)
         let receipt = try await backups.newBackup(requiring: BackupRequirement(containerID: containerID, needsNotes: true))
         progress(.deleting)
         try await store.delete(ids: ids, backup: receipt)
 
-        var run = CleanupRun(receipt: receipt, deletedIDs: ids, linksRemoved: 0, dismissalsPruned: 0, followUpWarnings: [])
+        var run = CleanupRun(receipt: receipt, deletedIDs: ids, linksRemoved: 0, googleRemovalsPending: 0, dismissalsPruned: 0, followUpWarnings: [])
         do {
-            let linked = Set(try links.load().links.keys).intersection(ids)
-            if !linked.isEmpty {
-                try links.remove(icloudIDs: ids.filter(linked.contains))
-                run.linksRemoved = linked.count
+            let table = try links.load()
+            let linked = Set(table.links.keys).intersection(ids)
+            let kept = syncOn ? Self.googleCopiesToRemove(among: linked, state: state) : []
+            run.googleRemovalsPending = kept.count
+            let removable = ids.filter { linked.contains($0) && !kept.contains($0) }
+            if !removable.isEmpty {
+                try links.remove(icloudIDs: removable)
+                run.linksRemoved = removable.count
             }
         } catch {
             run.followUpWarnings.append("The contacts are deleted, but their import links could not be removed: \(error.localizedDescription)")
@@ -284,6 +302,19 @@ public struct ContactWorkflows: Sendable {
             run.followUpWarnings.append("The contacts are deleted, but the groups you marked as not duplicates could not be updated: \(error.localizedDescription)")
         }
         return run
+    }
+
+    /// How many of these contacts would also be removed from Google by the next sync if deleted now: linked contacts with
+    /// a baseline, once sync is approved. Zero before that. The Clean up screen shows "Also removed from Google on the next
+    /// sync" when this is not zero.
+    public func googleRemovalsPending(ifDeleting ids: [String]) throws -> Int {
+        guard let state = try syncState?.load(), state.firstSyncApproved else { return 0 }
+        return Self.googleCopiesToRemove(among: Set(try links.load().links.keys).intersection(ids), state: state).count
+    }
+
+    /// A link without a baseline has no Google copy the sync could delete safely; it goes with the contact.
+    private static func googleCopiesToRemove(among linked: Set<String>, state: SyncState?) -> Set<String> {
+        linked.filter { state?.baselines[$0] != nil }
     }
 
     private func requireMembersExist(_ draft: MergeDraft) async throws {

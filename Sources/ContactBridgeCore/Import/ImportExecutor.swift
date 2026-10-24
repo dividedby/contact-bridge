@@ -3,10 +3,12 @@ import Foundation
 public struct ImportedLink: Sendable, Hashable {
     public var icloudID: String
     public var googleResourceName: String
+    public var origin: LinkOrigin
 
-    public init(icloudID: String, googleResourceName: String) {
+    public init(icloudID: String, googleResourceName: String, origin: LinkOrigin = .imported) {
         self.icloudID = icloudID
         self.googleResourceName = googleResourceName
+        self.origin = origin
     }
 }
 
@@ -77,7 +79,9 @@ public struct ImportExecutor: Sendable {
                 let stored = try await store.create(candidate.record, backup: receipt)
                 result.created.append(ImportResult.Created(candidateID: candidate.id, record: stored))
                 if candidate.record.source == .google {
-                    result.links.append(ImportedLink(icloudID: stored.sourceIdentifier, googleResourceName: candidate.googleResourceName))
+                    result.links.append(ImportedLink(
+                        icloudID: stored.sourceIdentifier, googleResourceName: candidate.googleResourceName, origin: .imported
+                    ))
                 }
             } catch {
                 result.stopped = .failed(candidateID: candidate.id, reason: error.localizedDescription)

@@ -88,8 +88,12 @@ public actor BackupCoordinator {
         try await takeBackup(joining: .any).0
     }
 
-    public func freshReceipt(requiring requirement: BackupRequirement = BackupRequirement(containerID: nil)) async throws -> BackupReceipt {
-        if let cached, cached.receipt.isFresh(maxAge: maxAge, now: now()), Self.meets(requirement, cached.coverage) {
+    /// - Parameter maxAge: how old a reused receipt may be; the coordinator's own limit when nil. Sync's Google writes pass
+    ///   24 hours, since they need a Google backup but not a minutes-old one.
+    public func freshReceipt(
+        requiring requirement: BackupRequirement = BackupRequirement(containerID: nil), maxAge limit: TimeInterval? = nil
+    ) async throws -> BackupReceipt {
+        if let cached, cached.receipt.isFresh(maxAge: limit ?? maxAge, now: now()), Self.meets(requirement, cached.coverage) {
             return cached.receipt
         }
         return try await newBackup(requiring: requirement)

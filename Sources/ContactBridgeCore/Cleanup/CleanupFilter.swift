@@ -12,7 +12,7 @@ public struct CleanupRow: Sendable, Hashable, Identifiable {
     /// No name parts and no organization.
     public var hasNoName: Bool
     public var hasNoPhoneOrEmail: Bool
-    /// Created by a Contact Bridge import (the id is in the link table).
+    /// Created by a Contact Bridge import (the id is in the link table with origin `imported`; links made by sync do not count).
     public var isImported: Bool
 
     /// Case- and diacritic-folded name parts, organization, phones and emails, one per line.

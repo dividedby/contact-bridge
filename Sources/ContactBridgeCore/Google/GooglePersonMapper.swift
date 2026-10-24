@@ -254,9 +254,7 @@ public enum GooglePersonMapper {
         }
 
         if fields.contains(.note), let note {
-            if !note.isBlank {
-                person.extras["biographies"] = .array([.object(["value": .string(note), "contentType": .string("TEXT_PLAIN")])])
-            }
+            setNote(note, on: &person)
             mask.append(SyncField.note.peopleAPIField)
         }
 
@@ -266,6 +264,12 @@ public enum GooglePersonMapper {
             mask.append("clientData")
         }
         return GoogleUpdatePayload(resourceName: existing.resourceName, person: person, updatePersonFields: mask.joined(separator: ","))
+    }
+
+    /// Sets `biographies` to the note as plain text. A blank note sets nothing.
+    public static func setNote(_ note: String, on person: inout GooglePerson) {
+        guard !note.isBlank else { return }
+        person.extras["biographies"] = .array([.object(["value": .string(note), "contentType": .string("TEXT_PLAIN")])])
     }
 
     // MARK: building entries

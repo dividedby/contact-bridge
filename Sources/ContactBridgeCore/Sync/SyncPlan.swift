@@ -184,8 +184,10 @@ public struct SyncPlan: Sendable, Hashable {
         if case .needsConfirmation? = pause { true } else { false }
     }
 
-    /// Nothing to write, link, refresh, drop or ask about.
+    /// Nothing to write, link, refresh, drop or ask about, and nothing waiting for a full listing or for notes. A plan
+    /// with contacts waiting is not settled, so a screen must not call it "up to date".
     public var isEmpty: Bool {
         links.isEmpty && mutationCount == 0 && baselineRefreshes.isEmpty && droppedLinks.isEmpty && review.isEmpty && deferred.isEmpty
+            && waitingForNotes == 0 && unlinkedWaitingForFullListing == 0
     }
 }

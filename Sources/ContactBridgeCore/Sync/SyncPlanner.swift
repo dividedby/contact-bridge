@@ -263,14 +263,8 @@ extension SyncPlanner {
             return new != old
         }
 
-        /// Whether Google moved the contact on since the baseline (iCloud held at the baseline, so only Google's side counts).
         private func googleChanged(_ person: GooglePerson, since baseline: SyncBaseline) -> Bool {
-            guard person.etag != baseline.googleEtag, let record = GooglePersonMapper.record(from: person, source: .google) else { return false }
-            let diff = ThreeWayDiff.diff(
-                icloud: baseline.icloud, google: record, base: baseline,
-                icloudNoteHash: baseline.icloudNoteHash, googleNoteHash: GooglePersonMapper.noteHash(of: person), at: now
-            )
-            return diff.changes.values.contains { $0 != .unchanged }
+            ThreeWayDiff.googleChanged(person, since: baseline, at: now)
         }
 
         // MARK: linking

@@ -29,7 +29,8 @@ public struct LinkDiff: Sendable, Hashable {
     public var desiredGoogle: ContactRecord
     /// The baseline once the pushes are confirmed. Groups under review keep their old values on both sides, so the
     /// review is derived again next run. `google` holds `desiredGoogle` (replace it with what Google returns), and
-    /// `googleEtag` is only current if the caller passed the etag it listed.
+    /// `googleEtag` is only current if the caller passed the etag it listed, and stays the old one while any group is
+    /// held for review.
     public var updatedBaseline: SyncBaseline
 
     public var needsPush: Bool { !pushFields.isEmpty }
@@ -49,7 +50,8 @@ public enum ThreeWayDiff {
     ///
     ///     The note is only compared when all four hashes (both current, both in the baseline) are known; otherwise it is
     ///     `unchanged`, is never pushed, and the baseline hashes stay as they are.
-    ///   - googleEtag: the etag of `google`, recorded in `updatedBaseline` when given.
+    ///   - googleEtag: the etag of `google`, recorded in `updatedBaseline` when given and nothing is held
+    ///     for review.
     public static func diff(
         icloud: ContactRecord, google: ContactRecord, base: SyncBaseline,
         icloudNoteHash: String? = nil, googleNoteHash: String? = nil, googleEtag: String? = nil, at now: Date = Date()
@@ -87,7 +89,9 @@ public enum ThreeWayDiff {
 
         var baseline = base
         baseline.syncedAt = now
-        if let googleEtag { baseline.googleEtag = googleEtag }
+        // While a group is held for review the baseline still lacks Google's edit of it. The etag must stay behind too:
+        // the planner reads "same etag as the baseline" as "Google changed nothing" and would never see the edit again.
+        if let googleEtag, held.isEmpty { baseline.googleEtag = googleEtag }
         for field in SyncField.recordFields where !held.contains(field) {
             baseline.icloud.copy(field, from: icloud)
             baseline.google.copy(field, from: desired)
@@ -101,6 +105,18 @@ public enum ThreeWayDiff {
             changes: changes, pushFields: pushFields, reviewFields: reviewFields, desiredGoogle: desired,
             updatedBaseline: baseline
         )
+    }
+
+    /// Whether Google moved the contact on since the baseline: a different etag AND a different projection (etags churn
+    /// without edits). iCloud is held at the baseline, so only Google's side counts. Used before deleting a Google contact
+    /// because its iCloud one is gone.
+    static func googleChanged(_ person: GooglePerson, since baseline: SyncBaseline, at now: Date) -> Bool {
+        guard person.etag != baseline.googleEtag, let record = GooglePersonMapper.record(from: person, source: .google) else { return false }
+        let diff = diff(
+            icloud: baseline.icloud, google: record, base: baseline,
+            icloudNoteHash: baseline.icloudNoteHash, googleNoteHash: GooglePersonMapper.noteHash(of: person), at: now
+        )
+        return diff.changes.values.contains { $0 != .unchanged }
     }
 
     // MARK: classification
