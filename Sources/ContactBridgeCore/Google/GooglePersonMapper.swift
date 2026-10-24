@@ -204,6 +204,53 @@ public enum GooglePersonMapper {
         )
     }
 
+    /// `updatePayload` limited to the given groups: the payload and `updatePersonFields` carry only those, so a sync
+    /// write for one edited field cannot touch or race on the rest. `clientData` joins the mask when the ownership tag
+    /// is wanted and `existing` does not carry it yet.
+    ///
+    /// `.note` is written as `biographies` only when `note` is given: nil means the note is unknown and is left out of
+    /// the payload and mask, so an unreadable note cannot erase Google's. A blank `note` is a known empty note and
+    /// clears `biographies` (the mask names it, the payload omits it). The mask is empty if nothing qualifies; do not
+    /// send it.
+    public static func updatePayload(
+        for record: ContactRecord, existing: GooglePerson, ownershipSourceID: String? = nil,
+        restrictedTo fields: Set<SyncField>, note: String? = nil
+    ) -> GoogleUpdatePayload {
+        let full = updatePayload(for: record, existing: existing)
+        let fullMask = Set(full.updatePersonFields.split(separator: ",").map(String.init))
+        var person = GooglePerson(resourceName: existing.resourceName, etag: existing.etag)
+        var mask: [String] = []
+
+        for field in SyncField.recordFields where fields.contains(field) && fullMask.contains(field.peopleAPIField) {
+            switch field {
+            case .name: person.names = full.person.names
+            case .nickname: person.nicknames = full.person.nicknames
+            case .organization: person.organizations = full.person.organizations
+            case .phones: person.phoneNumbers = full.person.phoneNumbers
+            case .emails: person.emailAddresses = full.person.emailAddresses
+            case .postalAddresses: person.addresses = full.person.addresses
+            case .urls: person.urls = full.person.urls
+            case .birthday: person.birthdays = full.person.birthdays
+            case .note: break
+            }
+            mask.append(field.peopleAPIField)
+        }
+
+        if fields.contains(.note), let note {
+            if !note.isBlank {
+                person.extras["biographies"] = .array([.object(["value": .string(note), "contentType": .string("TEXT_PLAIN")])])
+            }
+            mask.append(SyncField.note.peopleAPIField)
+        }
+
+        if let ownershipSourceID, GoogleOwnership.sourceID(of: existing) != ownershipSourceID {
+            person.clientData = existing.clientData
+            GoogleOwnership.setSourceID(ownershipSourceID, on: &person)
+            mask.append("clientData")
+        }
+        return GoogleUpdatePayload(resourceName: existing.resourceName, person: person, updatePersonFields: mask.joined(separator: ","))
+    }
+
     // MARK: building entries
 
     private static func hasName(_ record: ContactRecord) -> Bool {

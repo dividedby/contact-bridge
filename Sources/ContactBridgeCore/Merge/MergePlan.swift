@@ -193,7 +193,7 @@ public struct MergePlan: Sendable, Hashable {
     }
 
     /// Folds case, diacritics, width and whitespace only. Punctuation and symbols count, so "Acme \u{1F680}" differs from "Acme".
-    private static func comparisonKey(_ text: String) -> String {
+    static func comparisonKey(_ text: String) -> String {
         text.folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: nil)
             .split(whereSeparator: \.isWhitespace)
             .joined(separator: " ")
