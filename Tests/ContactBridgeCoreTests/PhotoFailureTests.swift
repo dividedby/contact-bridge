@@ -61,7 +61,7 @@ struct PhotoFailureTests {
             Issue.record("expected a permanent failure")
             return
         }
-        #expect(report.isComplete && report.warnings.count == 1 && report.googleWrites == 0)
+        #expect(report.isComplete && report.givenUp.count == 1 && report.leftForNextRun == 0 && report.googleWrites == 0)
         let failure = try #require(try rig.photoBaseline("I1")?.failure)
         #expect(failure.stamp == planned.first { $0.icloudID == "I1" }?.failureStamp)
 
@@ -179,7 +179,8 @@ struct PhotoFailureTests {
         await rig.engine.engine.syncNow()
         let second = await rig.engine.snapshot
         let writes = await rig.photos.google.photoWrites
-        #expect(second.lastRun?.warnings.isEmpty == true && second.lastRun?.leftForNextRun == 0 && writes.isEmpty)
+        #expect(second.lastRun?.warnings == first.lastRun?.warnings, "only the listing of the photo left alone")
+        #expect(second.lastRun?.leftForNextRun == 0 && writes.isEmpty)
         await rig.engine.engine.stop()
     }
 
@@ -308,5 +309,44 @@ struct PhotoFailureTests {
         let again = try await rig.look(.syncNow, fullListing: true)
         let after = await rig.fetcher.requested.count
         #expect(again.observed.failures.isEmpty && after == requested, "the profile photo is not downloaded again")
+    }
+
+    @Test("Photos given up on are one line per reason naming the contacts, with the rest counted past ten")
+    func givenUpLines() {
+        let lost = "macOS Contacts could not save this contact's photo"
+        let many = (1...12).map { (name: "Person \($0)", message: lost) }
+        let lines = PhotoNotice.lines(many + [(name: "Ada", message: "bad image")], couldNotBe: "synced")
+        #expect(lines == [
+            "A contact photo could not be synced and is left alone until it changes (Ada): bad image",
+            "12 contact photos could not be synced and are left alone until a photo changes (Person 1, Person 2, Person 3, Person 4, "
+                + "Person 5, Person 6, Person 7, Person 8, Person 9, Person 10 and 2 more): \(lost)",
+        ])
+        #expect(PhotoNotice.lines([], couldNotBe: "read").isEmpty)
+    }
+
+    @Test("A photo given up on is named in every run summary until it changes, and not counted as tried again next run")
+    func givenUpInRunSummary() async throws {
+        let rig = try await PhotoRig.linked(count: 2)
+        defer { rig.cleanUp() }
+        let support = SyncPhotoSupport(fetcher: rig.fetcher, history: rig.photoHistory, sleep: { _ in })
+        let engine = EngineRig(rig.base, photos: support)
+        try await rig.setICloudPhoto("I1", one)
+        await rig.google.inject(.error(.other(status: 400, message: "bad image")), on: .updateContactPhoto)
+        _ = await engine.startAndRun()
+
+        let run = try #require(await engine.snapshot.lastRun)
+        let name = try #require(try rig.state.baselines["I1"]?.icloud.displayName)
+        let lines = run.warnings.filter { $0.contains("could not be synced") }
+        #expect(lines.count == 1 && lines.first?.contains("(\(name))") == true && lines.first?.contains("bad image") == true)
+        #expect(run.leftForNextRun == 0, "a photo given up on is not tried again next run")
+
+        // The next run does not try it again, but still lists it, until a photo changes.
+        await engine.engine.syncNow()
+        let next = try #require(await engine.snapshot.lastRun)
+        #expect(next.warnings.filter { $0.contains("could not be synced") } == lines)
+        try await rig.setICloudPhoto("I1", two)
+        await engine.engine.syncNow()
+        #expect(await engine.snapshot.lastRun?.warnings.contains { $0.contains("could not be synced") } == false)
+        await engine.engine.stop()
     }
 }

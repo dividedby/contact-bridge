@@ -572,10 +572,7 @@ public actor SyncEngine {
             // A rate limit or sign-in problem in the photo phase stops the run like one in the field phase: back-off, the
             // "stopped" notice, and no follow-up run straight into it.
             report.halted = report.halted ?? report.photo.halted
-            report.warnings += report.photo.warnings + report.photo.putOffReasons
-            report.warnings += observed.failures.values.sorted { $0.resourceName < $1.resourceName }.map {
-                "A contact photo could not be read and will be left alone until it changes: \($0.message)"
-            }
+            report.warnings += report.photo.warnings + (try leftAlonePhotos(given: report.photo, observed: observed)) + report.photo.putOffReasons
             if feed.isFullListing, planState.useGoogleProfilePhotos {
                 try stateStore.update { $0.lastPhotoFullListingAt = at }
             }
@@ -591,6 +588,18 @@ public actor SyncEngine {
             notesUnavailable: plan.notesUnavailable, hasDeferred: !plan.deferred.isEmpty, reviews: reviews, unconfirmedCreates: unconfirmed,
             newPairs: photos != nil && planState.syncPhotos ? report.linksAdded + report.created : 0
         ))
+    }
+
+    /// Every pair whose photo is left alone until it changes, from the stored failure marks plus this run's, grouped by
+    /// reason and named: shown after every run, so the contacts stay listed until a photo changes, not only when they fail.
+    private func leftAlonePhotos(given report: PhotoRunReport, observed: PhotoObservations) throws -> [String] {
+        let baselines = try stateStore.load().baselines
+        var messages = baselines.compactMapValues { $0.photo?.failure?.message }
+        for failure in report.givenUp { messages[failure.icloudID] = failure.message }
+        for (id, failure) in observed.failures { messages[id] = failure.message }
+        return PhotoNotice.lines(
+            messages.map { (name(icloudID: $0.key, resourceName: nil, baselines: baselines), $0.value) }, couldNotBe: "synced"
+        )
     }
 
     /// Carries out the plan's photo ops after the field writes (the run still holds the write gate). If something is left

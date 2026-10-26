@@ -57,6 +57,14 @@ public struct PhotoRunReport: Sendable, Hashable {
     /// tokens where they were, so the next run reads the same changes again.
     public var isComplete: Bool { carried == 0 && halted == nil && !skipped.contains { $0.needsAnotherLook } }
 
+    /// Photo changes left for a later run: everything skipped except what was given up on, plus carried Google writes.
+    public var leftForNextRun: Int { skipped.filter { if case .permanent = $0.reason { false } else { true } }.count + carried }
+
+    /// Photos given up on this run: iCloud id and why. They are left alone until a photo changes.
+    public var givenUp: [(icloudID: String, message: String)] {
+        skipped.compactMap { if case .permanent(let message) = $0.reason { (icloudID: $0.icloudID, message: message) } else { nil } }
+    }
+
     /// Why photo changes were left for the next run, one line per reason, so "tried again on the next run" is not a mystery.
     public var putOffReasons: [String] {
         var counts: [String: Int] = [:]
@@ -197,8 +205,8 @@ public struct PhotoExecutor: Sendable {
     /// A failure that repeating cannot fix: noted on the pair's baseline against the photos it was planned on, and reported.
     private func giveUp(_ op: PlannedPhotoOp, _ error: any Error, _ progress: inout RunProgress) throws {
         let message = error.localizedDescription
+        // Reported by the engine, grouped by message and named (`PhotoRunReport.givenUp`, `PhotoNotice`).
         progress.skip(op, .permanent(message))
-        progress.report.warnings.append("A contact photo could not be copied and will be left alone until it changes: \(message)")
         var marked = try state.load().baselines[op.icloudID]?.photo ?? PhotoBaseline(syncedAt: now())
         marked.failure = PhotoBaseline.Failure(stamp: op.failureStamp ?? "", message: message, at: now())
         try saveBaseline(marked, for: op.icloudID)
@@ -429,5 +437,29 @@ public struct SyncPhotoSupport: Sendable {
         self.history = history
         self.fingerprinter = fingerprinter
         self.sleep = sleep
+    }
+}
+
+/// One line per reason for photos that are left alone until they change, naming the contacts, instead of one line each.
+public enum PhotoNotice {
+    /// Names listed in a line before the rest are counted.
+    static let namesShown = 10
+
+    /// `failures` are (contact name, message); `verb` is what could not be done ("synced").
+    public static func lines(_ failures: [(name: String, message: String)], couldNotBe verb: String) -> [String] {
+        var byMessage: [String: [String]] = [:]
+        var order: [String] = []
+        for failure in failures.sorted(by: { $0.name.localizedStandardCompare($1.name) == .orderedAscending }) {
+            if byMessage[failure.message] == nil { order.append(failure.message) }
+            byMessage[failure.message, default: []].append(failure.name)
+        }
+        return order.map { message in
+            let names = byMessage[message] ?? []
+            var shown = names.prefix(namesShown).joined(separator: ", ")
+            if names.count > namesShown { shown += " and \(names.count - namesShown) more" }
+            return names.count == 1
+                ? "A contact photo could not be \(verb) and is left alone until it changes (\(shown)): \(message)"
+                : "\(names.count) contact photos could not be \(verb) and are left alone until a photo changes (\(shown)): \(message)"
+        }
     }
 }

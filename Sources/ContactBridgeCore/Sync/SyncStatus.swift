@@ -185,7 +185,7 @@ public struct SyncRunSummary: Sendable, Hashable {
         photosRemoved = report.photo.removedFromGoogle + report.photo.removedFromICloud
         reviewsAdded = report.reviewsAdded.count
         conflictsFound = report.conflictsFound.count
-        leftForNextRun = report.leftForNextRun.count + report.photo.skipped.count + report.photo.carried
+        leftForNextRun = report.leftForNextRun.count + report.photo.leftForNextRun
         blockedByReview = report.blockedByReview.count
         halted = report.halted
         warnings = report.warnings
