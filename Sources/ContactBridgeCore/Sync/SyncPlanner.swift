@@ -18,6 +18,14 @@ public struct SyncPlanner: Sendable {
         public var updateFraction = 0.25
         /// Google writes per run; the rest wait for the next one.
         public var maxMutations = 1000
+        /// Photo writes to Google (or to iCloud) beyond `max(minPhotoWrites, photoWriteFraction * linked)` need confirmation.
+        public var minPhotoWrites = 20
+        public var photoWriteFraction = 0.25
+        /// Photo deletes in Google beyond `max(minPhotoDeletes, photoDeleteFraction * linked)` need confirmation.
+        public var minPhotoDeletes = 5
+        public var photoDeleteFraction = 0.02
+        /// Google photo writes per run (they are slow, one a second); the rest wait for the next one.
+        public var maxGooglePhotoWrites = 60
 
         public init() {}
     }
@@ -52,10 +60,12 @@ public struct SyncPlanner: Sendable {
     ///   - openReviews: the stored review items. A pinned edit conflict (`canSettle`) is derived by no later plan, so the
     ///     planner reports it in `settledReviews` when the live contacts it is about already agree on every group it names.
     ///   - googleExtra: Google contacts the caller read by hand, for pinned conflicts the feed did not list.
+    ///   - photos: what `PhotoReconciler` found; the default looked at nothing, so no photo is planned.
     ///   - now: stamped on the baselines.
     public func plan(
         icloud: ICloudScan, google feed: GoogleFeed, state: SyncState, links: LinkTable, keepSeparate: Set<String> = [],
-        allowMassGoogleDeletions: Bool = false, openReviews: [ReviewItem] = [], googleExtra: [String: GooglePerson] = [:], now: Date
+        allowMassGoogleDeletions: Bool = false, openReviews: [ReviewItem] = [], googleExtra: [String: GooglePerson] = [:],
+        photos: PhotoObservations = .none, now: Date
     ) -> SyncPlan {
         var plan = SyncPlan(isPreview: !state.firstSyncApproved)
         plan.notesReason = icloud.notesReason
@@ -78,6 +88,7 @@ public struct SyncPlanner: Sendable {
         let run = Run(planner: self, icloud: icloud, feed: feed, state: state, links: links, keepSeparate: keepSeparate, now: now)
         run.planLinked(into: &plan)
         run.planUnlinked(into: &plan)
+        run.planPhotos(photos, into: &plan)
         plan.settledReviews = run.settledReviews(of: openReviews, googleExtra: googleExtra, plan: plan)
         applyCap(to: &plan)
         applyGuards(to: &plan, linkedCount: max(links.links.count, state.baselines.count))
@@ -87,7 +98,7 @@ public struct SyncPlanner: Sendable {
         plan.droppedLinks.sort()
 
         // Anything left waiting must be seen again next run, so the iCloud token must not move past it.
-        if plan.deferred.isEmpty, plan.unlinkedWaitingForFullListing == 0, plan.waitingForNotes == 0 {
+        if plan.deferred.isEmpty, plan.unlinkedWaitingForFullListing == 0, plan.waitingForNotes == 0, plan.photosUnevaluated == 0 {
             plan.checkpoint = SyncCheckpoint(
                 icloudChangeToken: icloud.changeToken, icloudContainerID: icloud.containerID, lastNotesReadAt: icloud.notesReadAt,
                 googleSyncToken: feed.nextSyncToken, fieldsVersion: feed.fieldsVersion, googleAccount: feed.account,
@@ -96,6 +107,10 @@ public struct SyncPlanner: Sendable {
         }
         return plan
     }
+
+    /// What a photo review item is about: the iCloud thumbnail hash and the Google contact photo URL key, never the etag (which
+    /// moves on every unrelated edit). A moved stamp means the item has to be refreshed before it is applied.
+    public static func photoStamp(_ seen: PhotoSnapshot) -> String { "\(seen.icloud?.token ?? "")|\(seen.google?.token ?? "")" }
 
     /// A first-link conflict that is kept (pinned) until the user decides it, since the baseline already holds both sides.
     public static func canSettle(_ item: ReviewItem) -> Bool {
@@ -135,6 +150,51 @@ public struct SyncPlanner: Sendable {
         plan.deferred.updates = take(&plan.updates)
         plan.deferred.deletes = take(&plan.deletes)
         plan.deferred.creates = take(&plan.creates)
+
+        // Photos to Google are the slow ones; everything that writes no Google photo goes through.
+        plan.photoOps.sort { ($0.icloudID, $0.resourceName) < ($1.icloudID, $1.resourceName) }
+        var photoRoom = limits.maxGooglePhotoWrites
+        plan.photoOps.removeAll { op in
+            switch op.kind {
+            case .copyToGoogle, .deleteOnGoogle:
+                guard photoRoom > 0 else {
+                    plan.deferred.photoWrites += 1
+                    return true
+                }
+                photoRoom -= 1
+                return false
+            default: return false
+            }
+        }
+    }
+
+    /// The summary of the pause for photo changes that exceed the limits, nil when they are within them. Judged on every op
+    /// the plan lists plus the Google writes the per-run cap held back. Also used by whoever writes photos in bulk.
+    public static func photoGuardReasons(ops: [PlannedPhotoOp], deferredWrites: Int = 0, linkedCount: Int, limits: Limits) -> [String] {
+        var googleWrites = deferredWrites
+        var googleDeletes = 0
+        var icloudWrites = 0
+        for op in ops {
+            switch op.kind {
+            case .copyToGoogle: googleWrites += 1
+            case .deleteOnGoogle: googleDeletes += 1
+            case .copyToICloud, .deleteOnICloud: icloudWrites += 1
+            case .recordBaseline: break
+            }
+        }
+        let writeLimit = max(Double(limits.minPhotoWrites), limits.photoWriteFraction * Double(linkedCount))
+        let deleteLimit = max(Double(limits.minPhotoDeletes), limits.photoDeleteFraction * Double(linkedCount))
+        var reasons: [String] = []
+        if Double(googleWrites) > writeLimit {
+            reasons.append("write \(googleWrites) of \(linkedCount) contact photos to Google (more than \(Int(writeLimit)) at once)")
+        }
+        if Double(googleDeletes) > deleteLimit {
+            reasons.append("remove \(googleDeletes) of \(linkedCount) contact photos from Google (more than \(Int(deleteLimit)) at once)")
+        }
+        if Double(icloudWrites) > writeLimit {
+            reasons.append("change \(icloudWrites) of \(linkedCount) contact photos in iCloud (more than \(Int(writeLimit)) at once)")
+        }
+        return reasons
     }
 
     /// Judged on the full plan, before the cap.
@@ -159,6 +219,7 @@ public struct SyncPlanner: Sendable {
         if Double(updates) > updateLimit {
             reasons.append("update \(updates) of \(linkedCount) linked contacts in Google (more than \(Int(updateLimit)) at once)")
         }
+        reasons += Self.photoGuardReasons(ops: plan.photoOps, deferredWrites: plan.deferred.photoWrites, linkedCount: linkedCount, limits: limits)
         if !reasons.isEmpty { plan.pause = .needsConfirmation(summary: "This sync would " + reasons.joined(separator: " and ")) }
     }
 }
@@ -308,6 +369,62 @@ extension SyncPlanner {
 
         private func googleChanged(_ person: GooglePerson, since baseline: SyncBaseline) -> Bool {
             ThreeWayDiff.googleChanged(person, since: baseline, at: now)
+        }
+
+        // MARK: photos
+
+        /// Decides each observed pair's photos. A pair whose contact is going away (or is being asked about as gone) is
+        /// left out, as are pairs the observation could not look at (`photosUnevaluated`).
+        func planPhotos(_ photos: PhotoObservations, into plan: inout SyncPlan) {
+            guard state.syncPhotos, photos.wasObserved else { return }
+            let leaving = Set(plan.droppedLinks).union(plan.deletes.map(\.icloudID)).union(
+                plan.review.filter { $0.kind == .deletedInGoogle || $0.kind == .deletedInICloudEditedInGoogle }.compactMap(\.icloudID)
+            )
+            for id in photos.pairs.keys.sorted() {
+                guard let observation = photos.pairs[id], !leaving.contains(id), let baseline = state.baselines[id] else { continue }
+                let seen = observation.seen
+                let name = observation.resourceName
+                // A new decision supersedes an old failure; the failure only stops the same copy being tried again.
+                func op(_ kind: PlannedPhotoOp.Kind, _ result: PhotoBaseline, googleKey: String?) -> PlannedPhotoOp {
+                    var result = result
+                    result.failure = nil
+                    return PlannedPhotoOp(
+                        icloudID: id, resourceName: name, kind: kind, baseline: result, expectedGoogleURLKey: googleKey,
+                        expectedICloudHint: seen.icloud?.token,
+                        failureStamp: "\(seen.icloud?.token ?? "")|\(googleKey ?? "")"
+                    )
+                }
+                func copy(_ planned: PlannedPhotoOp) {
+                    if let failure = baseline.photo?.failure, failure.stamp == planned.failureStamp { return }
+                    plan.photoOps.append(planned)
+                }
+                switch PhotoDecision.decide(baseline: baseline.photo, seen: seen, profileEnabled: observation.profileEnabled, now: now) {
+                case .settled: break
+                case .record(let result): plan.photoOps.append(op(.recordBaseline, result, googleKey: seen.google?.token))
+                case .copyToGoogle(let result): copy(op(.copyToGoogle, result, googleKey: seen.google?.token))
+                case .copyToICloud(let source, let result):
+                    copy(op(.copyToICloud(source: source), result, googleKey: source == .googleProfile ? seen.profile?.token : seen.google?.token))
+                case .review(let reason):
+                    plan.review.append(ReviewCandidate(
+                        kind: .photoConflict, icloudID: id, resourceName: name, photoStamp: SyncPlanner.photoStamp(seen), photoReason: reason
+                    ))
+                }
+            }
+            // A photo that cannot be read is recorded on the pair, so it is left alone until it changes. A pair that is judged
+            // anyway (only its profile photo failed) carries the note on the baseline its op stores.
+            for (id, failure) in photos.failures.sorted(by: { $0.key < $1.key }) where !leaving.contains(id) && state.baselines[id] != nil {
+                let marker = PhotoBaseline.Failure(stamp: failure.stamp, message: failure.message, at: now)
+                if let index = plan.photoOps.firstIndex(where: { $0.icloudID == id }) {
+                    plan.photoOps[index].baseline.failure = marker
+                } else {
+                    var marked = state.baselines[id]?.photo ?? PhotoBaseline(syncedAt: now)
+                    marked.failure = marker
+                    plan.photoOps.append(PlannedPhotoOp(icloudID: id, resourceName: failure.resourceName, kind: .recordBaseline, baseline: marked))
+                }
+            }
+            plan.photosUnjudged = Set(photos.skipped).union(photos.failures.keys)
+            plan.photosUnevaluated = photos.unevaluated.count
+            plan.photoReviewIsComplete = feed.isFullListing && scanned && photos.unevaluated.isEmpty
         }
 
         // MARK: settled conflicts

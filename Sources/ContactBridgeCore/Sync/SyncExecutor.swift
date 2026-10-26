@@ -85,7 +85,11 @@ public struct SyncRunReport: Sendable {
     /// Housekeeping that failed without affecting the run (history, pruning).
     public var warnings: [String] = []
 
-    public var googleWrites: Int { updated + created + deleted }
+    /// What photo sync did after the field writes; set by the engine.
+    public var photo = PhotoRunReport()
+
+    /// Google writes of the run, photos included: a run that made any is followed by another for what was carried over.
+    public var googleWrites: Int { updated + created + deleted + photo.googleWrites }
     /// Everything the plan asked for was done or deliberately held for review.
     public var isComplete: Bool { leftForNextRun.isEmpty && halted == nil }
 }
@@ -696,7 +700,7 @@ public struct SyncExecutor: Sendable {
     }
 
     /// Errors after which every later call would fail the same way.
-    private static func haltReason(for error: GoogleAPIError) -> String? {
+    static func haltReason(for error: GoogleAPIError) -> String? {
         switch error {
         case .rateLimited, .unauthorized: error.localizedDescription
         case .other(403, _): error.localizedDescription

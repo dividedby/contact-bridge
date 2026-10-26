@@ -16,6 +16,9 @@ struct AppDependencies {
     var reviews: any ReviewStoring
     var syncJournal: any SyncJournalStoring
     var syncHistory: any SyncHistoryStoring
+    /// What photo sync downloads Google photos with and keeps replaced ones in. Nil where photos do not sync (demo mode, until it
+    /// has photos of its own).
+    var photoSupport: SyncPhotoSupport?
     /// Held by sync runs and by Import, Merge and Clean up, so they never interleave.
     var writeGate: WriteGate
     /// The second-instance guard, taken when sync starts. Nil in demo mode, which must not claim the real lock.
@@ -71,6 +74,7 @@ struct AppDependencies {
             reviews: ReviewStore(),
             syncJournal: SyncJournalStore(),
             syncHistory: SyncHistoryStore(),
+            photoSupport: SyncPhotoSupport(fetcher: URLSessionGooglePhotoFetcher(), history: PhotoHistoryStore()),
             writeGate: WriteGate(),
             acquireSyncLock: { try SyncProcessLock.acquire() },
             contactsAppRunning: { !NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.AddressBook").isEmpty },
@@ -108,6 +112,7 @@ struct AppDependencies {
             reviews: demo.reviews,
             syncJournal: demo.journal,
             syncHistory: demo.history,
+            photoSupport: nil,
             writeGate: WriteGate(),
             acquireSyncLock: nil,
             contactsAppRunning: { false },

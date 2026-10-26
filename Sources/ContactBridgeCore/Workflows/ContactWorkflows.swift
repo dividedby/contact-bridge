@@ -266,6 +266,8 @@ public struct ContactWorkflows: Sendable {
                 try syncState.update { state in
                     state.baselines[moved.from] = nil
                     state.baselines[survivor.sourceIdentifier] = baseline
+                    // The opt-out is about the person, not the contact: it follows the baseline to the survivor.
+                    if state.profilePhotoOptOut.remove(moved.from) != nil { state.profilePhotoOptOut.insert(survivor.sourceIdentifier) }
                 }
             }
         } catch {

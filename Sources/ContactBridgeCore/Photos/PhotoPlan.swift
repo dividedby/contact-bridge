@@ -44,10 +44,13 @@ public struct PlannedPhotoOp: Sendable, Hashable {
     public var expectedGoogleURLKey: String?
     /// The iCloud thumbnail hint the planner saw; a write or delete of the iCloud photo is skipped if it moved since.
     public var expectedICloudHint: String?
+    /// What a permanent failure of this op is recorded against (see `PhotoBaseline.Failure`): the signs of the photos it was
+    /// planned on. The planner leaves the op out while the stored failure has the same stamp.
+    public var failureStamp: String?
 
     public init(
         icloudID: String, resourceName: String, kind: Kind, baseline: PhotoBaseline, expectedGoogleURLKey: String? = nil,
-        expectedICloudHint: String? = nil
+        expectedICloudHint: String? = nil, failureStamp: String? = nil
     ) {
         self.icloudID = icloudID
         self.resourceName = resourceName
@@ -55,5 +58,19 @@ public struct PlannedPhotoOp: Sendable, Hashable {
         self.baseline = baseline
         self.expectedGoogleURLKey = expectedGoogleURLKey
         self.expectedICloudHint = expectedICloudHint
+        self.failureStamp = failureStamp
+    }
+}
+
+extension PlannedPhotoOp.Kind {
+    /// What the sync screen says about the change.
+    var text: String {
+        switch self {
+        case .copyToGoogle: "photo to Google"
+        case .copyToICloud(let source): source == .googleProfile ? "Google profile photo to iCloud" : "photo to iCloud"
+        case .deleteOnGoogle: "remove photo from Google"
+        case .deleteOnICloud: "remove photo from iCloud"
+        case .recordBaseline: "photos already agree"
+        }
     }
 }

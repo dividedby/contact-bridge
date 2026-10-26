@@ -112,13 +112,25 @@ public struct ReviewList: Sendable, Hashable, Codable, VersionedFileContents {
         remove(
             where: { ($0.kind == .googleEdited || $0.kind == .bothEdited) && $0.icloudID.map(gone.contains) == true }, into: &result
         )
+        // A photo question about a gone contact too, whether or not photo sync is on: nothing is left to ask it about.
+        remove(where: { $0.kind == .photoConflict && $0.icloudID.map(gone.contains) == true }, into: &result)
         // A first-link conflict whose two sides were found to agree: what Save would record, without anything to choose.
         let settled = Set(plan.settledReviews)
         remove(where: { $0.pinned && settled.contains($0.id) }, into: &result)
         // A conflict missing from a plan that did not look at everything is unseen, not resolved.
         if plan.reviewIsComplete {
             let current = Set(plan.review.map(\.id))
-            remove(where: { !current.contains($0.id) && !$0.pinned }, into: &result)
+            remove(where: { !current.contains($0.id) && !$0.pinned && $0.kind != .photoConflict }, into: &result)
+        }
+        // Photo questions have their own completeness: with photo sync off the plan looked at none of them, and the stored
+        // ones are kept (hidden by the screen), never deleted.
+        if plan.photoReviewIsComplete {
+            let current = Set(plan.review.map(\.id))
+            // ...except for a pair that was skipped or unreadable this run: not looking is not resolving.
+            remove(
+                where: { $0.kind == .photoConflict && !current.contains($0.id) && $0.icloudID.map(plan.photosUnjudged.contains) != true },
+                into: &result
+            )
         }
         return result
     }
@@ -128,7 +140,8 @@ public protocol ReviewStoring: Sendable {
     func load() throws -> [ReviewItem]
     /// Brings the stored items in line with the plan's candidates: new ones are added, ones with the same id and a moved
     /// etag or fingerprint are refreshed, and stored items the plan no longer reports are removed, but only when
-    /// `plan.reviewIsComplete` (otherwise an absent item was not looked at, not resolved). Stored `newInGoogle` items
+    /// `plan.reviewIsComplete` (otherwise an absent item was not looked at, not resolved; photo items follow
+    /// `plan.photoReviewIsComplete`). Stored `newInGoogle` items
     /// for contacts in `ignoredGoogle` are removed regardless, and so are pinned conflicts in `plan.settledReviews`.
     @discardableResult
     func reconcile(with plan: SyncPlan, ignoredGoogle: Set<String>, at now: Date) throws -> ReviewReconciliation

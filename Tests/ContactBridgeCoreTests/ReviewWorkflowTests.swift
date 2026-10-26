@@ -505,6 +505,18 @@ struct ReviewWorkflowTests {
         try await rig.expectSettled()
     }
 
+    @Test("Restore: a profile-photo opt-out for the old contact does not carry over to the restored one")
+    func restoreDropsOptOut() async throws {
+        let rig = try await ReviewRig.linked()
+        defer { rig.cleanUp() }
+        try rig.base.stateStore.update { $0.profilePhotoOptOut = ["I1", "I2"] }
+        try await deleteInICloudEditInGoogle(rig)
+        let detail = try await rig.detail("deletedInICloudEditedInGoogle|I1|people/c1")
+
+        #expect(try await rig.workflows.restoreToICloud(detail) == .done(warnings: []))
+        #expect(try rig.state.profilePhotoOptOut == ["I2"])
+    }
+
     @Test("Deleted here, edited in Google: if Google changed again since it was shown, nothing is deleted")
     func keepDeletedStale() async throws {
         let rig = try await ReviewRig.linked()

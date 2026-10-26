@@ -744,7 +744,7 @@ final class SyncModel {
             environment: { [weak app] in await app?.syncEnvironment() ?? .notReady("Contact Bridge is closing.") },
             links: deps.links, state: deps.syncState, reviews: deps.reviews, journal: deps.syncJournal, history: deps.syncHistory,
             backups: app.backupCoordinator, gate: deps.writeGate, contactsAppRunning: deps.contactsAppRunning,
-            acquireLock: deps.acquireSyncLock
+            acquireLock: deps.acquireSyncLock, photos: deps.photoSupport
         )
     }
 

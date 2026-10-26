@@ -485,6 +485,8 @@ public struct ReviewWorkflows: Sendable {
             try state.update { state in
                 state.baselines[id] = nil
                 state.baselines[newID] = baseline
+                // A restored contact is a new one: an opt-out for the old id does not carry over.
+                state.profilePhotoOptOut.remove(id)
             }
             try clear(detail.item)
             try await advanceICloudToken(from: tokenBefore)
@@ -747,15 +749,10 @@ public struct ReviewWorkflows: Sendable {
         try state.update { $0.baselines[icloudID] = nil }
     }
 
-    /// Moves the stored iCloud change token past this app's own write, so the sync does not read it as an edit. Only when
-    /// nothing else moved the token since it was stored and no conflict is open (an open one needs every scan to read the
-    /// whole book); otherwise it stays, and the next scan reads everything.
+    /// Moves the stored iCloud change token past this app's own write, so the sync does not read it as an edit (see
+    /// `ICloudTokenAdvance`).
     private func advanceICloudToken(from before: Data?) async throws {
-        guard let before, try state.load().icloudChangeToken == before,
-              try !reviews.load().contains(where: { Self.iCloudSideKinds.contains($0.kind) })
-        else { return }
-        let after = try await store.changeToken()
-        try state.update { $0.icloudChangeToken = after }
+        try await ICloudTokenAdvance.advance(store: store, state: state, reviews: reviews, from: before)
     }
 }
 
