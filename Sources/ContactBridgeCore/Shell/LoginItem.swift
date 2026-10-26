@@ -7,7 +7,8 @@ public enum LoginItemStatus: Sendable, Hashable {
     case enabled
     /// Registered, but the user has to allow it in System Settings > General > Login Items.
     case requiresApproval
-    /// macOS cannot find the app to register (not run from an installed app bundle).
+    /// macOS has no record of the app. Also what it reports for an app that was never registered, so it only means trouble
+    /// once a register leaves it this way.
     case notFound
 }
 
@@ -59,6 +60,8 @@ public final class LoginItemSettings {
     public private(set) var status: LoginItemStatus
     /// The last register or unregister failure, cleared by the next successful change or `refresh()`.
     public private(set) var errorMessage: String?
+    /// A register went through but macOS still could not find the app. Cleared once the status is anything else.
+    private var registerLeftNotFound = false
 
     @ObservationIgnored private let service: any LoginItemControlling
 
@@ -77,9 +80,9 @@ public final class LoginItemSettings {
         switch status {
         case .requiresApproval:
             return "macOS needs your OK first: turn on Contact Bridge in System Settings > General > Login Items."
-        case .notFound:
+        case .notFound where registerLeftNotFound:
             return "macOS can't find Contact Bridge to register it. Open it from the Applications folder and try again."
-        case .notRegistered, .enabled:
+        case .notFound, .notRegistered, .enabled:
             return nil
         }
     }
@@ -88,14 +91,19 @@ public final class LoginItemSettings {
     public func refresh() {
         status = service.status
         errorMessage = nil
+        if status != .notFound { registerLeftNotFound = false }
     }
 
     /// Registers or unregisters. A switch that is already in the requested state is left alone.
     public func setEnabled(_ enabled: Bool) {
         errorMessage = nil
+        var registered = false
         do {
             if enabled {
-                if !isOn { try service.register() }
+                if !isOn {
+                    try service.register()
+                    registered = true
+                }
             } else if isOn {
                 try service.unregister()
             }
@@ -103,6 +111,7 @@ public final class LoginItemSettings {
             errorMessage = "Could not \(enabled ? "turn on" : "turn off") open at login: \(error.localizedDescription)"
         }
         status = service.status
+        if registered { registerLeftNotFound = status == .notFound } else if status != .notFound { registerLeftNotFound = false }
     }
 
     public func openSystemSettings() { service.openSystemSettings() }

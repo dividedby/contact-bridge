@@ -86,10 +86,42 @@ struct LoginItemTests {
         #expect(settings.isOn && settings.explanation == "Could not turn off open at login: denied")
     }
 
-    @Test("A missing app is explained")
-    func notFound() {
-        let settings = LoginItemSettings(service: InMemoryLoginItem(status: .notFound))
+    @Test("Not found before any attempt is just off: macOS reports it for an app never registered")
+    func notFoundBeforeRegistering() {
+        let service = InMemoryLoginItem(status: .notFound)
+        let settings = LoginItemSettings(service: service)
+        #expect(!settings.isOn && settings.explanation == nil)
+        settings.refresh()
+        #expect(settings.explanation == nil)
+
+        settings.setEnabled(true)
+        #expect(settings.isOn && settings.explanation == nil && service.registerCalls == 1)
+    }
+
+    @Test("A register that leaves it not found is explained, until it is found")
+    func notFoundAfterRegistering() {
+        let service = InMemoryLoginItem(status: .notFound)
+        service.statusAfterRegister = .notFound
+        let settings = LoginItemSettings(service: service)
+        settings.setEnabled(true)
         #expect(!settings.isOn && settings.explanation?.contains("Applications") == true)
+        settings.refresh()
+        #expect(settings.explanation?.contains("Applications") == true)
+
+        service.status = .notRegistered
+        settings.refresh()
+        #expect(settings.explanation == nil)
+    }
+
+    @Test("A register that throws from not found shows the error, not the not-found sentence")
+    func notFoundRegisterThrows() {
+        let service = InMemoryLoginItem(status: .notFound)
+        service.registerError = Failure()
+        let settings = LoginItemSettings(service: service)
+        settings.setEnabled(true)
+        #expect(!settings.isOn && settings.explanation == "Could not turn on open at login: denied")
+        settings.refresh()
+        #expect(settings.explanation == nil)
     }
 
     @Test("Start in menu bar is on by default and remembered")
