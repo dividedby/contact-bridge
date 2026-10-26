@@ -1,12 +1,14 @@
 import Foundation
 
-/// Which photo errors are worth trying again. A refused address, a picture that cannot be decoded or is too large, or a 4xx
-/// answer from Google's servers will fail the same way next time; a dropped connection, a 5xx or a timeout may not.
+/// Which photo errors are worth trying again. A refused address, a picture that cannot be decoded or is too large, a 4xx
+/// answer from Google's servers, or a contact whose picture file macOS lost will fail the same way next time; a dropped
+/// connection, a 5xx or a timeout may not.
 /// (Rate limits and sign-in problems are neither: they stop the whole run, see `SyncExecutor.haltReason`.)
 enum PhotoErrors {
     static func isPermanent(_ error: any Error) -> Bool {
         switch error {
         case is PhotoEncodingError: true
+        case ContactStoreError.photoNotSaved: true
         case let error as GooglePhotoError:
             switch error {
             case .notAllowed, .notAnImage, .tooLarge: true

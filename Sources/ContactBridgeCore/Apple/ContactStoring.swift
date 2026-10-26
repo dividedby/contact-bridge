@@ -18,6 +18,8 @@ public enum ContactStoreError: Error, Sendable, Equatable {
     case outsideSelectedContainer([String])
     /// This store has no photo access.
     case photosUnsupported
+    /// macOS Contacts refused to save the contact's photo: its database lost the contact's old picture file.
+    case photoNotSaved
 }
 
 /// What the store says about a contact's photo without reading the picture itself: whether there is one, and a hash of its

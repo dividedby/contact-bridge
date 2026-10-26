@@ -220,8 +220,8 @@ public final class CNContactStoreAdapter: ContactStoring, @unchecked Sendable {
             var signatures: [String: PhotoSignature] = [:]
             for chunk in wanted.chunked(into: Self.photoPredicateChunk) {
                 for contact in try self.fetch(predicate: CNContact.predicateForContacts(withIdentifiers: chunk), keys: Self.photoSignatureKeys) {
-                    signatures[contact.identifier] = PhotoSignature(
-                        hasPhoto: contact.imageDataAvailable, thumbnailHash: contact.thumbnailImageData.map(PhotoHash.sha256Hex)
+                    signatures[contact.identifier] = ICloudPhotoRead.signature(
+                        imageDataAvailable: contact.imageDataAvailable, thumbnail: contact.thumbnailImageData
                     )
                 }
             }
@@ -233,9 +233,12 @@ public final class CNContactStoreAdapter: ContactStoring, @unchecked Sendable {
         try await requireAccess()
         return try await onQueue {
             let container = try self.resolveContainer()
-            let contacts = try self.fetchContacts(ids: [id], keys: [CNContactIdentifierKey, CNContactImageDataAvailableKey, CNContactImageDataKey].map { $0 as NSString })
+            let keys = [CNContactIdentifierKey, CNContactImageDataAvailableKey, CNContactImageDataKey, CNContactThumbnailImageDataKey]
+            let contacts = try self.fetchContacts(ids: [id], keys: keys.map { $0 as NSString })
             try self.requireInContainer(contacts, container)
-            return contacts[0].imageDataAvailable ? contacts[0].imageData : nil
+            return ICloudPhotoRead.picture(
+                imageDataAvailable: contacts[0].imageDataAvailable, image: contacts[0].imageData, thumbnail: contacts[0].thumbnailImageData
+            )
         }
     }
 
@@ -249,7 +252,11 @@ public final class CNContactStoreAdapter: ContactStoring, @unchecked Sendable {
             working.imageData = data
             let request = CNSaveRequest()
             request.update(working)
-            try self.store.execute(request)
+            do {
+                try self.store.execute(request)
+            } catch let error as NSError where error.domain == NSCocoaErrorDomain && error.code == ICloudPhotoRead.lostPictureFileCode {
+                throw ContactStoreError.photoNotSaved
+            }
         }
     }
 
@@ -319,5 +326,22 @@ public final class CNContactStoreAdapter: ContactStoring, @unchecked Sendable {
             if owners.first?.identifier != container.id { outside.append(contact.identifier) }
         }
         guard outside.isEmpty else { throw ContactStoreError.outsideSelectedContainer(outside) }
+    }
+}
+
+/// How a contact's photo reads through the Contacts framework. Once iCloud has synced a photo, macOS reports
+/// `imageDataAvailable` false and hands back only a centre-square `thumbnailImageData` (seen on macOS 27): that thumbnail
+/// is the photo as far as anything here is concerned.
+enum ICloudPhotoRead {
+    /// The undocumented Core Data error a save fails with when the contacts database lost the contact's old picture file.
+    static let lostPictureFileCode = 134092
+
+    static func signature(imageDataAvailable: Bool, thumbnail: Data?) -> PhotoSignature {
+        PhotoSignature(hasPhoto: imageDataAvailable || thumbnail != nil, thumbnailHash: thumbnail.map(PhotoHash.sha256Hex))
+    }
+
+    /// The full picture when there is one, otherwise the thumbnail.
+    static func picture(imageDataAvailable: Bool, image: Data?, thumbnail: Data?) -> Data? {
+        (imageDataAvailable ? image : nil) ?? thumbnail
     }
 }

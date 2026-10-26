@@ -116,6 +116,13 @@ enum PhotoTestImages {
         return CGImageDestinationFinalize(destination) ? data as Data : nil
     }
 
+    /// The centre square of `image`, scaled to `side`: what macOS keeps of a contact photo once iCloud has synced it.
+    static func centreSquare(_ image: CGImage, side: Int = 1024) -> CGImage {
+        let edge = min(image.width, image.height)
+        let square = image.cropping(to: CGRect(x: (image.width - edge) / 2, y: (image.height - edge) / 2, width: edge, height: edge))!
+        return scaled(square, width: side, height: side)
+    }
+
     static func jpeg(_ image: CGImage, quality: Double = 0.9, orientation: Int? = nil) -> Data {
         encode(image, as: .jpeg, quality: quality, orientation: orientation)!
     }

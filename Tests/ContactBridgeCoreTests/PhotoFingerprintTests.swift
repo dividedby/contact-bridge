@@ -121,4 +121,37 @@ struct PhotoFingerprintTests {
         let real = try fingerprint(PhotoTestImages.jpeg(PhotoTestImages.scene(seed: 9)))
         #expect(try JSONDecoder().decode(PhotoFingerprint.self, from: JSONEncoder().encode(real)) == real)
     }
+
+    @Test("A wide photo matches its centre-square thumbnail either way round; another wide photo's thumbnail does not")
+    func centreSquareThumbnail() throws {
+        for seed in UInt64(1)...40 {
+            let (width, height) = [(768, 400), (400, 768), (1024, 768)][Int(seed % 3)]
+            let wide = PhotoTestImages.scene(seed: seed, width: width, height: height)
+            let original = try fingerprint(PhotoTestImages.jpeg(wide))
+            let thumbnail = try fingerprint(PhotoTestImages.jpeg(PhotoTestImages.centreSquare(wide), quality: 0.7))
+            #expect(original.centreHash != nil && thumbnail.centreHash == nil, "only a picture that is not square has a centre")
+            #expect(original.isSimilar(to: thumbnail) && thumbnail.isSimilar(to: original))
+            let other = try fingerprint(PhotoTestImages.jpeg(PhotoTestImages.centreSquare(PhotoTestImages.scene(seed: seed + 50, width: width, height: height))))
+            #expect(!original.isSimilar(to: other))
+        }
+    }
+
+    @Test("A fingerprint stored before centres were added still decodes, and compares whole pictures as before")
+    func storedWithoutCentre() throws {
+        let stored = Data(#"{"hash":42,"colors":"AAAA"}"#.utf8)
+        let decoded = try JSONDecoder().decode(PhotoFingerprint.self, from: stored)
+        #expect(decoded.centreHash == nil && decoded.centreColors == nil)
+        #expect(decoded.isSimilar(to: PhotoFingerprint(hash: 42, colors: Data([0, 0, 0]))))
+    }
+
+    @Test("Contacts' readings: a thumbnail alone is a photo, and is the picture read when the full one is not available")
+    func thumbnailOnlyReads() {
+        let thumb = Data([1, 2, 3]), full = Data([4, 5])
+        #expect(ICloudPhotoRead.signature(imageDataAvailable: false, thumbnail: thumb).hasPhoto)
+        #expect(ICloudPhotoRead.signature(imageDataAvailable: true, thumbnail: nil).hasPhoto)
+        #expect(!ICloudPhotoRead.signature(imageDataAvailable: false, thumbnail: nil).hasPhoto)
+        #expect(ICloudPhotoRead.picture(imageDataAvailable: false, image: nil, thumbnail: thumb) == thumb)
+        #expect(ICloudPhotoRead.picture(imageDataAvailable: true, image: full, thumbnail: thumb) == full)
+        #expect(ICloudPhotoRead.picture(imageDataAvailable: false, image: nil, thumbnail: nil) == nil)
+    }
 }

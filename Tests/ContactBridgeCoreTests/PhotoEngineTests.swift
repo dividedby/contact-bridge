@@ -236,4 +236,101 @@ struct PhotoEngineTests {
         ])
         #expect(PhotoRunReport().putOffReasons.isEmpty)
     }
+
+    @Test("A wide Google photo copied to iCloud and then kept only as a centre-square thumbnail is not a change or a removal")
+    func centreSquareThumbnailIsTheSamePhoto() async throws {
+        let rig = try await setup(count: 2)
+        defer { rig.photos.cleanUp() }
+        let wide = PhotoTestImages.scene(seed: 9, width: 768, height: 400)
+        try await rig.photos.setGooglePhoto(2, PhotoTestImages.jpeg(wide))
+        _ = await rig.engine.startAndRun()
+        #expect(await rig.engine.snapshot.lastRun?.photosToICloud == 1)
+
+        // What macOS reports once iCloud has synced the photo: a re-encoded centre square, and a moved change token.
+        try await rig.photos.setICloudPhoto("I2", PhotoTestImages.jpeg(PhotoTestImages.centreSquare(wide), quality: 0.7))
+        let writes = await rig.photos.google.photoWrites.count
+        for _ in 0..<2 { await rig.engine.engine.syncNow() }
+        let run = try #require(await rig.engine.snapshot.lastRun)
+        #expect(run.photosToGoogle == 0 && run.photosToICloud == 0 && run.leftForNextRun == 0)
+        #expect(await rig.photos.google.photoWrites.count == writes)
+        #expect(try rig.photos.base.reviews.load().filter { $0.kind == .photoConflict }.isEmpty)
+        await rig.engine.engine.stop()
+    }
+
+    @Test("A photo save iCloud does not keep is not counted as copied, says why, and is tried again")
+    func photoSaveNotKept() async throws {
+        let rig = try await setup(count: 2)
+        defer { rig.photos.cleanUp() }
+        try await rig.photos.setGooglePhoto(2, two)
+        rig.photos.store.setDropsPhotoWrites(true)
+        _ = await rig.engine.startAndRun()
+        let first = try #require(await rig.engine.snapshot.lastRun)
+        #expect(first.photosToICloud == 0 && first.leftForNextRun == 1)
+        #expect(first.warnings.contains { $0.contains("iCloud did not keep the photo") })
+        #expect(try rig.photos.photoBaseline("I2")?.icloud == nil, "nothing was recorded as copied")
+
+        rig.photos.store.setDropsPhotoWrites(false)
+        await rig.engine.engine.syncNow()
+        #expect(await rig.engine.snapshot.lastRun?.photosToICloud == 1)
+        #expect(try await rig.photos.icloudPhoto("I2") != nil)
+        await rig.engine.engine.stop()
+    }
+
+    @Test("The one-time repair looks again at pairs whose iCloud contact has a photo and keeps real removals as questions")
+    func repairOfOlderPhotoRecords() async throws {
+        let rig = try await setup(count: 3)
+        defer { rig.photos.cleanUp() }
+        // A copy made before thumbnails were read: iCloud has the photo, but the stored record and question say it was removed.
+        try await rig.photos.setICloudPhoto("I1", one)
+        try await rig.photos.setGooglePhoto(1, one)
+        try await rig.photos.setGooglePhoto(2, two)
+        let fingerprints = ImageIOPhotoFingerprinter()
+        let stale = PhotoBaseline(icloud: fingerprints.fingerprint(of: one), google: fingerprints.fingerprint(of: one), syncedAt: Date())
+        let removed = PhotoBaseline(icloud: fingerprints.fingerprint(of: two), google: fingerprints.fingerprint(of: two), syncedAt: Date())
+        try rig.photos.base.stateStore.update {
+            $0.baselines["I1"]?.photo = stale
+            $0.baselines["I2"]?.photo = removed
+            $0.photoRepairVersion = 0
+        }
+        try rig.photos.base.reviews.add([
+            ReviewCandidate(kind: .photoConflict, icloudID: "I1", resourceName: "people/c1", fields: [], photoStamp: "s1", photoReason: .removedInICloud),
+            ReviewCandidate(kind: .photoConflict, icloudID: "I2", resourceName: "people/c2", fields: [], photoStamp: "s2", photoReason: .removedInICloud),
+        ], at: Date())
+
+        let writes = await rig.photos.google.photoWrites.count
+        let fresh = try await PhotoRepair.run(store: rig.photos.store, state: rig.photos.base.stateStore, reviews: rig.photos.base.reviews)
+        #expect(fresh == ["I1"])
+        #expect(try rig.photos.photoBaseline("I1") == nil && rig.photos.photoBaseline("I2") == removed)
+        #expect(try rig.photos.base.reviews.load().compactMap(\.icloudID) == ["I2"], "a photo really gone from iCloud is still asked about")
+        #expect(try rig.photos.state.photoRepairVersion == PhotoRepair.currentVersion)
+
+        // Looked at afresh, I1's two sides hold the same picture: recorded, nothing written, nothing asked.
+        _ = await rig.engine.startAndRun()
+        #expect(try rig.photos.photoBaseline("I1")?.icloud != nil)
+        #expect(await rig.photos.google.photoWrites.count == writes)
+        #expect(try rig.photos.base.reviews.load().filter { $0.icloudID == "I1" }.isEmpty)
+        await rig.engine.engine.stop()
+    }
+
+    @Test("A sync run does the repair first when the stored records are older, and not while sync is paused")
+    func repairRunsBeforePlanning() async throws {
+        let rig = try await setup(count: 2)
+        defer { rig.photos.cleanUp() }
+        try await rig.photos.setICloudPhoto("I1", one)
+        try await rig.photos.setGooglePhoto(1, one)
+        try rig.photos.base.stateStore.update {
+            $0.baselines["I1"]?.photo = PhotoBaseline(icloud: ImageIOPhotoFingerprinter().fingerprint(of: two), syncedAt: Date())
+            $0.photoRepairVersion = 0
+            $0.pause = .user
+        }
+        let writes = await rig.photos.google.photoWrites.count
+        await rig.engine.start()
+        await rig.engine.engine.syncNow()
+        #expect(try rig.photos.state.photoRepairVersion == 0, "paused: nothing is touched")
+
+        await rig.engine.engine.resume()
+        #expect(try rig.photos.state.photoRepairVersion == PhotoRepair.currentVersion)
+        #expect(await rig.photos.google.photoWrites.count == writes, "the stale record did not make I1 look changed")
+        await rig.engine.engine.stop()
+    }
 }

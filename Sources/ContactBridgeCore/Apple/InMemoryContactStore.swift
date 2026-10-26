@@ -31,6 +31,8 @@ public final class InMemoryContactStore: ContactStoring {
         var log: [StoreMutation] = []
         var signatureReads = 0
         var dataReads = 0
+        /// Photo saves report success but leave no photo, like a save iCloud did not keep.
+        var dropsPhotoWrites = false
         var subscribers: [UUID: AsyncStream<Void>.Continuation] = [:]
     }
 
@@ -56,6 +58,9 @@ public final class InMemoryContactStore: ContactStoring {
 
     /// Simulates the user switching to another account's container.
     public func setContainerID(_ id: String?) { state.withLock { $0.containerID = id } }
+
+    /// Simulates photo saves that report success but do not stay.
+    public func setDropsPhotoWrites(_ drops: Bool) { state.withLock { $0.dropsPhotoWrites = drops } }
 
     public func authorizationStatus() async -> ContactAuthorization {
         state.withLock { $0.authorization }
@@ -186,7 +191,7 @@ public final class InMemoryContactStore: ContactStoring {
         try state.withLock { state in
             try Self.requireAccess(state)
             guard state.records.contains(where: { $0.sourceIdentifier == id }) else { throw ContactStoreError.notFound([id]) }
-            state.photos[id] = data
+            state.photos[id] = state.dropsPhotoWrites ? nil : data
             state.version += 1
             state.log.append(StoreMutation(kind: .photo, ids: [id], receiptID: backup.id))
         }

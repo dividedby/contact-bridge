@@ -78,13 +78,16 @@ public struct SyncState: Sendable, Hashable, Codable {
     public var profilePhotoOptOut: Set<String>
     /// When Google was last listed in full for its photos; with profile photos on, a full listing is forced once a day.
     public var lastPhotoFullListingAt: Date?
+    /// The last `PhotoRepair` this state went through. Missing in older files, read as 0.
+    public var photoRepairVersion: Int
 
     public init(
         version: Int = SyncState.currentVersion, baselines: [String: SyncBaseline] = [:], googleSyncToken: String? = nil,
         fieldsVersion: String? = nil, icloudChangeToken: Data? = nil, icloudContainerID: String? = nil,
         lastNotesReadAt: Date? = nil, googleAccount: String? = nil, ignoredGoogle: Set<String> = [],
         keepSeparate: Set<String> = [], firstSyncApproved: Bool = false, pause: PauseReason? = nil, syncPhotos: Bool = true,
-        useGoogleProfilePhotos: Bool = false, profilePhotoOptOut: Set<String> = [], lastPhotoFullListingAt: Date? = nil
+        useGoogleProfilePhotos: Bool = false, profilePhotoOptOut: Set<String> = [], lastPhotoFullListingAt: Date? = nil,
+        photoRepairVersion: Int = PhotoRepair.currentVersion
     ) {
         self.version = version
         self.baselines = baselines
@@ -102,6 +105,7 @@ public struct SyncState: Sendable, Hashable, Codable {
         self.useGoogleProfilePhotos = useGoogleProfilePhotos
         self.profilePhotoOptOut = profilePhotoOptOut
         self.lastPhotoFullListingAt = lastPhotoFullListingAt
+        self.photoRepairVersion = photoRepairVersion
     }
 
     // Adding `keepSeparate` and the photo settings needs no version bump: a file without them decodes as before, with none
@@ -124,6 +128,7 @@ public struct SyncState: Sendable, Hashable, Codable {
         useGoogleProfilePhotos = try values.decodeIfPresent(Bool.self, forKey: .useGoogleProfilePhotos) ?? false
         profilePhotoOptOut = try values.decodeIfPresent(Set<String>.self, forKey: .profilePhotoOptOut) ?? []
         lastPhotoFullListingAt = try values.decodeIfPresent(Date.self, forKey: .lastPhotoFullListingAt)
+        photoRepairVersion = try values.decodeIfPresent(Int.self, forKey: .photoRepairVersion) ?? 0
     }
 
     /// Writes a whole baseline for `id` the way every field-sync rewrite does: the photo half of an existing baseline is

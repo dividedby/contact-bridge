@@ -487,6 +487,10 @@ public actor SyncEngine {
         if case .approve = options.mode { approvingNow = true } else { approvingNow = false }
         // `userPaused` too: a pause that could not be saved is not in `state`, but it still holds.
         if state.pause == .user || userPaused, state.firstSyncApproved || approvingNow { return .userPaused }
+        if photos != nil, state.syncPhotos, state.photoRepairVersion < PhotoRepair.currentVersion {
+            try await PhotoRepair.run(store: env.store, state: stateStore, reviews: reviewStore)
+            state = try stateStore.load()
+        }
         if approvingNow, env.accountEmail == nil {
             return .notReady("Couldn't confirm which Google account is signed in. Sign out in Setup, then sign in again and allow access to your email address, then start syncing.")
         }

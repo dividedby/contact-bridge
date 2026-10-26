@@ -17,6 +17,8 @@ extension ContactStoreError: LocalizedError {
             "\(ids.count) contact(s) are outside the selected contacts account and were left untouched."
         case .photosUnsupported:
             "Contact photos cannot be read or changed here."
+        case .photoNotSaved:
+            "macOS Contacts could not save this contact's photo (Cocoa error 134092: its database seems to have lost the contact's old picture file). Setting a photo on the contact in the Contacts app may repair it."
         }
     }
 }

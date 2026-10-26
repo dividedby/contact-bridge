@@ -385,10 +385,17 @@ public struct PhotoExecutor: Sendable {
             if progress.icloudTokenBefore == nil { progress.icloudTokenBefore = .some(try await store.changeToken()) }
             guard let receipt = progress.icloudReceipt else { return }
             try await store.setPhoto(id: op.icloudID, data: bytes, backup: receipt)
+            // A save that macOS reports as done is read back before it counts: a photo that did not stay is tried again.
+            let after = try await store.photoSignatures(ids: [op.icloudID])[op.icloudID]
+            guard (after?.hasPhoto ?? false) == (bytes != nil) else {
+                let message = bytes == nil ? "iCloud still shows the photo after removing it" : "iCloud did not keep the photo"
+                progress.skip(op, .failed(message))
+                return
+            }
             if bytes == nil { progress.report.removedFromICloud += 1 } else { progress.report.copiedToICloud += 1 }
 
             var baseline = op.baseline
-            baseline.icloudHint = try await store.photoSignatures(ids: [op.icloudID])[op.icloudID]?.thumbnailHash
+            baseline.icloudHint = after?.thumbnailHash
             finished = baseline
         } catch is CancellationError {
             throw CancellationError()

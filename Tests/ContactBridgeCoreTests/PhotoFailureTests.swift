@@ -159,6 +159,7 @@ struct PhotoFailureTests {
         #expect(PhotoErrors.isPermanent(GoogleAPIError.other(status: 400, message: "")))
         #expect(!PhotoErrors.isPermanent(GoogleAPIError.other(status: 409, message: "aborted")), "Google's ABORTED is a retry, not a refusal")
         #expect(!PhotoErrors.isPermanent(GoogleAPIError.other(status: 500, message: "")) && !PhotoErrors.isPermanent(URLError(.timedOut)))
+        #expect(PhotoErrors.isPermanent(ContactStoreError.photoNotSaved), "a contact whose picture file macOS lost fails every time")
     }
 
     @Test("Through the engine a permanent failure does not hold the tokens back, so nothing is re-read or retried every run")
