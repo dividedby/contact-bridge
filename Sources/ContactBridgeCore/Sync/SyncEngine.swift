@@ -234,6 +234,19 @@ public actor SyncEngine {
         }
         startTimer()
         if canRunAutomatically { request(delay: 0) }
+        // The list is otherwise filled only when a run completes, and a launch that stays paused never gets there.
+        Task { await publishStoredReviewsAtLaunch() }
+    }
+
+    private func publishStoredReviewsAtLaunch() async {
+        guard case .ready(let env) = await environment(), snapshot.lastRunAt == nil else { return }
+        try? await publishStoredReviews(google: env.google)
+    }
+
+    private func publishStoredReviews(google: any GoogleContactsClient) async throws {
+        let state = try stateStore.load()
+        let reviews = await summaries(of: try reviewStore.load(), baselines: state.baselines, showPhotos: state.syncPhotos, google: google)
+        publish { $0.reviewItems = reviews }
     }
 
     /// Stops the timer and any run, and lets go of the instance lock.
@@ -542,7 +555,10 @@ public actor SyncEngine {
             approved = true
             publish { $0.firstSyncApproved = true }
         }
-        if let pause = plan.pause { return .paused(pause, details: Self.forgottenItems(plan.guardedForgottenLinks)) }
+        if let pause = plan.pause {
+            try await publishStoredReviews(google: env.google)
+            return .paused(pause, details: Self.forgottenItems(plan.guardedForgottenLinks))
+        }
 
         try reviewStore.reconcile(with: plan, ignoredGoogle: state.ignoredGoogle, at: at)
         setPhase(.applying)
