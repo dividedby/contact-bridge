@@ -16,8 +16,7 @@ struct AppDependencies {
     var reviews: any ReviewStoring
     var syncJournal: any SyncJournalStoring
     var syncHistory: any SyncHistoryStoring
-    /// What photo sync downloads Google photos with and keeps replaced ones in. Nil where photos do not sync (demo mode, until it
-    /// has photos of its own).
+    /// What photo sync downloads Google photos with and keeps replaced ones in. Nil where photos do not sync.
     var photoSupport: SyncPhotoSupport?
     /// Held by sync runs and by Import, Merge and Clean up, so they never interleave.
     var writeGate: WriteGate
@@ -112,7 +111,8 @@ struct AppDependencies {
             reviews: demo.reviews,
             syncJournal: demo.journal,
             syncHistory: demo.history,
-            photoSupport: nil,
+            // Placeholder portraits served from the fake Google account; no pause between writes, since nothing is real.
+            photoSupport: SyncPhotoSupport(fetcher: FakeGooglePhotoFetcher(client: demo.google), history: demo.photoHistory, sleep: { _ in }),
             writeGate: WriteGate(),
             acquireSyncLock: nil,
             contactsAppRunning: { false },

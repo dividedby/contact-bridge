@@ -195,6 +195,8 @@ public struct SyncRunSummary: Sendable, Hashable {
         linksAdded + created + updated + deleted + alreadyGone + recoveredWrites + photosToGoogle + photosToICloud + photosRemoved > 0
     }
 
+    private static func photos(_ count: Int) -> String { "\(count) photo\(count == 1 ? "" : "s")" }
+
     /// "Linked 3, created 2, updated 1." or "Nothing needed changing."
     public var text: String {
         var parts: [String] = []
@@ -204,8 +206,13 @@ public struct SyncRunSummary: Sendable, Hashable {
         if deleted > 0 { parts.append("deleted \(deleted)") }
         if alreadyGone > 0 { parts.append("\(alreadyGone) already gone from Google") }
         if recoveredWrites > 0 { parts.append("confirmed \(recoveredWrites) from an earlier run") }
-        if photosToGoogle > 0 { parts.append("sent \(photosToGoogle) photo\(photosToGoogle == 1 ? "" : "s") to Google") }
-        if photosToICloud > 0 { parts.append("copied \(photosToICloud) photo\(photosToICloud == 1 ? "" : "s") to iCloud") }
+        if photosToGoogle > 0 && photosToICloud > 0 {
+            parts.append("copied \(Self.photos(photosToGoogle)) to Google, \(photosToICloud) to iCloud")
+        } else if photosToGoogle > 0 {
+            parts.append("copied \(Self.photos(photosToGoogle)) to Google")
+        } else if photosToICloud > 0 {
+            parts.append("copied \(Self.photos(photosToICloud)) to iCloud")
+        }
         if photosRemoved > 0 { parts.append("removed \(photosRemoved) photo\(photosRemoved == 1 ? "" : "s")") }
         guard !parts.isEmpty else { return "Nothing needed changing." }
         let sentence = parts.joined(separator: ", ")
@@ -221,6 +228,8 @@ public struct SyncReviewSummary: Sendable, Hashable, Identifiable {
     /// For a possible link, the Google contact it might be.
     public var detail: String?
     public var fields: [SyncField]
+    /// For a photo question: what kind it is.
+    public var photoReason: PhotoConflictReason?
     /// A conflict found when the two contacts were first linked ("Keep iCloud for all" applies to these).
     public var isFirstLink = false
 }

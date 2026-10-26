@@ -302,10 +302,11 @@ struct PhotoBaselinePreservationTests {
 
     // MARK: demo
 
-    @Test("Demo data seeds baselines without a photo baseline: the demo's photos are looked at on the first run")
+    @Test("Demo data seeds baselines without a photo baseline, so the demo's photos are looked at on the first run; the one case that needs history has it")
     func demoBaselines() throws {
         let demo = DemoData.make()
         let baselines = try demo.syncState.load().baselines
-        #expect(!baselines.isEmpty && baselines.values.allSatisfy { $0.photo == nil })
+        #expect(!baselines.isEmpty && baselines.values.allSatisfy { $0.photo == nil || $0.icloud.givenName == "Edsger" })
+        #expect(baselines.values.first { $0.icloud.givenName == "Edsger" }?.photo?.pendingRemoval?.side == .icloud)
     }
 }

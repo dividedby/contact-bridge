@@ -4,7 +4,9 @@ import Foundation
 /// screen (clear duplicates, a household phone, a three-way cluster, conflicting fields, safe and tick-by-hand groups for bulk merge, Google-only contacts including a business and a text-message sender, other
 /// contacts, a possible match, notes), for Clean up (text-message senders, nameless and empty contacts, imported contacts) and for the
 /// Sync review list (after Start syncing: Leo edited in Google, Mia deleted in Google, David edited on both sides, Priya and others
-/// new in Google, Janet a possible match for the Carters, Ann Lee a conflict from linking two contacts for the first time).
+/// new in Google, Janet a possible match for the Carters, Ann Lee a conflict from linking two contacts for the first time) and for
+/// photo sync, one linked contact per case (Grace's photo goes to Google, Alan's to iCloud, Ada's two photos differ, Edsger's was
+/// removed in iCloud, Margaret has only a Google profile photo, which the demo's switch for those lets through).
 public struct DemoEnvironment: Sendable {
     public let store: InMemoryContactStore
     public let google: FakeGoogleClient
@@ -16,6 +18,8 @@ public struct DemoEnvironment: Sendable {
     public let reviews: InMemoryReviewStore
     public let journal: InMemorySyncJournalStore
     public let history: InMemorySyncHistoryStore
+    /// Where photo sync keeps the Google photos it replaces or deletes.
+    public let photoHistory: InMemoryPhotoHistoryStore
     public let containers: [ContactContainer]
     public let accountEmail: String
 }
@@ -80,6 +84,12 @@ public enum DemoData {
             // Created by a Contact Bridge import: linked to their Google contact below.
             icloud("Leo", "Fischer", phones: [("mobile", "415-555-0401"), ("home", "415-555-0402")], emails: ["leo.fischer@example.com"]),
             icloud("Mia", "Chen", emails: ["mia.chen@example.com"]),
+            // Photo sync: linked contacts that have synced before, one for each case (see `photoCases` below).
+            icloud("Grace", "Hopper", emails: ["grace.hopper@example.com"]),
+            icloud("Alan", "Turing", emails: ["alan.turing@example.com"]),
+            icloud("Ada", "Lovelace", emails: ["ada.lovelace@example.com"]),
+            icloud("Edsger", "Dijkstra", emails: ["edsger.dijkstra@example.com"]),
+            icloud("Margaret", "Hamilton", emails: ["margaret.hamilton@example.com"]),
         ]
 
         func googlePerson(
@@ -128,6 +138,11 @@ public enum DemoData {
             leoNow, // imported earlier, edited in Google since
             googlePerson("", "", phones: ["415-555-0302"], emails: ["front.desk@lakesidedental.example"], org: "Lakeside Dental"), // new, a business
             googlePerson("", "", phones: ["48012"], org: "Parcel Express Alerts"), // new, a text-message sender
+            googlePerson("Grace", "Hopper", emails: ["grace.hopper@example.com"]),
+            googlePerson("Alan", "Turing", emails: ["alan.turing@example.com"]),
+            googlePerson("Ada", "Lovelace", emails: ["ada.lovelace@example.com"]),
+            googlePerson("Edsger", "Dijkstra", emails: ["edsger.dijkstra@example.com"]),
+            googlePerson("Margaret", "Hamilton", emails: ["margaret.hamilton@example.com"]),
         ].enumerated().map { index, person in
             var person = person
             person.resourceName = "people/c\(index + 1)"
@@ -148,7 +163,10 @@ public enum DemoData {
 
         // Past imports, so the Imported filter in Clean up shows something. In-memory, so adding cannot fail.
         let links = InMemoryLinkStore()
-        let imported = [("Mia", miaResource), ("Leo", "people/c6"), ("David", "people/c2")].compactMap { given, resource in
+        let imported = [
+            ("Mia", miaResource), ("Leo", "people/c6"), ("David", "people/c2"), ("Grace", "people/c9"), ("Alan", "people/c10"),
+            ("Ada", "people/c11"), ("Edsger", "people/c12"), ("Margaret", "people/c13"),
+        ].compactMap { given, resource in
             book.first { $0.givenName == given }.map { ImportedLink(icloudID: $0.sourceIdentifier, googleResourceName: resource) }
         }
         try? links.add(imported, at: Date(timeIntervalSince1970: 1_790_000_000))
@@ -178,21 +196,49 @@ public enum DemoData {
             record.organization = ""
             return record
         }
+        // Photo cases. The contacts agree in every field; only their photos differ.
+        //   Grace: a photo in iCloud only          -> copied to Google
+        //   Alan: a photo in Google only           -> copied to iCloud
+        //   Ada: a different photo on each side    -> a question
+        //   Edsger: the iCloud photo was removed   -> a question (the removal was already seen, ten minutes ago)
+        //   Margaret: only a Google profile photo  -> copied to iCloud, since the demo has profile photos on
+        let portraits = (0..<6).map { DemoPhotos.portrait($0) }
+        func record(_ given: String) -> ContactRecord { book.first { $0.givenName == given } ?? ContactRecord(id: "", source: .icloud, sourceIdentifier: "") }
+        func photoBaseline(_ given: String, google resource: String) -> (String, SyncBaseline) {
+            baseline(given.lowercased(), icloud: record(given), google: googleRecord(connections.first { $0.resourceName == resource } ?? GooglePerson(), resource))
+        }
+        let removedAt = Date().addingTimeInterval(-600)
+        var edsger = photoBaseline("Edsger", google: "people/c12")
+        if let seen = ImageIOPhotoFingerprinter().fingerprint(of: portraits[4]) {
+            edsger.1.photo = PhotoBaseline(
+                icloud: seen, google: seen, syncedAt: removedAt, pendingRemoval: PhotoBaseline.PendingRemoval(side: .icloud, firstSeenAt: removedAt)
+            )
+        }
         let baselines = Dictionary(uniqueKeysWithValues: [
             baseline("leo", icloud: iCloudThen("Leo"), google: googleRecord(leoThen, "people/c6")),
             baseline("david", icloud: iCloudThen("David"), google: googleRecord(davidThen, "people/c2")),
+            photoBaseline("Grace", google: "people/c9"),
+            photoBaseline("Alan", google: "people/c10"),
+            photoBaseline("Ada", google: "people/c11"),
+            edsger,
+            photoBaseline("Margaret", google: "people/c13"),
         ])
 
         return DemoEnvironment(
-            store: InMemoryContactStore(records: book),
-            google: FakeGoogleClient(people: connections, otherContacts: others),
+            store: InMemoryContactStore(records: book, photos: [record("Grace").sourceIdentifier: portraits[0], record("Ada").sourceIdentifier: portraits[2]]),
+            google: FakeGoogleClient(
+                people: connections, otherContacts: others,
+                contactPhotos: ["people/c10": portraits[1], "people/c11": portraits[3], "people/c12": portraits[4]],
+                profilePhotos: ["people/c13": portraits[5]]
+            ),
             notes: InMemoryNotesStore(notes: notes),
             links: links,
             dismissals: InMemoryDismissalStore(),
-            syncState: InMemorySyncStateStore(SyncState(baselines: baselines)),
+            syncState: InMemorySyncStateStore(SyncState(baselines: baselines, useGoogleProfilePhotos: true)),
             reviews: InMemoryReviewStore(),
             journal: InMemorySyncJournalStore(),
             history: InMemorySyncHistoryStore(),
+            photoHistory: InMemoryPhotoHistoryStore(),
             containers: [ContactContainer(id: "demo-icloud", name: "iCloud", kind: .cardDAV, isDefault: true)],
             accountEmail: "demo.user@example.com"
         )

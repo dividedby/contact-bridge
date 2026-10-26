@@ -511,7 +511,7 @@ public actor SyncEngine {
         }
         let at = clock.now()
         var observed = PhotoObservations.none
-        if let photos, planState.firstSyncApproved, planState.syncPhotos {
+        if let photos, planState.syncPhotos {
             let questioned = Set(try reviewStore.load().filter { $0.kind == .photoConflict }.compactMap(\.icloudID))
             observed = try await PhotoReconciler(store: env.store, google: env.google, fetcher: photos.fetcher, fingerprinter: photos.fingerprinter)
                 .observe(icloud: scan, feed: feed, state: planState, links: table, keepSeparate: planState.keepSeparate, questioned: questioned)
@@ -562,7 +562,9 @@ public actor SyncEngine {
         }
 
         let baselines = try stateStore.load().baselines
-        let reviews = await summaries(of: try reviewStore.load(), baselines: baselines, google: env.google)
+        let reviews = await summaries(
+            of: try reviewStore.load(), baselines: baselines, showPhotos: try stateStore.load().syncPhotos, google: env.google
+        )
         let unconfirmed = try journalStore.load().entries.filter { $0.kind == .create }.count
         return .completed(Completion(
             report: report, waitingForNotes: plan.waitingForNotes, unlinkedWaitingForFullListing: plan.unlinkedWaitingForFullListing,
@@ -723,18 +725,22 @@ public actor SyncEngine {
 
     private func summary(
         id: String, kind: ReviewKind, icloudID: String?, resourceName: String?, fields: [SyncField], pinned: Bool = false,
-        baselines: [String: SyncBaseline]
+        photoReason: PhotoConflictReason? = nil, baselines: [String: SyncBaseline]
     ) -> SyncReviewSummary {
         let mayBe = kind == .possibleLink ? resourceName.flatMap { googleNames[$0] } : nil
         return SyncReviewSummary(
             id: id, kind: kind, name: name(icloudID: icloudID, resourceName: resourceName, baselines: baselines), detail: mayBe,
-            fields: fields, isFirstLink: pinned
+            fields: fields, photoReason: photoReason, isFirstLink: pinned
         )
     }
 
     /// Stored review items as the screen lists them. Google contacts this run did not list are looked up by name, a few
     /// at a time.
-    private func summaries(of items: [ReviewItem], baselines: [String: SyncBaseline], google: any GoogleContactsClient) async -> [SyncReviewSummary] {
+    /// Photo questions are left out while photo sync is off: they stay stored, and come back when it is switched on.
+    private func summaries(
+        of stored: [ReviewItem], baselines: [String: SyncBaseline], showPhotos: Bool, google: any GoogleContactsClient
+    ) async -> [SyncReviewSummary] {
+        let items = showPhotos ? stored : stored.filter { $0.kind != .photoConflict }
         var lookups = 25
         for item in items {
             guard let resourceName = item.resourceName, googleNames[resourceName] == nil,
@@ -749,7 +755,7 @@ public actor SyncEngine {
         return items.map {
             summary(
                 id: $0.id, kind: $0.kind, icloudID: $0.icloudID, resourceName: $0.resourceName, fields: $0.fields, pinned: $0.pinned,
-                baselines: baselines
+                photoReason: $0.photoReason, baselines: baselines
             )
         }
     }
@@ -785,7 +791,10 @@ public actor SyncEngine {
                 SyncPreview.Item(id: $0.icloudID, name: name(icloudID: $0.icloudID, resourceName: $0.resourceName, baselines: baselines), detail: $0.kind.text)
             },
             reviews: plan.review.map {
-                summary(id: $0.id, kind: $0.kind, icloudID: $0.icloudID, resourceName: $0.resourceName, fields: $0.fields, baselines: baselines)
+                summary(
+                    id: $0.id, kind: $0.kind, icloudID: $0.icloudID, resourceName: $0.resourceName, fields: $0.fields,
+                    photoReason: $0.photoReason, baselines: baselines
+                )
             },
             forgottenLinks: Self.forgottenItems(plan.forgottenLinkInfo), waitingForNotes: plan.waitingForNotes,
             unlinkedWaitingForFullListing: plan.unlinkedWaitingForFullListing, notesUnavailable: plan.notesUnavailable,

@@ -30,7 +30,7 @@ struct PhotoEngineTests {
 
         let snapshot = await rig.engine.snapshot
         let run = try #require(snapshot.lastRun)
-        #expect(run.photosToGoogle == 1 && run.photosToICloud == 1 && run.text == "Sent 1 photo to Google, copied 1 photo to iCloud.")
+        #expect(run.photosToGoogle == 1 && run.photosToICloud == 1 && run.text == "Copied 1 photo to Google, 1 to iCloud.")
         let onGoogle = await rig.photos.googlePhoto(1)
         let onICloud = try await rig.photos.icloudPhoto("I2")
         #expect(onGoogle != nil && onICloud != nil)
@@ -120,6 +120,24 @@ struct PhotoEngineTests {
         let after = try #require(await rig.photos.base.taggedPeople(carol.sourceIdentifier).first)
         #expect(GooglePersonMapper.photos(of: after).contact != nil)
         #expect(await rig.engine.snapshot.lastRun?.photosToGoogle == 1)
+        await rig.engine.engine.stop()
+    }
+
+    @Test("The first-sync preview lists the photos it would copy, and approving still goes through with the same counts")
+    func previewShowsPhotos() async throws {
+        let rig = try await setup(count: 2)
+        defer { rig.photos.cleanUp() }
+        try rig.photos.base.stateStore.update { $0.firstSyncApproved = false }
+        try await rig.photos.setICloudPhoto("I1", one)
+        await rig.engine.start()
+        await rig.engine.engine.refreshPreview()
+
+        let preview = try #require(await rig.engine.snapshot.preview)
+        #expect(preview.photos.map(\.name) == ["First1 Last1"] && preview.counts.photo == 1 && !preview.isEmpty)
+        #expect(await rig.photos.googlePhoto(1) == nil, "a preview writes nothing")
+
+        #expect(await rig.engine.engine.approveFirstSync() == .started)
+        #expect(await rig.photos.googlePhoto(1) != nil)
         await rig.engine.engine.stop()
     }
 

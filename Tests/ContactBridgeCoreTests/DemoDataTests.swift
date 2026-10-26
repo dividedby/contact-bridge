@@ -118,7 +118,7 @@ struct DemoSyncTests {
         #expect(preview.reviews.allSatisfy { $0.name != "Unknown contact" })
         #expect(preview.links.contains { $0.name == "Ann Lee" } && preview.reviews.contains { $0.kind == .newInGoogle && $0.name == "Priya Patel" })
         let before = await demo.google.allPeople.count
-        #expect(try demo.syncState.load() == seeded && demo.links.load().links.count == 3, "the preview changed nothing")
+        #expect(try demo.syncState.load() == seeded && demo.links.load().links.count == 8, "the preview changed nothing")
 
         #expect(await engine.approveFirstSync() == .started)
         let after = await engine.current
@@ -150,9 +150,9 @@ struct DemoSyncTests {
         #expect(shown.confirmationSummary == first && shown.pauseDetails.isEmpty)
         await engine.confirmAndContinue()
         shown = await engine.current
-        #expect(shown.confirmationSummary?.contains("forget 6 of 9 links to contacts gone from both sides") == true)
+        #expect(shown.confirmationSummary?.contains("forget 6 of 14 links to contacts gone from both sides") == true)
         #expect(shown.pauseDetails.map(\.name) == ["Alan Cooper", "Beth Ward", "Chris Doyle", "Dina Moss", "Eli Park", "Fay Ross"])
-        #expect(try demo.links.load().links.count == 9, "nothing is forgotten until the user confirms")
+        #expect(try demo.links.load().links.count == 14, "nothing is forgotten until the user confirms")
 
         await engine.confirmAndContinue()
         shown = await engine.current

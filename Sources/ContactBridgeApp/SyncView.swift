@@ -95,6 +95,7 @@ private extension SyncPreview {
                         CountTile(title: "Update", count: counts.update, systemImage: "pencil.circle")
                         CountTile(title: "Delete", count: counts.delete, systemImage: "trash.circle")
                         CountTile(title: "Review", count: counts.review, systemImage: "questionmark.circle")
+                        CountTile(title: "Photos", count: counts.photo, systemImage: "photo")
                     }
 
                     if let pause {
@@ -124,6 +125,11 @@ private extension SyncPreview {
                         title: "Forget \(ContactText.count(forgottenLinks.count, "old link"))",
                         explanation: ForgottenLinks.explanation,
                         items: forgottenLinks
+                    )
+                    PreviewList(
+                        title: "Copy \(ContactText.count(photos.count, "photo"))",
+                        explanation: "Photos are copied both ways between iCloud and Google. A replaced Google photo is saved first, and nothing is removed without asking.",
+                        items: photos
                     )
                     ReviewListView(
                         title: "Review \(ContactText.count(reviews.count, "item"))",
@@ -252,7 +258,24 @@ extension ReviewKind {
         case .deletedInGoogle: "Deleted in Google"
         case .deletedInICloudEditedInGoogle: "Deleted here, edited in Google"
         case .possibleLink: "Possible match"
-        case .photoConflict: "Photo differs"
+        case .photoConflict: PhotoConflictReason.firstSightDiffers.listTitle
+        }
+    }
+
+    /// The title of a row or header: photo questions say what happened to the photo.
+    func title(photoReason: PhotoConflictReason?) -> String {
+        if self == .photoConflict, let photoReason { photoReason.listTitle } else { title }
+    }
+}
+
+extension PhotoConflictReason {
+    var listTitle: String {
+        switch self {
+        case .bothChanged, .firstSightDiffers: "Photo differs"
+        case .removedInICloud: "Photo removed in iCloud"
+        case .removedInGoogle: "Photo removed in Google"
+        case .removedOneChangedOther: "Photo removed on one side"
+        case .profileRemovedInICloud: "Profile photo removed"
         }
     }
 }
@@ -263,7 +286,7 @@ struct ReviewRow: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(item.kind.title)
+            Text(item.kind.title(photoReason: item.photoReason))
                 .font(.caption.weight(.medium))
                 .padding(.horizontal, 8).padding(.vertical, 2)
                 .background(Color.orange.opacity(0.2), in: Capsule())
@@ -355,6 +378,10 @@ private struct SyncStatusView: View {
                     Label("Waiting for your OK", systemImage: "hand.raised.fill").font(.headline).foregroundStyle(.orange)
                     Text(summary).fixedSize(horizontal: false, vertical: true)
                     PreviewList(title: "Contacts whose links would be forgotten", explanation: ForgottenLinks.explanation, items: snapshot.pauseDetails)
+                    if summary.contains("contact photos") {
+                        Text("Photos are copied between iCloud and Google. A Google photo that is replaced or removed is saved to the photo history first (kept for 30 days), and an iCloud photo change takes a backup first.")
+                            .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
                     Text("Nothing has been changed. Confirm if this is what you expect; otherwise keep syncing paused and look at your contacts first.")
                         .font(.caption).foregroundStyle(.secondary)
                     HStack {
@@ -373,6 +400,7 @@ private struct SyncStatusView: View {
         }
         .formStyle(.grouped)
         .sheet(isPresented: $review.showingBulk) { KeepICloudSheet(model: review) }
+        .sheet(item: $review.photoBulkSide) { _ in PhotoBulkSheet(model: review) }
         .sheet(isPresented: $review.showingIgnored) { IgnoredSheet(model: review) }
     }
 
@@ -381,6 +409,7 @@ private struct SyncStatusView: View {
     @ViewBuilder private func reviewSection(_ snapshot: SyncSnapshot) -> some View {
         let items = review.items
         let firstLink = review.firstLinkItems
+        let photos = review.photoItems
         Section("Needs your review") {
             if let message = review.resultMessage {
                 Label(message, systemImage: "checkmark.circle.fill").foregroundStyle(.green).fixedSize(horizontal: false, vertical: true)
@@ -407,6 +436,14 @@ private struct SyncStatusView: View {
                 if firstLink.count > 1 {
                     Button("Keep iCloud for all \(firstLink.count) first-link conflicts…") { review.startBulk() }
                         .help("Two contacts that were linked for the first time disagree. Keep iCloud's values, send them to Google, and keep what only Google has.")
+                }
+                if photos.count > 1 {
+                    HStack {
+                        Button("Keep iCloud photos for all \(photos.count)…") { review.startPhotoBulk(.icloud) }
+                            .help("For every photo question, iCloud's side wins. A photo iCloud lacks is removed from Google.")
+                        Button("Keep Google photos for all \(photos.count)…") { review.startPhotoBulk(.google) }
+                            .help("For every photo question, Google's side wins. A photo Google lacks is removed from iCloud.")
+                    }
                 }
             }
             Button("Show ignored contacts…") { Task { await review.showIgnored() } }

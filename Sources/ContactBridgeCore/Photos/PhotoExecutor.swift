@@ -35,6 +35,8 @@ public struct PhotoRunReport: Sendable, Hashable {
         }
     }
 
+    /// iCloud ids whose op was carried out (or found already true).
+    public var completed: [String] = []
     public var recorded = 0
     public var copiedToGoogle = 0
     public var copiedToICloud = 0
@@ -144,6 +146,7 @@ public struct PhotoExecutor: Sendable {
             case .recordBaseline:
                 try saveBaseline(op.baseline, for: op.icloudID)
                 progress.report.recorded += 1
+                progress.report.completed.append(op.icloudID)
             case .copyToGoogle, .deleteOnGoogle:
                 if let halted = progress.report.halted {
                     progress.skip(op, .notAttempted(halted))
@@ -236,6 +239,7 @@ public struct PhotoExecutor: Sendable {
         if upload == nil, current == nil {
             // Nothing there to delete: the intended end state is already true.
             try saveBaseline(op.baseline, for: op.icloudID)
+            progress.report.completed.append(op.icloudID)
             return
         }
 
@@ -303,6 +307,7 @@ public struct PhotoExecutor: Sendable {
         var baseline = op.baseline
         baseline.googleURLKey = GooglePersonMapper.photos(of: returned).contact?.key
         try saveBaseline(baseline, for: op.icloudID)
+        progress.report.completed.append(op.icloudID)
     }
 
     /// A failed Google call: noted, and the run stops if every later call would fail the same way.
@@ -365,7 +370,10 @@ public struct PhotoExecutor: Sendable {
         } catch {
             try failed(op, error, &progress)
         }
-        if let finished { try saveBaseline(finished, for: op.icloudID) }
+        if let finished {
+            try saveBaseline(finished, for: op.icloudID)
+            progress.report.completed.append(op.icloudID)
+        }
     }
 }
 

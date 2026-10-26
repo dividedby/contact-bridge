@@ -67,7 +67,13 @@ public actor FakeGoogleClient: GoogleContactsClient {
         var version: Int
     }
 
-    public init(people seeded: [GooglePerson] = [], otherContacts: [GooglePerson] = [], pageSize: Int = 100) {
+    /// - Parameters:
+    ///   - contactPhotos: the contact's own photo, by resource name, for people who start with one.
+    ///   - profilePhotos: the Google profile photo, by resource name.
+    public init(
+        people seeded: [GooglePerson] = [], otherContacts: [GooglePerson] = [], pageSize: Int = 100, contactPhotos: [String: Data] = [:],
+        profilePhotos: [String: Data] = [:]
+    ) {
         self.pageSize = max(pageSize, 1)
         self.others = otherContacts.enumerated().map { index, person in
             var person = person
@@ -89,6 +95,27 @@ public actor FakeGoogleClient: GoogleContactsClient {
             if seededPeople[name] == nil { seededOrder.append(name) }
             seededPeople[name] = person
         }
+        // Starting photos are part of the starting state too: the same entries `applyPhoto` makes, without a version bump.
+        var seededPhotos: [String: Data] = [:]
+        var photoID = 1
+        for (source, photos) in [("CONTACT", contactPhotos), ("PROFILE", profilePhotos)] {
+            for (name, bytes) in photos.sorted(by: { $0.key < $1.key }) {
+                guard var person = seededPeople[name] else { continue }
+                let key = "https://lh3.googleusercontent.com/fake/\(source.lowercased())/\(photoID)"
+                photoID += 1
+                seededPhotos[key] = bytes
+                var entries: [JSONValue] = []
+                if case .array(let existing)? = person.extras["photos"] { entries = existing }
+                entries.append(.object([
+                    "url": .string(key + "=s100"),
+                    "metadata": .object(["primary": .bool(true), "source": .object(["type": .string(source), "id": .string(name)])]),
+                ]))
+                person.extras["photos"] = .array(entries)
+                seededPeople[name] = person
+            }
+        }
+        self.photoStore = seededPhotos
+        self.nextPhotoID = photoID
         self.people = seededPeople
         self.order = seededOrder
         self.nextID = counter
