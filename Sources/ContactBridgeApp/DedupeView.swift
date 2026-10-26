@@ -470,9 +470,35 @@ struct MergeConfirmationSheet: View {
                 NSPasteboard.general.setString(combined, forType: .string)
             }
         }
+        MergeLinkNotes(links: run.links)
         HStack {
             Spacer()
             Button("Done") { model.showingConfirmation = false }.keyboardShortcut(.defaultAction)
+        }
+    }
+}
+
+/// What a merge did about the Google links of the contacts it deleted.
+struct MergeLinkNotes: View {
+    let links: MergeLinkOutcome
+
+    var body: some View {
+        if links.linksMoved > 0 {
+            Label("Google link moved to the kept contact.", systemImage: "link").foregroundStyle(.secondary)
+        }
+        if links.googleCopiesLeft > 0 {
+            Label(
+                "Google still has \(links.googleCopiesLeft == 1 ? "1 other copy" : "\(links.googleCopiesLeft) other copies") of this person. Contact Bridge leaves \(links.googleCopiesLeft == 1 ? "it" : "them") alone.",
+                systemImage: "info.circle"
+            )
+            .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+        if links.googleRemovalsPending > 0 {
+            Label("Also removed from Google on the next sync (\(ContactText.count(links.googleRemovalsPending, "contact"))).", systemImage: "arrow.triangle.2.circlepath")
+                .foregroundStyle(.orange)
+        }
+        ForEach(links.followUpWarnings, id: \.self) { warning in
+            Label(warning, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
         }
     }
 }
@@ -592,21 +618,10 @@ struct BulkMergeSheet: View {
     @ViewBuilder private func entryRow(_ entry: BulkMergeReport.Entry) -> some View {
         let draft = entry.draft
         switch entry.outcome {
-        case .merged(let survivor, let deleted, let notes):
-            if case .writeFailed(let combined, let reason) = notes {
-                VStack(alignment: .leading, spacing: 4) {
-                    Label("Merged: kept \(survivor.displayName), deleted \(deleted.map(\.displayName).joined(separator: ", ")). The combined note was not saved: \(reason)", systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
-                    BoundedText(text: combined, maxHeight: 100)
-                    Button("Copy combined note") {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(combined, forType: .string)
-                    }
-                    Text("Paste it into the contact's note yourself. It is also in the backup.").font(.caption).foregroundStyle(.secondary)
-                }
-            } else {
-                Label("Merged: kept \(survivor.displayName), deleted \(deleted.map(\.displayName).joined(separator: ", "))", systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(.green).fixedSize(horizontal: false, vertical: true)
+        case .merged(let survivor, let deleted, let notes, let links):
+            VStack(alignment: .leading, spacing: 4) {
+                mergedRow(survivor: survivor, deleted: deleted, notes: notes)
+                MergeLinkNotes(links: links).font(.caption)
             }
         case .failed(let reason):
             Label("Failed: \(draft.survivor.displayName) and \(draft.others.map(\.displayName).joined(separator: ", ")). \(reason)", systemImage: "xmark.octagon.fill")
@@ -614,6 +629,24 @@ struct BulkMergeSheet: View {
         case .notRun:
             Label("Not run: \(draft.members.map(\.displayName).joined(separator: ", "))", systemImage: "minus.circle")
                 .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @ViewBuilder private func mergedRow(survivor: ContactRecord, deleted: [ContactRecord], notes: MergeExecutor.NotesOutcome) -> some View {
+        if case .writeFailed(let combined, let reason) = notes {
+            VStack(alignment: .leading, spacing: 4) {
+                Label("Merged: kept \(survivor.displayName), deleted \(deleted.map(\.displayName).joined(separator: ", ")). The combined note was not saved: \(reason)", systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+                BoundedText(text: combined, maxHeight: 100)
+                Button("Copy combined note") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(combined, forType: .string)
+                }
+                Text("Paste it into the contact's note yourself. It is also in the backup.").font(.caption).foregroundStyle(.secondary)
+            }
+        } else {
+            Label("Merged: kept \(survivor.displayName), deleted \(deleted.map(\.displayName).joined(separator: ", "))", systemImage: "checkmark.circle.fill")
+                .foregroundStyle(.green).fixedSize(horizontal: false, vertical: true)
         }
     }
 }

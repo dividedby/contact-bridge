@@ -38,6 +38,31 @@ struct LinkOriginTests {
         #expect(reloaded.links["i1"]?.effectiveOrigin == .imported && reloaded.links["i2"]?.origin == .matched)
     }
 
+    @Test("A link's display name round-trips through links.json, is not part of its identity, and old files without it still load")
+    func displayNameRoundTrip() throws {
+        let directory = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("links.json")
+        let old = #"{ "version": 1, "links": { "i1": { "googleResourceName": "people/c1", "linkedAt": "2027-01-15T08:00:00Z", "origin": "matched" } } }"#
+        try Data(old.utf8).write(to: url)
+
+        let store = LinkStore(url: url)
+        #expect(try store.load().links["i1"]?.displayName == nil)
+        try store.add([ImportedLink(icloudID: "i2", googleResourceName: "people/c2", origin: .matched, displayName: "Ann Lee")], at: t0)
+
+        let reloaded = try LinkStore(url: url).load()
+        #expect(reloaded.links["i2"]?.displayName == "Ann Lee" && reloaded.links["i1"]?.displayName == nil)
+        let object = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+        let links = try #require(object["links"] as? [String: [String: Any]])
+        #expect(object["version"] as? Int == 1, "no version bump")
+        #expect(links["i1"]?["displayName"] == nil && links["i2"]?["displayName"] as? String == "Ann Lee")
+
+        let named = LinkEntry(googleResourceName: "people/c2", linkedAt: t0, origin: .matched, displayName: "Ann Lee")
+        let renamed = LinkEntry(googleResourceName: "people/c2", linkedAt: t0, origin: .matched, displayName: "Someone Else")
+        #expect(named == renamed && named.hashValue == renamed.hashValue)
+        #expect(named == LinkEntry(googleResourceName: "people/c2", linkedAt: t0, origin: .matched))
+    }
+
     @Test("Import writes its links with origin imported; sync links carry theirs")
     func originsAreStored() async throws {
         let links = InMemoryLinkStore()

@@ -185,7 +185,7 @@ struct BulkMergeTests {
         let report = try await rig.workflows.runBulkMerge(try await rig.drafts())
         // Group a has one note and nothing to add, so it is unchanged; group b's combined note cannot be saved.
         #expect(report.stop == .stoppedOnProblem && report.mergedCount == 2 && report.notRunCount == 1)
-        guard case .merged(_, _, let outcome) = report.entries[1].outcome, case .writeFailed(let combined, let reason) = outcome else {
+        guard case .merged(_, _, let outcome, _) = report.entries[1].outcome, case .writeFailed(let combined, let reason) = outcome else {
             Issue.record("unexpected outcomes \(report.entries.map(\.outcome))")
             return
         }

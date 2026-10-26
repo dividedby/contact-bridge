@@ -130,6 +130,37 @@ struct DemoSyncTests {
         await engine.stop()
     }
 
+    @Test("The forget-links demo: Start syncing asks twice, the second question names the six contacts whose old links would go, and two confirms finish it")
+    func forgetLinksDemo() async throws {
+        let demo = DemoData.make(forgottenLinks: true)
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("demo-forget-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let engine = engine(demo, directory: directory)
+        await engine.start()
+        await engine.refreshPreview()
+        let preview = try #require(await engine.current.preview)
+        guard case .needsConfirmation(let first)? = preview.pause else {
+            Issue.record("expected the preview to carry the Google-missing confirmation, got \(String(describing: preview.pause))")
+            return
+        }
+        #expect(first.hasPrefix(SyncPlanner.googleMissingSummaryPrefix), "that guard fires first, so the preview itself is empty")
+
+        _ = await engine.approveFirstSync()
+        var shown = await engine.current
+        #expect(shown.confirmationSummary == first && shown.pauseDetails.isEmpty)
+        await engine.confirmAndContinue()
+        shown = await engine.current
+        #expect(shown.confirmationSummary?.contains("forget 6 of 9 links to contacts gone from both sides") == true)
+        #expect(shown.pauseDetails.map(\.name) == ["Alan Cooper", "Beth Ward", "Chris Doyle", "Dina Moss", "Eli Park", "Fay Ross"])
+        #expect(try demo.links.load().links.count == 9, "nothing is forgotten until the user confirms")
+
+        await engine.confirmAndContinue()
+        shown = await engine.current
+        #expect(shown.status == .idle && shown.confirmationSummary == nil && shown.pauseDetails.isEmpty)
+        #expect(try demo.links.load().links.keys.contains { $0.hasPrefix("demo-gone") } == false)
+        await engine.stop()
+    }
+
     private func approved(_ demo: DemoEnvironment, directory: URL) async -> SyncEngine {
         let engine = engine(demo, directory: directory)
         await engine.start()

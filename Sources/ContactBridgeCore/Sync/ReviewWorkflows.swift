@@ -464,7 +464,7 @@ public struct ReviewWorkflows: Sendable {
             guard let created = result.created.first else { throw ReviewWorkflowError.importFailed("nothing was created") }
             let newID = created.record.sourceIdentifier
             // The import linked it as imported, replacing the old entry; keep how the pair originally came about.
-            try links.add([ImportedLink(icloudID: newID, googleResourceName: name, origin: origin)], at: now())
+            try links.add([ImportedLink(icloudID: newID, googleResourceName: name, origin: origin, displayName: created.record.displayName)], at: now())
 
             var warnings: [String] = []
             var icloudNoteHash = NoteHash.hash("")
@@ -538,7 +538,7 @@ public struct ReviewWorkflows: Sendable {
                 if live.icloud == nil || live.person == nil || !free { try reviews.remove(ids: [detail.item.id]) }
                 return .changedSinceShown(live.icloud == nil || live.person == nil || !free ? nil : fresh)
             }
-            try links.add([ImportedLink(icloudID: id, googleResourceName: name, origin: .matched)], at: now())
+            try links.add([ImportedLink(icloudID: id, googleResourceName: name, origin: .matched, displayName: live.icloud?.displayName)], at: now())
             // A link without a baseline is adopted by a full scan; an unchanged iCloud token would skip it.
             try state.update { $0.icloudChangeToken = nil }
             try clear(detail.item)

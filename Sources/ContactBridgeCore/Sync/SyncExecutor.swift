@@ -196,7 +196,11 @@ public struct SyncExecutor: Sendable {
     private func applyLocalChanges(of plan: SyncPlan, to report: inout SyncRunReport) throws {
         let at = now()
         let newLinks = plan.links.filter(\.isNewLink)
-        try links.add(newLinks.map { ImportedLink(icloudID: $0.icloudID, googleResourceName: $0.resourceName, origin: $0.origin) }, at: at)
+        // New links go in before dropped ones come out: `LinkTable.add` takes a Google contact from its old owner, so a contact
+        // that is re-pointed from a vanished iCloud id to a surviving one never has two owners or none.
+        try links.add(newLinks.map {
+            ImportedLink(icloudID: $0.icloudID, googleResourceName: $0.resourceName, origin: $0.origin, displayName: $0.baseline.icloud.displayName)
+        }, at: at)
         try links.remove(icloudIDs: plan.droppedLinks)
         guard !plan.links.isEmpty || !plan.baselineRefreshes.isEmpty || !plan.droppedLinks.isEmpty else { return }
         try state.update { state in
@@ -490,7 +494,12 @@ public struct SyncExecutor: Sendable {
             if !confirmed.isEmpty {
                 let confirmedAt = now()
                 // The link first: a crash between the two leaves a link without a baseline, which the next plan adopts.
-                try links.add(confirmed.map { ImportedLink(icloudID: $0.item.create.icloudID, googleResourceName: $0.name, origin: .createdInGoogle) }, at: confirmedAt)
+                try links.add(confirmed.map {
+                    ImportedLink(
+                        icloudID: $0.item.create.icloudID, googleResourceName: $0.name, origin: .createdInGoogle,
+                        displayName: $0.item.create.record.displayName
+                    )
+                }, at: confirmedAt)
                 try state.update { state in
                     for (item, person, _) in confirmed {
                         state.baselines[item.create.icloudID] = (item.entry.baseline ?? SyncBaseline(

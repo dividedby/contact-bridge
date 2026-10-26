@@ -4,11 +4,14 @@ public struct ImportedLink: Sendable, Hashable {
     public var icloudID: String
     public var googleResourceName: String
     public var origin: LinkOrigin
+    /// Stored with the link (`LinkEntry.displayName`) so a screen can name the contact after it is gone from iCloud.
+    public var displayName: String?
 
-    public init(icloudID: String, googleResourceName: String, origin: LinkOrigin = .imported) {
+    public init(icloudID: String, googleResourceName: String, origin: LinkOrigin = .imported, displayName: String? = nil) {
         self.icloudID = icloudID
         self.googleResourceName = googleResourceName
         self.origin = origin
+        self.displayName = displayName
     }
 }
 
@@ -80,7 +83,8 @@ public struct ImportExecutor: Sendable {
                 result.created.append(ImportResult.Created(candidateID: candidate.id, record: stored))
                 if candidate.record.source == .google {
                     result.links.append(ImportedLink(
-                        icloudID: stored.sourceIdentifier, googleResourceName: candidate.googleResourceName, origin: .imported
+                        icloudID: stored.sourceIdentifier, googleResourceName: candidate.googleResourceName, origin: .imported,
+                        displayName: stored.displayName
                     ))
                 }
             } catch {

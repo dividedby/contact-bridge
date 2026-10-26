@@ -33,8 +33,9 @@ public actor SyncEngine {
 
         var trigger: SyncTrigger
         var mode = Mode.regular
-        /// The summary of the `.needsConfirmation` pause the user accepted.
-        var confirmedSummary: String?
+        /// The summaries of the `.needsConfirmation` pauses the user accepted in this chain of questions. One run can hit
+        /// several guards one after the other; each confirmation adds to the set instead of replacing the last.
+        var confirmedSummaries: Set<String> = []
     }
 
     private struct Completion: Sendable {
@@ -54,7 +55,7 @@ public actor SyncEngine {
         case failed(String)
         case preview(SyncPreview)
         case previewChanged(SyncPreview)
-        case paused(PauseReason)
+        case paused(PauseReason, details: [SyncPreview.Item])
         case completed(Completion)
     }
 
@@ -81,6 +82,9 @@ public actor SyncEngine {
     private var approved = false
     private var userPaused = false
     private var awaitingConfirmation = false
+    /// What the user has confirmed since the first question of the current chain of `.needsConfirmation` pauses. Memory
+    /// only (a relaunch asks again), and emptied as soon as the chain ends in anything but another question.
+    private var confirmedChain: Set<String> = []
     private var approving = false
     private var lastApproval: ApprovalOutcome?
 
@@ -188,6 +192,8 @@ public actor SyncEngine {
     private func publish(_ change: (inout SyncSnapshot) -> Void) {
         var updated = snapshot
         change(&updated)
+        // The details belong to the confirmation pause and to nothing else.
+        if case .paused(.needsConfirmation) = updated.status {} else { updated.pauseDetails = [] }
         guard updated != snapshot else { return }
         snapshot = updated
         for observer in observers.values { observer.yield(updated) }
@@ -346,6 +352,7 @@ public actor SyncEngine {
         guard started, disabledReason == nil else { return }
         userPaused = true
         awaitingConfirmation = false
+        confirmedChain = []
         _ = try? stateStore.update { $0.pause = .user }
         cancelPending()
         rerunWanted = false
@@ -370,7 +377,7 @@ public actor SyncEngine {
     public func confirmAndContinue() async {
         guard started, disabledReason == nil, let summary = snapshot.confirmationSummary else { return }
         awaitingConfirmation = false
-        await perform(RunOptions(trigger: .syncNow, confirmedSummary: summary))
+        await perform(RunOptions(trigger: .syncNow, confirmedSummaries: confirmedChain.union([summary])))
     }
 
     /// "Keep paused" on a `.needsConfirmation` pause: the same as the kill switch, until the user resumes.
@@ -473,9 +480,9 @@ public actor SyncEngine {
         let at = clock.now()
         var plan = planner.plan(
             icloud: scan, google: feed, state: planState, links: table, keepSeparate: planState.keepSeparate,
-            allowMassGoogleDeletions: options.confirmedSummary?.hasPrefix(SyncPlanner.googleMissingSummaryPrefix) == true, now: at
+            allowMassGoogleDeletions: options.confirmedSummaries.contains { $0.hasPrefix(SyncPlanner.googleMissingSummaryPrefix) }, now: at
         )
-        if let confirmed = options.confirmedSummary, case .needsConfirmation(let summary)? = plan.pause, summary == confirmed {
+        if case .needsConfirmation(let summary)? = plan.pause, options.confirmedSummaries.contains(summary) {
             plan.pause = nil
         }
 
@@ -489,7 +496,7 @@ public actor SyncEngine {
             approved = true
             publish { $0.firstSyncApproved = true }
         }
-        if let pause = plan.pause { return .paused(pause) }
+        if let pause = plan.pause { return .paused(pause, details: Self.forgottenItems(plan.guardedForgottenLinks)) }
 
         try reviewStore.reconcile(with: plan, ignoredGoogle: state.ignoredGoogle, at: at)
         setPhase(.applying)
@@ -507,6 +514,13 @@ public actor SyncEngine {
     // MARK: results
 
     private func apply(_ result: RunResult, options: RunOptions) {
+        // Confirmations only carry from one question to the next. Any other end of a run (done, failed, cancelled, a pause
+        // for another reason) closes the chain, so an old OK never covers a later, different run.
+        if case .paused(.needsConfirmation, _) = result, !options.confirmedSummaries.isEmpty {
+            confirmedChain = options.confirmedSummaries
+        } else {
+            confirmedChain = []
+        }
         if case .approve = options.mode {
             switch result {
             case .previewChanged: lastApproval = .previewChanged
@@ -543,10 +557,11 @@ public actor SyncEngine {
                 $0.preview = preview
             }
 
-        case .paused(let reason):
+        case .paused(let reason, let details):
             if case .needsConfirmation = reason { awaitingConfirmation = true } else { registerFailure() }
             publish {
                 $0.status = .paused(reason)
+                $0.pauseDetails = details
                 $0.nextAttemptAt = backoffUntil
             }
 
@@ -639,6 +654,12 @@ public actor SyncEngine {
         }
     }
 
+    private static func forgottenItems(_ links: [DroppedLinkInfo]) -> [SyncPreview.Item] {
+        links.map {
+            SyncPreview.Item(id: $0.icloudID, name: $0.name, detail: $0.reason == .iCloudGone ? "deleted in iCloud" : "gone from iCloud and Google")
+        }
+    }
+
     private func makePreview(_ plan: SyncPlan, state: SyncState, hasNotes: Bool, at: Date) -> SyncPreview {
         let baselines = state.baselines
         var backups: [String] = []
@@ -663,7 +684,7 @@ public actor SyncEngine {
             reviews: plan.review.map {
                 summary(id: $0.id, kind: $0.kind, icloudID: $0.icloudID, resourceName: $0.resourceName, fields: $0.fields, baselines: baselines)
             },
-            forgottenLinks: plan.droppedLinks.count, waitingForNotes: plan.waitingForNotes,
+            forgottenLinks: Self.forgottenItems(plan.forgottenLinkInfo), waitingForNotes: plan.waitingForNotes,
             unlinkedWaitingForFullListing: plan.unlinkedWaitingForFullListing, notesUnavailable: plan.notesUnavailable,
             pause: plan.pause, backups: backups, generatedAt: at
         )

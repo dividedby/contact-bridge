@@ -49,6 +49,14 @@ struct AppDependencies {
         return !value.isEmpty && value != "0"
     }
 
+    /// `--demo-forget-links` (with `--demo`), or CONTACT_BRIDGE_DEMO_FORGET_LINKS set to anything but "" and "0": the demo also
+    /// holds old links to six deleted contacts, so Start syncing leads to the "forget old links" confirmation.
+    static var demoForgetLinksRequested: Bool {
+        if CommandLine.arguments.contains("--demo-forget-links") { return true }
+        let value = ProcessInfo.processInfo.environment["CONTACT_BRIDGE_DEMO_FORGET_LINKS"] ?? ""
+        return !value.isEmpty && value != "0"
+    }
+
     @MainActor
     static func live() -> AppDependencies {
         let adapter = CNContactStoreAdapter()
@@ -83,7 +91,7 @@ struct AppDependencies {
     /// suite, the sync files stay in memory, and nothing real is read or written. The real sync engine runs against the fakes.
     @MainActor
     static func demo() -> AppDependencies {
-        let demo = DemoData.make()
+        let demo = DemoData.make(forgottenLinks: demoForgetLinksRequested)
         let suite = "dev.dividedby.contactbridge.demo"
         // Never fall back to .standard: demo mode must not read or write the real saved container choice.
         guard let defaults = UserDefaults(suiteName: suite) else { fatalError("Cannot create the demo UserDefaults suite \(suite)") }

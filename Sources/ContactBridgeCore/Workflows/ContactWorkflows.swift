@@ -14,6 +14,25 @@ public struct ImportRun: Sendable {
     public var receipt: BackupReceipt
 }
 
+/// What a merge did about the Google links of the contacts it deleted. The merge itself stands whatever happened here.
+public struct MergeLinkOutcome: Sendable, Equatable {
+    /// 1 when a deleted contact's Google link was given to the survivor (it then keeps syncing as the same Google contact).
+    public var linksMoved = 0
+    /// Other Google copies of the person that the merge leaves alone: their links are gone and nothing will delete them.
+    public var googleCopiesLeft = 0
+    /// Other Google copies whose link was kept because sync is on: the next sync deletes them (guarded, like Clean up).
+    public var googleRemovalsPending = 0
+    /// What tidying up the links did not manage. The merge is done regardless.
+    public var followUpWarnings: [String] = []
+
+    public init(linksMoved: Int = 0, googleCopiesLeft: Int = 0, googleRemovalsPending: Int = 0, followUpWarnings: [String] = []) {
+        self.linksMoved = linksMoved
+        self.googleCopiesLeft = googleCopiesLeft
+        self.googleRemovalsPending = googleRemovalsPending
+        self.followUpWarnings = followUpWarnings
+    }
+}
+
 public struct MergeRun: Sendable {
     public var receipt: BackupReceipt
     public var outcome: MergeExecutor.Outcome
@@ -21,6 +40,35 @@ public struct MergeRun: Sendable {
     public var survivor: ContactRecord
     /// The contacts that were deleted.
     public var deleted: [ContactRecord]
+    public var links = MergeLinkOutcome()
+
+    public var linksMoved: Int { links.linksMoved }
+    public var googleCopiesLeft: Int { links.googleCopiesLeft }
+    public var googleRemovalsPending: Int { links.googleRemovalsPending }
+    public var followUpWarnings: [String] { links.followUpWarnings }
+}
+
+/// What to do with the Google links of a merge's deleted contacts (`ContactWorkflows.linkCarryOver`).
+public struct LinkCarryPlan: Sendable, Equatable {
+    /// A deleted contact's link that the survivor takes over.
+    public struct Moved: Sendable, Equatable {
+        public var from: String
+        public var googleResourceName: String
+        public var origin: LinkOrigin?
+    }
+
+    public var moved: Moved?
+    /// The survivor's baseline, from the contact whose link moved: its iCloud half is that contact's, with the survivor's
+    /// ids, so the next sync sees the merged data as an ordinary iCloud edit and pushes it. Nil when sync is off or the
+    /// moved link had no baseline yet (a later sync takes one from both sides).
+    public var survivorBaseline: SyncBaseline?
+    /// Deleted contacts whose link and baseline go: the moved one's (cleared with the baseline moved) and links with no
+    /// Google copy the sync could safely delete.
+    public var linksToRemove: [String] = []
+    /// Deleted contacts whose link and baseline stay, because sync is on: the next sync deletes their Google copy.
+    public var keptForSync: [String] = []
+    /// Links removed without their Google copy being deleted.
+    public var googleCopiesLeft: Int { linksToRemove.count - (moved == nil ? 0 : 1) }
 }
 
 /// What a bulk delete is doing, for progress display.
@@ -185,9 +233,81 @@ public struct ContactWorkflows: Sendable {
     private func merge(_ draft: MergeDraft, receipt: BackupReceipt) async throws -> MergeRun {
         let plan = draft.plan
         let deleted = draft.others
+        let survivorID = plan.merged.sourceIdentifier
+        let loserIDs = draft.deleteSourceIdentifiers
+        // Read before anything changes, as Clean up does: if either file is unreadable, nothing is merged.
+        let table = try links.load()
+        let state = try syncState?.load()
+        let carry = Self.linkCarryOver(survivorID: survivorID, loserIDs: loserIDs, table: table, state: state)
+
         let outcome = try await MergeExecutor(store: store, notes: notes)
-            .execute(survivor: plan.merged, absorbing: draft.deleteSourceIdentifiers, backup: receipt, now: now())
-        return MergeRun(receipt: receipt, outcome: outcome, survivor: plan.merged, deleted: deleted)
+            .execute(survivor: plan.merged, absorbing: loserIDs, backup: receipt, now: now())
+        var run = MergeRun(receipt: receipt, outcome: outcome, survivor: plan.merged, deleted: deleted)
+        run.links = applyLinkCarry(carry, survivor: plan.merged)
+        return run
+    }
+
+    /// The merge is done; the links follow it. A failure here is reported, never thrown.
+    private func applyLinkCarry(_ carry: LinkCarryPlan, survivor: ContactRecord) -> MergeLinkOutcome {
+        var result = MergeLinkOutcome(googleCopiesLeft: carry.googleCopiesLeft, googleRemovalsPending: carry.keptForSync.count)
+        guard carry.moved != nil || !carry.linksToRemove.isEmpty else { return result }
+        do {
+            if let moved = carry.moved {
+                // `add` takes the Google contact away from its old owner, so there is never a moment with two.
+                try links.add([ImportedLink(
+                    icloudID: survivor.sourceIdentifier, googleResourceName: moved.googleResourceName, origin: moved.origin ?? .imported,
+                    displayName: survivor.displayName
+                )], at: now())
+                result.linksMoved = 1
+            }
+            try links.remove(icloudIDs: carry.linksToRemove)
+            if let moved = carry.moved, let baseline = carry.survivorBaseline, let syncState {
+                // One write, so the baseline is never both gone and not yet on the survivor.
+                try syncState.update { state in
+                    state.baselines[moved.from] = nil
+                    state.baselines[survivor.sourceIdentifier] = baseline
+                }
+            }
+        } catch {
+            result.followUpWarnings.append("The contacts are merged, but their Google links could not be updated: \(error.localizedDescription)")
+        }
+        return result
+    }
+
+    /// Decides what happens to the Google links of the contacts a merge deletes. Pure.
+    ///
+    /// - The survivor has no link and a deleted contact has: the survivor takes over one deleted contact's link (the one with
+    ///   a baseline, then the oldest, then the lowest id), keeping its origin, so the same Google contact keeps syncing. With
+    ///   sync on, that contact's baseline moves to the survivor.
+    /// - Any other linked deleted contact (or all of them, if the survivor was linked already) points at another Google copy of
+    ///   the same person; the survivor's link wins. With sync on, a copy the sync can safely delete (one with a baseline) keeps
+    ///   its link and baseline so the next sync deletes it, as it does after Clean up. Otherwise the link goes and Google is left
+    ///   alone (`googleCopiesLeft`).
+    public static func linkCarryOver(survivorID: String, loserIDs: [String], table: LinkTable, state: SyncState?) -> LinkCarryPlan {
+        var plan = LinkCarryPlan()
+        let syncOn = state?.firstSyncApproved == true
+        let linked = Set(loserIDs).subtracting([survivorID]).filter { table.links[$0] != nil }.sorted()
+        guard !linked.isEmpty else { return plan }
+
+        var others = linked
+        if table.links[survivorID] == nil, let mover = linked.min(by: { lhs, rhs in
+            let l = (state?.baselines[lhs] == nil ? 1 : 0, table.links[lhs]?.linkedAt ?? .distantFuture, lhs)
+            let r = (state?.baselines[rhs] == nil ? 1 : 0, table.links[rhs]?.linkedAt ?? .distantFuture, rhs)
+            return l < r
+        }), let entry = table.links[mover] {
+            plan.moved = LinkCarryPlan.Moved(from: mover, googleResourceName: entry.googleResourceName, origin: entry.origin)
+            plan.linksToRemove.append(mover)
+            if syncOn, var baseline = state?.baselines[mover] {
+                baseline.icloud.id = survivorID
+                baseline.icloud.sourceIdentifier = survivorID
+                plan.survivorBaseline = baseline
+            }
+            others.removeAll { $0 == mover }
+        }
+        for id in others {
+            if syncOn, state?.baselines[id] != nil { plan.keptForSync.append(id) } else { plan.linksToRemove.append(id) }
+        }
+        return plan
     }
 
     /// Merges the groups one after another, each with the suggested survivor and values, behind one brand-new backup that
@@ -239,8 +359,12 @@ public struct ContactWorkflows: Sendable {
                 let receipt = try await backups.freshReceipt(requiring: requirement)
                 if receipt != receipts.last { receipts.append(receipt) }
                 let run = try await merge(draft, receipt: receipt)
-                entries[index].outcome = .merged(survivor: run.survivor, deleted: run.deleted, notes: run.outcome.notes)
+                entries[index].outcome = .merged(survivor: run.survivor, deleted: run.deleted, notes: run.outcome.notes, links: run.links)
                 if case .writeFailed = run.outcome.notes {
+                    stop = .stoppedOnProblem
+                    break
+                }
+                if !run.links.followUpWarnings.isEmpty {
                     stop = .stoppedOnProblem
                     break
                 }

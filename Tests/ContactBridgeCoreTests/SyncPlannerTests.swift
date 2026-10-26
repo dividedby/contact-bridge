@@ -323,6 +323,68 @@ struct SyncPlannerTests {
         #expect(plan.droppedLinks == ["I2"] && plan.mutationCount == 0 && plan.review.isEmpty)
     }
 
+    // MARK: orphaned links (a Dedupe merge deleted the linked iCloud contact)
+
+    /// "GONE" was linked to Google's Ann Lee by an earlier import and has since been merged away in iCloud.
+    private func orphanWorld(icloud: [ContactRecord], google: [GooglePerson]) -> SyncWorld {
+        let world = SyncWorld(icloud: icloud, google: google)
+        world.links.links["GONE"] = LinkEntry(googleResourceName: "people/c1", linkedAt: world.clock, origin: .imported, displayName: "Ann Lee")
+        return world
+    }
+
+    @Test("An orphaned import link releases its Google contact so the surviving iCloud contact is matched to it, not duplicated")
+    func orphanReleasedAndRematched() async throws {
+        let world = orphanWorld(
+            icloud: [SyncFixtures.icloud("S", "Ann", "Lee", emails: ["ann@example.com"])],
+            google: [SyncFixtures.person("Ann", "Lee", emails: ["ann@example.com"])]
+        )
+        let plan = try await world.plan()
+        let link = try #require(plan.links.first)
+        #expect(plan.droppedLinks == ["GONE"] && plan.droppedLinkInfo["GONE"]?.isReleased == true)
+        #expect(plan.links.count == 1 && link.icloudID == "S" && link.resourceName == "people/c1" && link.origin == .matched && link.isNewLink)
+        #expect(plan.creates.isEmpty, "no second copy of Ann in Google")
+        #expect(review(plan, .newInGoogle).isEmpty && review(plan, .possibleLink).isEmpty)
+        #expect(plan.forgottenLinkInfo.isEmpty)
+
+        // The executor's local step ends with one owner for the Google contact.
+        world.commit(plan)
+        #expect(world.links.links.keys.sorted() == ["S"] && world.state.baselines.keys.sorted() == ["S"])
+    }
+
+    @Test("An orphaned link whose Google contact matches nothing leaves the survivor to be created, as before")
+    func orphanWithoutMatch() async throws {
+        let world = orphanWorld(
+            icloud: [SyncFixtures.icloud("S", "Bob", "Stone", phones: ["415-555-0002"])],
+            google: [SyncFixtures.person("Ann", "Lee", emails: ["ann@example.com"])]
+        )
+        let plan = try await world.plan()
+        #expect(plan.droppedLinks == ["GONE"] && plan.links.isEmpty && plan.creates.map(\.icloudID) == ["S"])
+        #expect(plan.mutationCount == 1 && plan.deletes.isEmpty, "Google's copy of the vanished contact is never deleted")
+        // The released contact is no longer hidden from the new-in-Google list, which a later full listing would show anyway.
+        #expect(plan.review.map(\.id) == ["newInGoogle||people/c1"])
+    }
+
+    @Test("An orphaned link whose Google contact only matches the survivor by name becomes a possibleLink, never an automatic link")
+    func orphanNameOnlyIsPossibleLink() async throws {
+        let world = orphanWorld(icloud: [SyncFixtures.icloud("S", "Ann", "Lee")], google: [SyncFixtures.person("Ann", "Lee")])
+        let plan = try await world.plan()
+        #expect(plan.links.isEmpty && plan.creates.isEmpty)
+        #expect(plan.review.map(\.id) == ["possibleLink|S|people/c1"])
+        #expect(plan.droppedLinks == ["GONE"])
+    }
+
+    @Test("A link whose Google contact is gone too is not released, whatever the survivor looks like")
+    func orphanGoneEverywhereIsNotReleased() async throws {
+        let world = orphanWorld(
+            icloud: [SyncFixtures.icloud("S", "Ann", "Lee", emails: ["ann@example.com"])],
+            google: [SyncFixtures.person("Zed", "Quinn", phones: ["415-555-0099"])]
+        )
+        world.links.links["GONE"] = LinkEntry(googleResourceName: "people/c9", linkedAt: world.clock)
+        let plan = try await world.plan()
+        #expect(plan.droppedLinkInfo["GONE"]?.isReleased == false && plan.droppedLinkInfo["GONE"]?.reason == .goneFromBothSides)
+        #expect(plan.forgottenLinkInfo.count == 1 && plan.links.isEmpty)
+    }
+
     // MARK: pauses
 
     @Test("Nothing changed anywhere: an empty plan that still advances the checkpoint")
@@ -483,6 +545,57 @@ struct SyncPlannerTests {
             return
         }
         #expect(over.droppedLinks.count == 9 && summary.contains("forget 9 of 400"))
+        #expect(summary.contains("links to contacts gone from both sides"))
+        #expect(over.guardedForgottenLinks.count == 9 && over.guardedForgottenLinks.allSatisfy { $0.reason == .goneFromBothSides })
+        #expect(over.guardedForgottenLinks.map(\.name).first == "First1 Last1", "named from the baseline, sorted by name")
+        #expect(!summary.contains("First1"), "the summary is saved and compared as text: it stays name-free")
+    }
+
+    @Test("Dropped links are named from the baseline, else the Google contact, else the name stored with the link, else the resource name")
+    func droppedLinkNames() async throws {
+        // Baselined, gone from both sides: the baseline's iCloud name wins over a different name stored on the link.
+        let world = try await SyncWorld.linked(count: 3)
+        world.links.links["I1"]?.displayName = "Stale Name"
+        try await world.google.deleteContact(resourceName: "people/c1")
+        try await world.store.delete(ids: ["I1"], backup: .forTesting())
+        // Unbaselined links: Google's contact survives (named from the feed), or is gone (named from the link, or not at all).
+        _ = try await world.google.createContact(SyncFixtures.person("Dora", "Feed"))
+        world.links.links["O1"] = LinkEntry(googleResourceName: "people/c4", linkedAt: world.clock, displayName: "Old Dora")
+        world.links.links["O2"] = LinkEntry(googleResourceName: "people/c77", linkedAt: world.clock, displayName: "Kept On Link")
+        world.links.links["O3"] = LinkEntry(googleResourceName: "people/c88", linkedAt: world.clock)
+        let plan = try await world.plan()
+
+        #expect(plan.droppedLinks == ["I1", "O1", "O2", "O3"])
+        let info = plan.droppedLinkInfo
+        #expect(info["I1"]?.name == "First1 Last1" && info["I1"]?.reason == .goneFromBothSides && info["I1"]?.isReleased == false)
+        #expect(info["O1"]?.name == "Dora Feed" && info["O1"]?.isReleased == true && info["O1"]?.resourceName == "people/c4")
+        #expect(info["O2"]?.name == "Kept On Link" && info["O2"]?.reason == .goneFromBothSides && info["O2"]?.isReleased == false)
+        #expect(info["O3"]?.name == "people/c88")
+        #expect(plan.forgottenLinkInfo.map(\.icloudID) == ["I1", "O2", "O3"].sorted { (info[$0]!.name, $0) < (info[$1]!.name, $1) })
+    }
+
+    @Test("Released links do not count towards the forget-links guard; a pause for a link that was deleted in iCloud says so")
+    func releasedLinksAreNotGuarded() async throws {
+        let world = SyncWorld(icloud: [SyncFixtures.icloud("S", "Zed", "Quinn", phones: ["415-555-0099"])], google: [])
+        for n in 1...7 {
+            _ = try await world.google.createContact(SyncFixtures.person("Gone\(n)", "Person", phones: ["415-555-01\(String(format: "%02d", n))"]))
+            world.links.links["GONE\(n)"] = LinkEntry(googleResourceName: "people/c\(n)", linkedAt: world.clock)
+        }
+        let released = try await world.plan()
+        #expect(released.droppedLinks.count == 7 && released.forgottenLinkInfo.isEmpty && released.pause == nil)
+
+        // Seen through an incremental feed that did not list them, the same links are forgotten, and the pause says why.
+        let scan = try #require(world.lastScan)
+        var feed = try #require(world.lastFeed)
+        feed.mode = .incremental
+        feed.people = [:]
+        let partial = SyncPlanner().plan(icloud: scan, google: feed, state: world.state, links: world.links, now: world.clock)
+        guard case .needsConfirmation(let summary)? = partial.pause else {
+            Issue.record("expected confirmation, got \(String(describing: partial.pause))")
+            return
+        }
+        #expect(summary.contains("forget 7 of 7 links to contacts deleted in iCloud"))
+        #expect(partial.guardedForgottenLinks.allSatisfy { $0.reason == .iCloudGone && !$0.isReleased })
     }
 
     @Test("A paused feed or scan never yields deletions even with deletion-looking data")

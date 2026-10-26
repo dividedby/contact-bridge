@@ -45,6 +45,25 @@ struct SyncEngineTests {
         await rig.engine.stop()
     }
 
+    @Test("The preview names the contacts whose old links will be forgotten, and leaves out links that are re-matched instead")
+    func previewNamesForgottenLinks() async throws {
+        let world = SyncWorld(
+            icloud: [SyncFixtures.icloud("S", "Ann", "Lee", phones: ["415-555-2671"])],
+            google: [SyncFixtures.person("Ann", "Lee", phones: ["415-555-2671"])]
+        )
+        world.links.links["GONE1"] = LinkEntry(googleResourceName: "people/c1", linkedAt: world.clock, displayName: "Ann Lee (merged)")
+        world.links.links["GONE2"] = LinkEntry(googleResourceName: "people/c99", linkedAt: world.clock, displayName: "Zed Quinn")
+        let rig = EngineRig(try ExecutorRig(world))
+        defer { rig.cleanUp() }
+        await rig.start()
+        await rig.engine.refreshPreview()
+
+        let preview = try #require(await rig.snapshot.preview)
+        #expect(preview.forgottenLinks.map(\.name) == ["Zed Quinn"] && preview.forgottenLinks.first?.id == "GONE2")
+        #expect(preview.links.map(\.name) == ["Ann Lee"] && preview.creates.isEmpty, "the survivor takes over Ann's Google contact")
+        await rig.engine.stop()
+    }
+
     @Test("Approving runs the previewed plan once: the link is made, Bob is created, a second approval does nothing")
     func approveRunsOnce() async throws {
         let rig = try firstSyncRig()
@@ -347,6 +366,110 @@ struct SyncEngineTests {
         let snapshot = await rig.snapshot
         #expect(snapshot.status == .idle && snapshot.confirmationSummary == nil && snapshot.lastRun?.deleted == 3)
         #expect(await rig.base.world.google.allPeople.count == 3)
+        await rig.engine.stop()
+    }
+
+    @Test("A pause about forgetting links carries the contacts' names beside the unchanged, name-free summary; Confirm and Keep paused clear them")
+    func forgetLinksPauseCarriesNames() async throws {
+        var limits = SyncPlanner.Limits()
+        limits.minDeletes = 1
+        let rig = try await EngineRig.linked(planner: SyncPlanner(limits: limits))
+        defer { rig.cleanUp() }
+        for n in 1...3 {
+            try await rig.base.world.google.deleteContact(resourceName: "people/c\(n)")
+            try await rig.base.world.store.delete(ids: ["I\(n)"], backup: .forTesting())
+        }
+
+        await rig.start()
+        await rig.engine.waitForRuns(1)
+        var snapshot = await rig.snapshot
+        let summary = try #require(snapshot.confirmationSummary)
+        #expect(summary.contains("forget 3 of 6 links to contacts gone from both sides") && !summary.contains("First1"))
+        #expect(snapshot.pauseDetails.map(\.name) == ["First1 Last1", "First2 Last2", "First3 Last3"])
+        #expect(snapshot.pauseDetails.map(\.id) == ["I1", "I2", "I3"] && snapshot.pauseDetails.allSatisfy { $0.detail == "gone from iCloud and Google" })
+        #expect(try rig.base.links.count == 6, "nothing is forgotten before the user confirms")
+
+        await rig.engine.keepPaused()
+        snapshot = await rig.snapshot
+        #expect(snapshot.status == .paused(.user) && snapshot.pauseDetails.isEmpty)
+        await rig.engine.resume()
+        #expect(await rig.snapshot.pauseDetails.count == 3, "asked again, with the same names")
+
+        await rig.engine.confirmAndContinue()
+        snapshot = await rig.snapshot
+        #expect(snapshot.status == .idle && snapshot.confirmationSummary == nil && snapshot.pauseDetails.isEmpty)
+        #expect(try rig.base.links.keys.sorted() == ["I4", "I5", "I6"])
+        await rig.engine.stop()
+    }
+
+    /// Three contacts deleted on both sides and Google's sync token expired: the full listing lacks 3 of 6 linked contacts
+    /// (the Google-missing guard) and, once that is allowed, the plan forgets 3 links (the forget-links guard).
+    private func stackedGuardsRig() async throws -> EngineRig {
+        var limits = SyncPlanner.Limits()
+        limits.minDeletes = 1
+        let rig = try await EngineRig.linked(planner: SyncPlanner(limits: limits))
+        for n in 1...3 {
+            try await rig.base.world.google.deleteContact(resourceName: "people/c\(n)")
+            try await rig.base.world.store.delete(ids: ["I\(n)"], backup: .forTesting())
+        }
+        await rig.base.world.google.expireSyncTokens()
+        return rig
+    }
+
+    @Test("Two guards in a row: confirming the first and then the second lets the run through, with no third question")
+    func stackedConfirmations() async throws {
+        let rig = try await stackedGuardsRig()
+        defer { rig.cleanUp() }
+        _ = await started(rig)
+
+        let first = try #require(await rig.snapshot.confirmationSummary)
+        #expect(first.hasPrefix(SyncPlanner.googleMissingSummaryPrefix))
+        await rig.engine.confirmAndContinue()
+        let second = try #require(await rig.snapshot.confirmationSummary)
+        #expect(second.contains("forget 3 of 6") && second != first)
+        #expect(await rig.snapshot.pauseDetails.count == 3)
+
+        await rig.engine.confirmAndContinue()
+        let snapshot = await rig.snapshot
+        #expect(snapshot.status == .idle && snapshot.confirmationSummary == nil && snapshot.pauseDetails.isEmpty)
+        #expect(try rig.base.links.keys.sorted() == ["I4", "I5", "I6"])
+        await rig.engine.stop()
+    }
+
+    @Test("Keep paused forgets what was confirmed: resuming asks the first question again")
+    func keepPausedClearsConfirmations() async throws {
+        let rig = try await stackedGuardsRig()
+        defer { rig.cleanUp() }
+        _ = await started(rig)
+        await rig.engine.confirmAndContinue()
+        #expect(await rig.snapshot.confirmationSummary?.contains("forget 3 of 6") == true)
+
+        await rig.engine.keepPaused()
+        await rig.engine.resume()
+        #expect(await rig.snapshot.confirmationSummary?.hasPrefix(SyncPlanner.googleMissingSummaryPrefix) == true)
+        #expect(try rig.base.links.count == 6)
+        await rig.engine.stop()
+    }
+
+    @Test("A confirmation never carries over to a later, different run: a new summary asks again")
+    func staleConfirmationsDoNotCarryOver() async throws {
+        let rig = try await stackedGuardsRig()
+        defer { rig.cleanUp() }
+        _ = await started(rig)
+        await rig.engine.confirmAndContinue()
+        await rig.engine.confirmAndContinue()
+        #expect(await rig.snapshot.status == .idle)
+
+        // Later: more contacts vanish from Google and the token expires again. Different counts, so a fresh question.
+        for n in 4...5 {
+            try await rig.base.world.google.deleteContact(resourceName: "people/c\(n)")
+            try await rig.base.world.store.delete(ids: ["I\(n)"], backup: .forTesting())
+        }
+        await rig.base.world.google.expireSyncTokens()
+        await rig.engine.syncNow()
+        let again = try #require(await rig.snapshot.confirmationSummary)
+        #expect(again.hasPrefix(SyncPlanner.googleMissingSummaryPrefix) && again.contains("2 of 3"))
+        #expect(try rig.base.links.keys.sorted() == ["I4", "I5", "I6"], "nothing was forgotten without a new OK")
         await rig.engine.stop()
     }
 

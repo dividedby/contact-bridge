@@ -91,7 +91,7 @@ final class ExecutorRig: @unchecked Sendable {
         self.history = history
         faulty = FaultyGoogle(world.google)
         stateStore = InMemorySyncStateStore(world.state)
-        try linkStore.add(world.links.links.map { ImportedLink(icloudID: $0.key, googleResourceName: $0.value.googleResourceName) }, at: world.clock)
+        try linkStore.add(world.links.links.map { ImportedLink(icloudID: $0.key, googleResourceName: $0.value.googleResourceName, displayName: $0.value.displayName) }, at: world.clock)
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("executor-tests-\(UUID().uuidString)", isDirectory: true)
         let store = world.store, google = world.google, notes = world.notes, directory = directory, clock = clock
         backups = BackupCoordinator(makeSetup: {

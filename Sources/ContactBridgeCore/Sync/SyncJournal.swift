@@ -418,7 +418,9 @@ struct SyncJournalRecovery: Sendable {
                     // The planner may have linked it already from a later listing; that baseline is newer than ours.
                     if knownBaselines[entry.icloudID] == nil || knownLinks[entry.icloudID] == nil {
                         baselines[entry.icloudID] = baseline.afterCreate(returned: person, at: at)
-                        newLinks.append(ImportedLink(icloudID: entry.icloudID, googleResourceName: name, origin: .createdInGoogle))
+                        newLinks.append(ImportedLink(
+                            icloudID: entry.icloudID, googleResourceName: name, origin: .createdInGoogle, displayName: baseline.icloud.displayName
+                        ))
                     }
                     mark(entry, .applied)
                 } else if at.timeIntervalSince(entry.attemptedAt ?? entry.recheckedAt ?? at) < Self.createGracePeriod {

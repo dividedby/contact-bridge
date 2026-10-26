@@ -8,16 +8,20 @@ public struct LinkEntry: Sendable, Hashable, Codable {
     /// How the link came about. Nil in files written before Phase 2, which only ever held imports: read it as `.imported`
     /// (`effectiveOrigin`). Adding the key needs no version bump.
     public var origin: LinkOrigin?
+    /// The contact's name when the link was made, so a screen can say who a link was for after the iCloud contact is gone.
+    /// Optional like `origin` (older files lack it; no version bump) and not part of the link's identity.
+    public var displayName: String?
 
-    public init(googleResourceName: String, linkedAt: Date, origin: LinkOrigin? = nil) {
+    public init(googleResourceName: String, linkedAt: Date, origin: LinkOrigin? = nil, displayName: String? = nil) {
         self.googleResourceName = googleResourceName
         self.linkedAt = linkedAt
         self.origin = origin
+        self.displayName = displayName
     }
 
     public var effectiveOrigin: LinkOrigin { origin ?? .imported }
 
-    // A missing origin and an explicit `.imported` are the same link.
+    // A missing origin and an explicit `.imported` are the same link; the name is a label, not identity.
     public static func == (lhs: LinkEntry, rhs: LinkEntry) -> Bool {
         lhs.googleResourceName == rhs.googleResourceName && lhs.linkedAt == rhs.linkedAt && lhs.effectiveOrigin == rhs.effectiveOrigin
     }
@@ -35,7 +39,7 @@ public struct LinkEntry: Sendable, Hashable, Codable {
 /// ```json
 /// { "version": 1, "links": { "<iCloud id>": { "googleResourceName": "people/c123", "linkedAt": "2026-10-21T15:04:05Z", "origin": "imported" } } }
 /// ```
-/// `origin` is optional (older files lack it; read as `imported`). A Google contact belongs to at most one iCloud id. Readers must refuse a version they do not know.
+/// `origin` is optional (older files lack it; read as `imported`), and so is `displayName`. A Google contact belongs to at most one iCloud id. Readers must refuse a version they do not know.
 public struct LinkTable: Sendable, Hashable, Codable {
     public static let currentVersion = 1
     public var version: Int
@@ -55,7 +59,7 @@ public struct LinkTable: Sendable, Hashable, Codable {
         for link in new {
             // One owner per Google contact, so reverse lookups are unambiguous.
             links = links.filter { $0.value.googleResourceName != link.googleResourceName }
-            links[link.icloudID] = LinkEntry(googleResourceName: link.googleResourceName, linkedAt: date, origin: link.origin)
+            links[link.icloudID] = LinkEntry(googleResourceName: link.googleResourceName, linkedAt: date, origin: link.origin, displayName: link.displayName)
         }
     }
 

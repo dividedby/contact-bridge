@@ -135,8 +135,14 @@ public struct SyncPlanner: Sendable {
         let deleteLimit = max(Double(limits.minDeletes), limits.deleteFraction * Double(linkedCount))
         let updateLimit = max(Double(limits.minUpdates), limits.updateFraction * Double(linkedCount))
         var reasons: [String] = []
-        if Double(plan.droppedLinks.count) > deleteLimit {
-            reasons.append("forget \(plan.droppedLinks.count) of \(linkedCount) links to contacts that are gone from both sides (more than \(Int(deleteLimit)) at once)")
+        // A released link (its iCloud contact is gone, Google's still exists) is re-matched, not forgotten for good.
+        let forgotten = plan.forgottenLinkInfo
+        if Double(forgotten.count) > deleteLimit {
+            let reasonsSeen = Set(forgotten.map(\.reason))
+            let what = reasonsSeen == [.iCloudGone] ? "deleted in iCloud"
+                : reasonsSeen == [.goneFromBothSides] ? "gone from both sides" : "deleted in iCloud or gone from both sides"
+            plan.guardedForgottenLinks = forgotten
+            reasons.append("forget \(forgotten.count) of \(linkedCount) links to contacts \(what) (more than \(Int(deleteLimit)) at once)")
         }
         if Double(deletes) > deleteLimit {
             reasons.append("delete \(deletes) of \(linkedCount) linked contacts in Google (more than \(Int(deleteLimit)) at once)")
@@ -186,11 +192,11 @@ extension SyncPlanner {
                 let person = feed.people[name]
 
                 guard let baseline = state.baselines[id] else {
-                    planUnbaselined(id: id, name: name, iCloudGone: iCloudGone, googleGone: googleGone, person: person, into: &plan)
+                    planUnbaselined(id: id, entry: entry, iCloudGone: iCloudGone, googleGone: googleGone, person: person, into: &plan)
                     continue
                 }
                 if iCloudGone && googleGone {
-                    plan.droppedLinks.append(id)
+                    drop(id, entry, baseline: baseline, person: person, reason: .goneFromBothSides, released: false, into: &plan)
                 } else if iCloudGone {
                     if let person, googleChanged(person, since: baseline) {
                         plan.review.append(ReviewCandidate(
@@ -212,11 +218,19 @@ extension SyncPlanner {
 
         /// A link from Phase 1 Import: no baseline yet. Take one from both sides as they are now.
         private func planUnbaselined(
-            id: String, name: String, iCloudGone: Bool, googleGone: Bool, person: GooglePerson?, into plan: inout SyncPlan
+            id: String, entry: LinkEntry, iCloudGone: Bool, googleGone: Bool, person: GooglePerson?, into plan: inout SyncPlan
         ) {
+            let name = entry.googleResourceName
             guard scanned else { return }
             guard let record = icloudByID[id] else {
-                if iCloudGone { plan.droppedLinks.append(id) }
+                // Typically a Dedupe merge or a delete removed the iCloud contact after Import linked it. If Google still has
+                // the contact, release it: a surviving iCloud contact may be the same person, and must not get a second copy.
+                if iCloudGone {
+                    drop(
+                        id, entry, baseline: nil, person: person, reason: googleGone ? .goneFromBothSides : .iCloudGone,
+                        released: person != nil, into: &plan
+                    )
+                }
                 return
             }
             if googleGone {
@@ -259,6 +273,22 @@ extension SyncPlanner {
                     icloudFingerprint: ContactFingerprint.of(record), fields: fields
                 ))
             }
+        }
+
+        private func drop(
+            _ id: String, _ entry: LinkEntry, baseline: SyncBaseline?, person: GooglePerson?, reason: DroppedLinkInfo.Reason,
+            released: Bool, into plan: inout SyncPlan
+        ) {
+            plan.droppedLinks.append(id)
+            let named = [
+                baseline?.icloud.displayName,
+                person.flatMap { GooglePersonMapper.record(from: $0, source: .google) }?.displayName,
+                entry.displayName,
+            ].compactMap { $0 }.first { !$0.isBlank && $0 != "(No name)" }
+            plan.droppedLinkInfo[id] = DroppedLinkInfo(
+                icloudID: id, name: named ?? entry.googleResourceName, resourceName: entry.googleResourceName, reason: reason,
+                isReleased: released
+            )
         }
 
         private func differs(_ new: SyncBaseline, from old: SyncBaseline) -> Bool {
@@ -321,7 +351,9 @@ extension SyncPlanner {
         // MARK: unlinked contacts
 
         func planUnlinked(into plan: inout SyncPlan) {
-            let linkedNames = Set(links.links.values.map(\.googleResourceName))
+            // A released link's Google contact competes in the matching pass like any unlinked one.
+            let released = Set(plan.droppedLinkInfo.values.filter(\.isReleased).map(\.resourceName))
+            let linkedNames = Set(links.links.values.map(\.googleResourceName)).subtracting(released)
             var claimedICloud = Set(plan.links.map(\.icloudID))
             var claimedGoogle = Set(plan.links.map(\.resourceName))
 

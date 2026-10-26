@@ -68,6 +68,32 @@ struct SyncExecutorTests {
         #expect(try await rig.plan().isEmpty)
     }
 
+    @Test("A new link and dropped links in one plan: the Google contact moves to the survivor, nothing is left behind or duplicated")
+    func newLinkAndDroppedLinksTogether() async throws {
+        let world = SyncWorld(
+            icloud: [SyncFixtures.icloud("S", "Ann", "Lee", emails: ["ann@example.com"])],
+            google: [SyncFixtures.person("Ann", "Lee", emails: ["ann@example.com"])]
+        )
+        world.state.firstSyncApproved = true
+        // Two vanished iCloud contacts: one pointed at the Google contact the survivor now matches, one at a contact Google lost.
+        world.links.links["GONE1"] = LinkEntry(googleResourceName: "people/c1", linkedAt: world.clock, displayName: "Ann Lee")
+        world.links.links["GONE2"] = LinkEntry(googleResourceName: "people/c99", linkedAt: world.clock, displayName: "Zed Quinn")
+        let rig = try ExecutorRig(world)
+        defer { rig.cleanUp() }
+
+        let plan = try await rig.plan()
+        try #require(plan.links.map(\.icloudID) == ["S"] && plan.links.first?.isNewLink == true)
+        try #require(plan.droppedLinks == ["GONE1", "GONE2"])
+        let report = try await rig.run(plan)
+
+        #expect(report.linksAdded == 1 && report.linksDropped == 2 && report.isComplete)
+        #expect(try rig.links.keys.sorted() == ["S"] && rig.links["S"]?.googleResourceName == "people/c1" && rig.links["S"]?.origin == .matched)
+        #expect(try rig.links["S"]?.displayName == "Ann Lee")
+        #expect(try rig.state.baselines.keys.sorted() == ["S"])
+        #expect(await world.google.allPeople.count == 1, "Google's contact was neither deleted nor copied")
+        #expect(try await rig.plan().isEmpty)
+    }
+
     @Test("A plan that is paused, or made before approval, is refused and nothing is touched")
     func refusals() async throws {
         let rig = try await ExecutorRig.linked(count: 2)

@@ -21,7 +21,9 @@ public struct DemoEnvironment: Sendable {
 }
 
 public enum DemoData {
-    public static func make() -> DemoEnvironment {
+    /// - Parameter forgottenLinks: also seed links to six contacts that were deleted in iCloud and no longer exist in Google
+    ///   (`--demo-forget-links`), so Start syncing runs into the "forget old links" confirmation with the names listed.
+    public static func make(forgottenLinks: Bool = false) -> DemoEnvironment {
         var counter = 0
         func icloud(
             _ given: String, _ family: String, phones: [(String, String)] = [], emails: [String] = [], org: String = "", job: String = ""
@@ -150,6 +152,12 @@ public enum DemoData {
             book.first { $0.givenName == given }.map { ImportedLink(icloudID: $0.sourceIdentifier, googleResourceName: resource) }
         }
         try? links.add(imported, at: Date(timeIntervalSince1970: 1_790_000_000))
+        if forgottenLinks {
+            let gone = ["Alan Cooper", "Beth Ward", "Chris Doyle", "Dina Moss", "Eli Park", "Fay Ross"]
+            try? links.add(gone.enumerated().map { index, name in
+                ImportedLink(icloudID: "demo-gone-\(index + 1)", googleResourceName: "people/c\(80001 + index)", displayName: name)
+            }, at: Date(timeIntervalSince1970: 1_780_000_000))
+        }
 
         // Leo and David have synced before, so Start syncing finds their edits as ordinary changes rather than as two
         // contacts to compare for the first time. A baseline's etag is one the fake never issues, so Google's copy reads as edited.

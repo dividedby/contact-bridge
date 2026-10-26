@@ -107,6 +107,25 @@ public struct PlannedDelete: Sendable, Hashable {
     public var baseline: SyncBaseline
 }
 
+/// Who a forgotten link was for, so the screen can name the contact after it is gone from iCloud.
+public struct DroppedLinkInfo: Sendable, Hashable {
+    public enum Reason: Sendable, Hashable {
+        /// Gone from iCloud and from Google.
+        case goneFromBothSides
+        /// Gone from iCloud; Google was not seen to lose it (or still has it).
+        case iCloudGone
+    }
+
+    public var icloudID: String
+    /// The baseline's iCloud name, else the Google contact's, else the one stored with the link, else the resource name.
+    public var name: String
+    public var resourceName: String
+    public var reason: Reason
+    /// The Google contact still exists, so the matching pass may link it to a surviving iCloud contact instead of leaving
+    /// it as an orphan. A released drop is not a forgotten contact and does not count towards the confirmation guard.
+    public var isReleased: Bool
+}
+
 /// The state to save once a run's results are committed. `SyncPlan.checkpoint` is nil when the run left work behind.
 public struct SyncCheckpoint: Sendable, Hashable {
     public var icloudChangeToken: Data?
@@ -157,6 +176,10 @@ public struct SyncPlan: Sendable, Hashable {
     /// iCloud ids whose link and baseline should be forgotten: the contact is gone from both sides, or its link has no
     /// baseline and its iCloud contact is gone.
     public var droppedLinks: [String] = []
+    /// Who each of `droppedLinks` was, by iCloud id.
+    public var droppedLinkInfo: [String: DroppedLinkInfo] = [:]
+    /// The links the forget-links guard counted, when it is what paused the plan (`pause` is `.needsConfirmation`).
+    public var guardedForgottenLinks: [DroppedLinkInfo] = []
     public var review: [ReviewCandidate] = []
     public var deferred = Deferred()
 
@@ -177,6 +200,12 @@ public struct SyncPlan: Sendable, Hashable {
     public var notesReason: NotesReadReason = .skipped
 
     public var checkpoint: SyncCheckpoint?
+
+    /// The dropped links that count towards the confirmation guard and the forget-links pause, sorted by name: those not
+    /// released for re-matching.
+    public var forgottenLinkInfo: [DroppedLinkInfo] {
+        droppedLinkInfo.values.filter { !$0.isReleased }.sorted { ($0.name, $0.icloudID) < ($1.name, $1.icloudID) }
+    }
 
     public var mutationCount: Int { creates.count + updates.count + deletes.count }
 

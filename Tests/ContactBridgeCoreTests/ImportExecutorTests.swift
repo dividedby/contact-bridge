@@ -89,9 +89,10 @@ struct ImportExecutorTests {
         let result = try await ImportExecutor(store: store, receipt: .forTesting(createdAt: now), links: links)
             .execute([candidate("people/c1", "Ann"), candidate("otherContacts/c7", "Cara", source: .googleOther)], now: now)
         #expect(result.created.count == 2)
-        #expect(result.links == [ImportedLink(icloudID: "mem-1", googleResourceName: "people/c1")])
+        #expect(result.links == [ImportedLink(icloudID: "mem-1", googleResourceName: "people/c1", displayName: "Ann Test")])
         let table = try links.load()
         #expect(table.links == ["mem-1": LinkEntry(googleResourceName: "people/c1", linkedAt: now)])
+        #expect(table.links["mem-1"]?.displayName == "Ann Test", "the name is kept so a screen can say who the link was for after the contact is gone")
         #expect(result.linkSaveError == nil)
     }
 

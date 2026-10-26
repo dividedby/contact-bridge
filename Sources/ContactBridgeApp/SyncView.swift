@@ -120,6 +120,11 @@ private extension SyncPreview {
                         explanation: "Their iCloud contact is gone.",
                         items: deletes
                     )
+                    PreviewList(
+                        title: "Forget \(ContactText.count(forgottenLinks.count, "old link"))",
+                        explanation: ForgottenLinks.explanation,
+                        items: forgottenLinks
+                    )
                     ReviewListView(
                         title: "Review \(ContactText.count(reviews.count, "item"))",
                         explanation: "These need your decision. Nothing is changed for them until you decide.",
@@ -179,10 +184,6 @@ private extension SyncPreview {
             Label("\(ContactText.count(unlinkedWaitingForFullListing, "contact")) wait for a full read of your Google contacts.", systemImage: "hourglass")
                 .foregroundStyle(.orange)
         }
-        if forgottenLinks > 0 {
-            Label("\(ContactText.count(forgottenLinks, "old link")) will be forgotten: the contact is gone on both sides.", systemImage: "link.badge.plus")
-                .foregroundStyle(.secondary)
-        }
     }
 }
 
@@ -202,6 +203,10 @@ private struct CountTile: View {
         .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
         .accessibilityElement(children: .combine)
     }
+}
+
+private enum ForgottenLinks {
+    static let explanation = "Their contact is gone from iCloud, so the saved link to Google is dropped. Nothing is deleted in Google for these."
 }
 
 /// An expandable list of contact names. Long lists show their first names and a count of the rest.
@@ -348,6 +353,7 @@ private struct SyncStatusView: View {
                 Section {
                     Label("Waiting for your OK", systemImage: "hand.raised.fill").font(.headline).foregroundStyle(.orange)
                     Text(summary).fixedSize(horizontal: false, vertical: true)
+                    PreviewList(title: "Contacts whose links would be forgotten", explanation: ForgottenLinks.explanation, items: snapshot.pauseDetails)
                     Text("Nothing has been changed. Confirm if this is what you expect; otherwise keep syncing paused and look at your contacts first.")
                         .font(.caption).foregroundStyle(.secondary)
                     HStack {

@@ -237,8 +237,9 @@ public struct SyncPreview: Sendable, Hashable {
     /// Google contacts that will be deleted because the iCloud contact is gone.
     public var deletes: [Item]
     public var reviews: [SyncReviewSummary]
-    /// Links that will be forgotten because the contact is gone from both sides.
-    public var forgottenLinks: Int
+    /// Links that will be forgotten because their contact is gone from iCloud (and perhaps from Google too). Links whose
+    /// Google contact survives are re-matched instead and are not listed.
+    public var forgottenLinks: [Item]
     public var waitingForNotes: Int
     public var unlinkedWaitingForFullListing: Int
     public var notesUnavailable: Bool
@@ -277,6 +278,9 @@ public struct SyncSnapshot: Sendable, Hashable {
     public var unconfirmedCreates = 0
     /// Notes were due but unreadable on the last run: the note field is skipped, and new contacts cannot sync.
     public var notesUnavailable = false
+    /// The contacts a `.needsConfirmation` pause is about to forget links to, by name. The pause's own summary stays
+    /// name-free (it is saved and compared as text); empty unless that guard is what paused.
+    public var pauseDetails: [SyncPreview.Item] = []
 
     public init() {}
 
