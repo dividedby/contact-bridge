@@ -199,12 +199,12 @@ public final class InMemoryContactStore: ContactStoring {
     }
 
     public func exportVCard(ids: [String]) async throws -> Data {
-        let chosen: [ContactRecord] = try state.withLock { state in
+        let chosen: [(ContactRecord, Data?)] = try state.withLock { state in
             try Self.requireAccess(state)
             let byID = Dictionary(state.records.map { ($0.sourceIdentifier, $0) }, uniquingKeysWith: { first, _ in first })
             let missing = ids.filter { byID[$0] == nil }
             guard missing.isEmpty else { throw ContactStoreError.notFound(missing) }
-            return ids.compactMap { byID[$0] }
+            return ids.compactMap { id in byID[id].map { ($0, state.photos[id]) } }
         }
         return Data(chosen.map(Self.vCard).joined().utf8)
     }
@@ -245,7 +245,7 @@ public final class InMemoryContactStore: ContactStoring {
     }
 
     /// Minimal vCard 3.0, enough for previews and tests; the real adapter uses CNContactVCardSerialization.
-    private static func vCard(_ record: ContactRecord) -> String {
+    private static func vCard(_ record: ContactRecord, photo: Data?) -> String {
         func escape(_ text: String) -> String {
             text.replacing("\\", with: "\\\\").replacing(";", with: "\\;").replacing(",", with: "\\,")
                 .replacing("\r\n", with: "\\n").replacing("\n", with: "\\n")
@@ -274,6 +274,7 @@ public final class InMemoryContactStore: ContactStoring {
             let year = birthday.year.map { String(format: "%04d", $0) } ?? "-"
             lines.append("BDAY:\(year)-\(String(format: "%02d-%02d", month, day))")
         }
+        if let photo { lines.append("PHOTO;ENCODING=b;TYPE=\(VCardWriter.imageType(photo)):\(photo.base64EncodedString())") }
         lines.append("END:VCARD")
         return lines.joined(separator: "\r\n") + "\r\n"
     }

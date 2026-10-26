@@ -1,7 +1,9 @@
+import Contacts
 import CryptoKit
 import Foundation
 import Synchronization
 import Testing
+import UniformTypeIdentifiers
 @testable import ContactBridgeCore
 
 struct BackupWriterTests {
@@ -56,11 +58,11 @@ struct BackupWriterTests {
 
     private func writer(
         _ sandbox: Sandbox, store: any ContactStoring? = nil, google: (any GoogleContactsClient)? = nil,
-        notes: (any NotesProvider)? = nil, retention: Int = 20, clock: Clock? = nil
+        notes: (any NotesProvider)? = nil, photoFetcher: (any GooglePhotoFetching)? = nil, retention: Int = 20, clock: Clock? = nil
     ) -> BackupWriter {
         let clock = clock ?? Clock(start)
         return BackupWriter(
-            store: store ?? self.store(), google: google, notes: notes, baseDirectory: sandbox.url,
+            store: store ?? self.store(), google: google, notes: notes, photoFetcher: photoFetcher, baseDirectory: sandbox.url,
             appVersion: "9.9.9", retention: retention, now: { clock.now() }, timeZone: centralDaylight
         )
     }
@@ -103,7 +105,7 @@ struct BackupWriterTests {
         #expect(written.appVersion == "9.9.9")
         #expect(written.createdAt == Date(timeIntervalSince1970: 1_792_611_125))
         #expect(written.sources == ["icloud", "google", "googleOther"])
-        #expect(written.counts == BackupManifest.Counts(icloud: 3, googleConnections: 5, googleOther: 3))
+        #expect(written.counts == BackupManifest.Counts(icloud: 3, googleConnections: 5, googleOther: 3, icloudPhotos: 0))
         #expect(written.notesIncluded == false)
         #expect(written.files.map(\.name) == ["icloud.vcf", "icloud.json", "google-connections.json", "google-other.json"])
         #expect(receipt.createdAt == written.createdAt)
@@ -132,7 +134,7 @@ struct BackupWriterTests {
         let files = try FileManager.default.contentsOfDirectory(atPath: receipt.folderURL.path).sorted()
         #expect(files == ["icloud.json", "icloud.vcf", "manifest.json"])
         #expect(receipt.manifest.sources == ["icloud"])
-        #expect(receipt.manifest.counts == BackupManifest.Counts(icloud: 3))
+        #expect(receipt.manifest.counts == BackupManifest.Counts(icloud: 3, icloudPhotos: 0))
     }
 
     @Test("Backups in the same second get distinct folders; names are filesystem-safe")
@@ -613,5 +615,68 @@ struct BackupWriterTests {
         let exact = PagingStub(connectionToken: { $0 < 1000 ? "t\($0)" : nil })
         _ = try await writer(sandbox, google: exact).createBackup()
         #expect(exact.connectionCalls.withLock { $0 } == 1000)
+    }
+
+    // MARK: photos
+
+    @Test("iCloud photos are in icloud.vcf and counted in the manifest")
+    func icloudPhotos() async throws {
+        let sandbox = Sandbox()
+        let picture = PhotoPictures.picture(1)
+        let store = InMemoryContactStore(records: [record("c", "Cy"), record("a", "Ann"), record("b", "Bob")], photos: ["a": picture])
+        let receipt = try await writer(sandbox, store: store).createBackup()
+        let vcf = String(decoding: try Data(contentsOf: receipt.folderURL.appendingPathComponent("icloud.vcf")), as: UTF8.self)
+        #expect(vcf.contains("PHOTO;ENCODING=b;TYPE=JPEG:\(picture.base64EncodedString())"))
+        #expect(receipt.manifest.counts.icloudPhotos == 1)
+    }
+
+    @Test("A photo added to Apple's vCard export reads back through Apple's import, card by card")
+    func appleExportCarriesPhoto() throws {
+        let ann = CNMutableContact(), bob = CNMutableContact()
+        ann.givenName = "Ann"
+        bob.givenName = "Bob"
+        let picture = PhotoPictures.picture(2)
+        let exported = VCardWriter.addingPhotos([nil, picture], to: try CNContactVCardSerialization.data(with: [ann, bob]))
+        let back = try CNContactVCardSerialization.contacts(with: exported)
+        #expect(back.map(\.givenName) == ["Ann", "Bob"])
+        #expect(back[0].imageData == nil && back[1].imageData != nil)
+        #expect(String(decoding: exported, as: UTF8.self).components(separatedBy: "\n").allSatisfy { $0.utf8.count <= 76 }, "folded")
+        #expect(VCardWriter.addingPhotos([picture, nil], to: exported) != exported, "a card without one gets it")
+        #expect(VCardWriter.addingPhotos([nil, picture], to: exported) == exported, "a card that has one keeps it")
+    }
+
+    @Test("Google contacts' own photos are saved full size with an index; a failed download is listed, not fatal")
+    func googlePhotos() async throws {
+        let sandbox = Sandbox()
+        let google = google()
+        let one = PhotoPictures.picture(3), two = try #require(PhotoTestImages.encode(PhotoTestImages.scene(seed: 4), as: .png))
+        try await google.setContactPhoto(one, for: "people/c1")
+        try await google.setContactPhoto(two, for: "people/c2")
+        let unreachable = try await google.setContactPhoto(PhotoPictures.picture(5), for: "people/c3")
+        try await google.setProfilePhoto(PhotoPictures.picture(6), for: "people/c4")
+        let fetcher = FakeGooglePhotoFetcher(client: google)
+        let failing = FailingFetcher(inner: fetcher, key: try #require(GooglePersonMapper.photos(of: unreachable).contact?.key))
+        let receipt = try await writer(sandbox, google: google, photoFetcher: failing).createBackup()
+        let folder = receipt.folderURL
+
+        let index = try JSONDecoder().decode([BackupWriter.GooglePhotoEntry].self, from: Data(contentsOf: folder.appendingPathComponent("google-photos.json")))
+        #expect(index.map(\.resourceName) == ["people/c1", "people/c2", "people/c3"], "the profile photo is not the contact's own")
+        #expect(index.map(\.file) == ["google-photos/c1.jpg", "google-photos/c2.png", nil])
+        #expect(index[2].error != nil && index[0].error == nil)
+        #expect(try Data(contentsOf: folder.appendingPathComponent("google-photos/c1.jpg")) == one)
+        #expect(try Data(contentsOf: folder.appendingPathComponent("google-photos/c2.png")) == two)
+        #expect(await fetcher.requested.allSatisfy { $0.absoluteString.hasSuffix("=s0") }, "full size")
+        #expect(receipt.manifest.counts.googlePhotos == 2)
+        #expect(receipt.manifest.files.filter { $0.name.hasPrefix("google-photos/") }.count == 2)
+        #expect(receipt.manifest.files.contains { $0.name == "google-photos.json" && $0.recordCount == 3 })
+    }
+
+    private struct FailingFetcher: GooglePhotoFetching {
+        let inner: FakeGooglePhotoFetcher
+        let key: String
+        func fetch(_ url: URL) async throws -> Data {
+            if GooglePersonMapper.photoKey(ofURL: url.absoluteString) == key { throw GooglePhotoError.http(503) }
+            return try await inner.fetch(url)
+        }
     }
 }

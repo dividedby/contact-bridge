@@ -111,11 +111,15 @@ public final class CNContactStoreAdapter: ContactStoring, @unchecked Sendable {
         return try await onQueue {
             let container = try self.resolveContainer()
             try self.requireInContainer(try self.fetchContacts(ids: ids, keys: [CNContactIdentifierKey as NSString]), container)
+            let photoKeys = [CNContactImageDataKey, CNContactImageDataAvailableKey, CNContactThumbnailImageDataKey].map { $0 as NSString }
             do {
-                let contacts = try self.fetchContacts(ids: ids, keys: [CNContactVCardSerialization.descriptorForRequiredKeys()])
-                return try CNContactVCardSerialization.data(with: contacts)
+                let contacts = try self.fetchContacts(ids: ids, keys: [CNContactVCardSerialization.descriptorForRequiredKeys()] + photoKeys)
+                // Apple's export leaves photos out, whatever is fetched: they are added card by card.
+                return VCardWriter.addingPhotos(
+                    contacts.map { ICloudPhotoRead.withPictureForExport($0).imageData }, to: try CNContactVCardSerialization.data(with: contacts)
+                )
             } catch where CNContactMapper.isUnauthorizedKeys(error) {
-                return VCardWriter.data(for: try self.fetchContacts(ids: ids, keys: CNContactMapper.mergeKeys))
+                return VCardWriter.data(for: try self.fetchContacts(ids: ids, keys: CNContactMapper.mergeKeys + photoKeys).map(ICloudPhotoRead.withPictureForExport))
             }
         }
     }
@@ -343,5 +347,18 @@ enum ICloudPhotoRead {
     /// The full picture when there is one, otherwise the thumbnail.
     static func picture(imageDataAvailable: Bool, image: Data?, thumbnail: Data?) -> Data? {
         (imageDataAvailable ? image : nil) ?? thumbnail
+    }
+
+    /// `contact` with `picture` as its image, so a vCard export carries the photo even when macOS only has a thumbnail. An
+    /// in-memory copy for exporting; it is never saved. Needs the image, availability and thumbnail keys fetched.
+    static func withPictureForExport(_ contact: CNContact) -> CNContact {
+        let image = contact.isKeyAvailable(CNContactImageDataKey) ? contact.imageData : nil
+        let available = contact.isKeyAvailable(CNContactImageDataAvailableKey) && contact.imageDataAvailable
+        let thumbnail = contact.isKeyAvailable(CNContactThumbnailImageDataKey) ? contact.thumbnailImageData : nil
+        guard let best = picture(imageDataAvailable: available, image: image, thumbnail: thumbnail), best != image,
+              let copy = contact.mutableCopy() as? CNMutableContact
+        else { return contact }
+        copy.imageData = best
+        return copy
     }
 }

@@ -162,7 +162,10 @@ final class AppModel {
 
     private func makeBackupSetup() throws -> BackupSetup {
         guard let store else { throw ContactStoreError.accessDenied }
-        let writer = BackupWriter(store: store, google: googleClient, notes: notesAreAccessible ? deps.notes : nil, baseDirectory: deps.backupDirectory)
+        let writer = BackupWriter(
+            store: store, google: googleClient, notes: notesAreAccessible ? deps.notes : nil, photoFetcher: deps.photoSupport?.fetcher,
+            baseDirectory: deps.backupDirectory
+        )
         return BackupSetup(writer: writer, containerID: setup.selectedContainer?.id)
     }
 
