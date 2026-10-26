@@ -78,7 +78,8 @@ public struct BackupWriter: Sendable {
             connections = try await Self.allPages("google-connections") { try await google.listConnections(syncToken: nil, pageToken: $0) }
             others = try await Self.allPages("google-other") { try await google.listOtherContacts(pageToken: $0) }
         }
-        let noteMap = try await notes?.fetchNotes(ids: identifiers)
+        // Contacts without a note come back as "": the file lists only real notes.
+        let noteMap = try await notes?.fetchNotes(ids: identifiers).filter { !$0.value.isEmpty }
         let createdAt = Date(timeIntervalSince1970: now().timeIntervalSince1970.rounded(.down))
 
         let fm = FileManager.default

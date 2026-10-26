@@ -197,11 +197,11 @@ public struct ContactWorkflows: Sendable {
         )
     }
 
-    /// Notes of the given contacts, in one read. Empty without a notes store.
+    /// Notes of the given contacts that have one, in one read. Empty without a notes store.
     @concurrent
     public func loadNotes(ids: [String]) async throws -> [String: String] {
         guard let notes else { return [:] }
-        return try await notes.fetchNotes(ids: ids)
+        return try await notes.fetchNotes(ids: ids).filter { !$0.value.isEmpty }
     }
 
     /// Never offer this group again (until `restoreDismissed`): the members still in the draft, not ones the user left out.

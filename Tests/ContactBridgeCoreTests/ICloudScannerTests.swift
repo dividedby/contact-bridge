@@ -54,6 +54,27 @@ struct ICloudScannerTests {
         #expect(notes.fetchedIDs == [["a", "b"]])
     }
 
+    @Test("A contact the provider did not return gets no note hash and no text, while a found contact without a note gets the empty hash")
+    func unmatchedContactHasNoHash() async throws {
+        let store = InMemoryContactStore(records: [
+            SyncFixtures.icloud("a", "Ann", "Lee"), SyncFixtures.icloud("b", "Bob", "Stone"), SyncFixtures.icloud("c", "Cy", "Park"),
+        ])
+        let notes = InMemoryNotesStore(notes: ["a": "hello"], unmatchedIDs: ["b"])
+        let scan = try await scanner(store, notes: notes).scan(state: SyncState())
+        #expect(scan.notes == .read)
+        #expect(scan.noteHashes == ["a": NoteHash.hash("hello"), "c": NoteHash.hash("")])
+        #expect(scan.noteHashes["b"] == nil && scan.noteTexts["b"] == nil)
+    }
+
+    @Test("A synced note is not reported as changed when its contact was not returned")
+    func unmatchedContactIsNotChanged() async throws {
+        let ann = SyncFixtures.icloud("a", "Ann", "Lee")
+        let store = InMemoryContactStore(records: [ann])
+        let state = try await settled(store, baselines: ["a": baseline(ann, noteHash: NoteHash.hash("hello"))])
+        let scan = try await scanner(store, notes: InMemoryNotesStore(unmatchedIDs: ["a"])).scan(state: state, trigger: .syncNow)
+        #expect(scan.notes == .read && scan.noteHashes.isEmpty && scan.changedIDs.isEmpty)
+    }
+
     @Test("The same change token short-circuits: nothing is fetched and no note is read")
     func tokenShortCircuit() async throws {
         let ann = SyncFixtures.icloud("a", "Ann", "Lee")

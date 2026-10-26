@@ -124,8 +124,8 @@ enum ContactsAppIDs {
             || (descriptor.descriptorType == typeType && descriptor.typeCodeValue == 0x6D73_6E67)
     }
 
-    /// Notes for `requested`, keyed by the requested id. Exact id match first, then UUID-part match. People without a
-    /// note are omitted.
+    /// Notes for `requested`, keyed by the requested id. Exact id match first, then UUID-part match. A matched person
+    /// without a note is `""`; an id that matches nobody is omitted (unknown, not empty).
     static func notes(for requested: [String], in people: [(id: String, note: String?)]) -> [String: String] {
         var exact: [String: String?] = [:]
         var byUUID: [String: String?] = [:]
@@ -137,7 +137,7 @@ enum ContactsAppIDs {
         var result: [String: String] = [:]
         for id in requested where !uuidPart(of: id).isEmpty {
             let match = exact[id] ?? byUUID[uuidPart(of: id)]
-            if let note = match ?? nil { result[id] = note }
+            if let found = match { result[id] = found ?? "" }
         }
         return result
     }

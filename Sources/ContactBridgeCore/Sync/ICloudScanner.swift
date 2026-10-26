@@ -26,7 +26,7 @@ public enum SyncTrigger: Sendable, Hashable {
 
 /// What happened to the notes in one scan.
 public enum NotesReadOutcome: Sendable, Hashable {
-    /// Every scanned contact has a note hash.
+    /// The notes were read. A contact the provider did not return has no note hash (see `ICloudScan.noteHashes`).
     case read
     /// No read was attempted (reason `skipped`).
     case notRead
@@ -132,7 +132,8 @@ public struct ICloudScanner: Sendable {
                 do {
                     let fetched = try await notes.fetchNotes(ids: records.map(\.sourceIdentifier))
                     for record in records {
-                        let text = fetched[record.sourceIdentifier] ?? ""
+                        // Absent means the provider could not match the contact: its note is unknown, not empty.
+                        guard let text = fetched[record.sourceIdentifier] else { continue }
                         hashes[record.sourceIdentifier] = NoteHash.hash(text)
                         if !text.isBlank { texts[record.sourceIdentifier] = text }
                     }

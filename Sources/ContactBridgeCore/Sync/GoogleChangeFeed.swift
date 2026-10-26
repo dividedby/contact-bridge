@@ -51,6 +51,21 @@ public struct GoogleFeed: Sendable, Hashable {
     }
 }
 
+public enum GoogleChangeFeedError: Error, Sendable, Equatable {
+    /// An account is saved in the sync state but the signed-in account's email is not known, so it cannot be told whether
+    /// it is the same one. Not a change of account: the run fails and tries again.
+    case accountUnconfirmed
+}
+
+extension GoogleChangeFeedError: LocalizedError {
+    public var errorDescription: String? {
+        switch self {
+        case .accountUnconfirmed:
+            "Couldn't confirm which Google account is signed in, so Google was left alone this time. Sign in again in Setup if this keeps happening."
+        }
+    }
+}
+
 /// Reads Google's contacts the cheap way: with the stored sync token only what changed since the last run, and the whole
 /// book when the token is missing, expired or was issued for other `personFields`.
 public struct GoogleChangeFeed: Sendable {
@@ -70,9 +85,11 @@ public struct GoogleChangeFeed: Sendable {
     }
 
     /// - Parameters:
-    ///   - accountEmail: the signed-in account, when known. A different one than `state.googleAccount` pauses.
+    ///   - accountEmail: the signed-in account, when known. A different one than `state.googleAccount` pauses. Unknown
+    ///     (nil or empty) while an account is saved throws `GoogleChangeFeedError.accountUnconfirmed`: nothing is read.
     ///   - requireFullListing: list everything even though a valid sync token exists.
     public func fetch(state: SyncState, accountEmail: String? = nil, requireFullListing: Bool = false) async throws -> GoogleFeed {
+        let accountEmail = accountEmail.flatMap { $0.isEmpty ? nil : $0 }
         func feed(
             _ status: GoogleFeed.Status, _ mode: GoogleFeed.Mode, people: [GooglePerson] = [], deleted: Set<String> = [], token: String? = nil
         ) -> GoogleFeed {
@@ -89,8 +106,9 @@ public struct GoogleChangeFeed: Sendable {
             )
         }
 
-        if let saved = state.googleAccount, let accountEmail, saved.lowercased() != accountEmail.lowercased() {
-            return feed(.paused(.accountChanged), .full(.requested))
+        if let saved = state.googleAccount {
+            guard let accountEmail else { throw GoogleChangeFeedError.accountUnconfirmed }
+            if saved.lowercased() != accountEmail.lowercased() { return feed(.paused(.accountChanged), .full(.requested)) }
         }
 
         var reason: GoogleFeed.FullListingReason?

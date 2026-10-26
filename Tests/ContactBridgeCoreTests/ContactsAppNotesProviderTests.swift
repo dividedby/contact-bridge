@@ -23,13 +23,14 @@ struct ContactsAppNotesProviderTests {
         #expect(source.contains("com.apple.AddressBook"))
     }
 
-    @Test("Notes are filtered to the requested ids and missing value means no entry")
+    @Test("Notes are filtered to the requested ids; a found person without a note is empty text, an unmatched id is absent")
     func filtersAndSkipsMissing() async throws {
         let runner = FakeAppleScriptRunner(responses: [
             bulk(["A:ABPerson", "B:ABPerson", "C:ABPerson", "D:ABPerson"], ["Note A", nil, "Note C", ""]),
         ])
         let notes = try await provider(runner).fetchNotes(ids: ["A:ABPerson", "B:ABPerson", "D:ABPerson", "Z:ABPerson"])
-        #expect(notes == ["A:ABPerson": "Note A"])
+        #expect(notes == ["A:ABPerson": "Note A", "B:ABPerson": "", "D:ABPerson": ""])
+        #expect(notes["Z:ABPerson"] == nil, "not found must stay distinguishable from found without a note")
     }
 
     @Test("The parser accepts real AppleScript output: `missing value` as NSAppleScript returns it")
@@ -38,13 +39,13 @@ struct ContactsAppNotesProviderTests {
         #expect(real.atIndex(2)?.atIndex(2)?.descriptorType != typeNull, "fixture check: real missing value is not typeNull")
         #expect(real.atIndex(2)?.atIndex(2)?.stringValue == nil)
         let notes = try await provider(FakeAppleScriptRunner(responses: [.success(real)])).fetchNotes(ids: ["id1:ABPerson", "id2:ABPerson", "id3:ABPerson"])
-        #expect(notes == ["id1:ABPerson": "note"])
+        #expect(notes == ["id1:ABPerson": "note", "id2:ABPerson": "", "id3:ABPerson": ""])
     }
 
-    @Test("A typeNull entry also counts as no note")
+    @Test("A typeNull entry also counts as a found contact with no note")
     func nullIsNoNote() async throws {
         let shape = ScriptValue.list([ScriptValue.list([ScriptValue.string("A")]), ScriptValue.list([NSAppleEventDescriptor.null()])])
-        #expect(try await provider(FakeAppleScriptRunner(responses: [.success(shape)])).fetchNotes(ids: ["A"]).isEmpty)
+        #expect(try await provider(FakeAppleScriptRunner(responses: [.success(shape)])).fetchNotes(ids: ["A"]) == ["A": ""])
     }
 
     @Test("Multi-line and unicode notes come back verbatim")

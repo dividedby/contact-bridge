@@ -105,6 +105,21 @@ struct MergeExecutorTests {
         #expect(notes.writes.isEmpty)
     }
 
+    @Test("Empty note text (found, no note) counts as no note: nothing is written, and a duplicate's note still carries over")
+    func emptyTextIsNoNote() async throws {
+        let store = store()
+        let none = FakeNotes(store: store, notes: ["s": "", "d1": ""])
+        let outcome = try await MergeExecutor(store: store, notes: none)
+            .execute(survivor: record("s", "Sam"), absorbing: ["d1"], backup: receipt)
+        #expect(outcome.notes == .unchanged && none.writes.isEmpty)
+
+        let store2 = self.store()
+        let carry = FakeNotes(store: store2, notes: ["s": "", "d1": "One"])
+        let carried = try await MergeExecutor(store: store2, notes: carry)
+            .execute(survivor: record("s", "Sam"), absorbing: ["d1"], backup: receipt)
+        #expect(carried.notes == .written && carry.writes.map(\.note) == ["One"])
+    }
+
     @Test("A failed note write is reported with the combined text; the merge stays done")
     func writeFails() async throws {
         let store = store()

@@ -123,7 +123,7 @@ struct SyncPlannerTests {
         _ = try await world.store.create(SyncFixtures.icloud("x", "Cy", "Moss", phones: ["415-555-0003"]), backup: .forTesting())
         let scan = try await ICloudScanner(store: world.store, notes: world.notes, now: { world.clock }).scan(state: world.state)
         #expect(SyncPlanner.requiresFullGoogleListing(icloud: scan, links: world.links, state: world.state))
-        let partial = try await GoogleChangeFeed(client: world.google, fieldsVersion: SyncFixtures.fieldsVersion).fetch(state: world.state)
+        let partial = try await GoogleChangeFeed(client: world.google, fieldsVersion: SyncFixtures.fieldsVersion).fetch(state: world.state, accountEmail: world.account)
         #expect(!partial.isFullListing)
         let plan = SyncPlanner().plan(icloud: scan, google: partial, state: world.state, links: world.links, now: world.clock)
         #expect(plan.creates.isEmpty && plan.unlinkedWaitingForFullListing == 1 && !plan.createsVerifiedAgainstFullListing)
@@ -253,6 +253,19 @@ struct SyncPlannerTests {
         #expect(plan.notesUnavailable && plan.notesReason == .syncNow)
         #expect(plan.updates.map(\.fields) == [[.nickname]], "other fields still sync; the note is left alone")
         #expect(plan.updates.first?.note == nil)
+    }
+
+    @Test("A contact the notes provider did not return never gets its note cleared in Google")
+    func unmatchedNoteNeverPushes() async throws {
+        let world = try await syncedPair(notes: ["I1": "Hello"], googleNote: "Hello")
+        world.notes.setUnmatched(["I1"])
+        let plan = try await world.plan(.syncNow)
+        #expect(plan.updates.isEmpty && plan.review.isEmpty, "an unread note is unknown, not deleted")
+        #expect(world.lastScan?.noteHashes["I1"] == nil && world.lastScan?.noteHashes["I2"] == NoteHash.hash(""))
+
+        try await world.editICloud("I1") { $0.nickname = "Annie" }
+        let other = try await world.plan(.syncNow)
+        #expect(other.updates.map(\.fields) == [[.nickname]] && other.updates.first?.note == nil)
     }
 
     @Test("A note edited only in Google is a googleEdited review of the note")
@@ -452,7 +465,7 @@ struct SyncPlannerTests {
 
         let scan = try #require(world.lastScan)
         let feed = try await GoogleChangeFeed(client: world.google, fieldsVersion: SyncFixtures.fieldsVersion)
-            .fetch(state: world.state, requireFullListing: true)
+            .fetch(state: world.state, accountEmail: world.account, requireFullListing: true)
         let confirmed = SyncPlanner().plan(
             icloud: scan, google: feed, state: world.state, links: world.links, allowMassGoogleDeletions: true, now: world.clock
         )

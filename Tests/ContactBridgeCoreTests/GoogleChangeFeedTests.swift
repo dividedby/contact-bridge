@@ -91,8 +91,20 @@ struct GoogleChangeFeedTests {
 
         let adopted = try await feed(client).fetch(state: SyncState(), accountEmail: "me@example.com")
         #expect(adopted.account == "me@example.com")
-        let unknown = try await feed(client).fetch(state: SyncState(googleAccount: "me@example.com"), accountEmail: nil)
-        #expect(unknown.status == .ok && unknown.account == "me@example.com")
+        let neither = try await feed(client).fetch(state: SyncState(), accountEmail: nil)
+        #expect(neither.status == .ok && neither.account == nil)
+    }
+
+    @Test("A saved account with no known current email fails the run before Google is read: unconfirmed, not changed")
+    func accountUnconfirmed() async throws {
+        let client = FakeGoogleClient(people: people(2))
+        await #expect(throws: GoogleChangeFeedError.accountUnconfirmed) {
+            try await feed(client).fetch(state: SyncState(googleAccount: "me@example.com"), accountEmail: nil)
+        }
+        await #expect(throws: GoogleChangeFeedError.accountUnconfirmed) {
+            try await feed(client).fetch(state: SyncState(googleAccount: "me@example.com"), accountEmail: "", requireFullListing: true)
+        }
+        #expect(GoogleChangeFeedError.accountUnconfirmed.localizedDescription.contains("which Google account"))
     }
 
     @Test("The ownership tag index maps iCloud ids to resource names")

@@ -46,7 +46,8 @@ public struct SyncEnvironment: Sendable {
     /// Nil when notes cannot be read (no permission): the run carries no note information.
     public var notes: (any NotesProvider)?
     public var google: any GoogleContactsClient
-    /// The signed-in Google account; a different one than the baselines were made for pauses sync.
+    /// The signed-in Google account; a different one than the baselines were made for pauses sync. Nil when the email is
+    /// unknown: a run then fails once an account is saved, and the first sync cannot be approved.
     public var accountEmail: String?
     /// The iCloud container `store` reads and writes; the backup has to cover exactly it.
     public var containerID: String?
@@ -281,6 +282,9 @@ public struct SyncSnapshot: Sendable, Hashable {
     /// The contacts a `.needsConfirmation` pause is about to forget links to, by name. The pause's own summary stays
     /// name-free (it is saved and compared as text); empty unless that guard is what paused.
     public var pauseDetails: [SyncPreview.Item] = []
+    /// Set when the kill switch (pause or resume) could not be saved: it holds for now but may not after a relaunch.
+    /// Cleared by the next switch that saves.
+    public var pauseSaveWarning: String?
 
     public init() {}
 

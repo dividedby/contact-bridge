@@ -465,8 +465,13 @@ private struct SyncStatusView: View {
         let blocked = snapshot.lastRun?.blockedByReview ?? 0
         let warnings = snapshot.lastRun?.warnings ?? []
         if snapshot.notesUnavailable || snapshot.waitingForNotes > 0 || snapshot.unlinkedWaitingForFullListing > 0
-            || snapshot.unconfirmedCreates > 0 || leftBehind > 0 || conflicts > 0 || blocked > 0 || !warnings.isEmpty {
+            || snapshot.unconfirmedCreates > 0 || leftBehind > 0 || conflicts > 0 || blocked > 0 || !warnings.isEmpty
+            || snapshot.pauseSaveWarning != nil {
             Section("Heads up") {
+                if let saveWarning = snapshot.pauseSaveWarning {
+                    Label(saveWarning, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 if snapshot.notesUnavailable || snapshot.waitingForNotes > 0 {
                     Label(notesText(snapshot), systemImage: "note.text").foregroundStyle(.orange)
                         .fixedSize(horizontal: false, vertical: true)

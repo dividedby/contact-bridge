@@ -209,7 +209,7 @@ public struct ReviewWorkflows: Sendable {
                 }
                 var draft = SyncReviewDraft(
                     icloud: record, google: google, base: baseline, reviewFields: item.fields,
-                    icloudNote: noteTexts.map { $0[id] ?? "" }, googleNote: GooglePersonMapper.note(of: person)
+                    icloudNote: noteTexts.flatMap { $0[id] }, googleNote: GooglePersonMapper.note(of: person)
                 )
                 // Only what the user was shown is settled: either contact moving on, or a wider conflict (a Google edit since
                 // linking shows up as one more group), is for a look one by one.
@@ -673,7 +673,8 @@ public struct ReviewWorkflows: Sendable {
         }
         if live.icloud != nil, let notes, let id = item.icloudID {
             do {
-                live.icloudNote = try await notes.fetchNotes(ids: [id])[id] ?? ""
+                // Not returned = unknown, which is not an empty note.
+                live.icloudNote = try await notes.fetchNotes(ids: [id])[id]
             } catch is CancellationError {
                 throw CancellationError()
             } catch {

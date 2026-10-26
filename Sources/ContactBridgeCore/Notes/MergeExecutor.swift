@@ -49,7 +49,8 @@ public struct MergeExecutor: Sendable {
         var combined: String?
         if let notes {
             let fetched = try await notes.fetchNotes(ids: [survivorID] + duplicateIDs)
-            survivorNote = fetched[survivorID]
+            // "" means found without a note.
+            survivorNote = fetched[survivorID].flatMap { $0.isEmpty ? nil : $0 }
             combined = NotesMerge.combine(survivor: survivorNote, others: duplicateIDs.map { (id: $0, note: fetched[$0]) })
         }
 

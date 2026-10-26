@@ -87,6 +87,30 @@ struct SyncEngineTests {
         await rig.engine.stop()
     }
 
+    @Test("Start syncing needs a known Google account email, and saves it with the approval")
+    func approveNeedsAccountEmail() async throws {
+        let rig = try firstSyncRig()
+        defer { rig.cleanUp() }
+        await rig.start()
+        await rig.engine.refreshPreview()
+        rig.setAccountEmail(nil)
+
+        guard case .unavailable(let reason) = await rig.engine.approveFirstSync() else {
+            Issue.record("approval must be refused while the account email is unknown")
+            return
+        }
+        #expect(reason.contains("which Google account"))
+        let people = await rig.base.world.google.allPeople.count
+        #expect(try !rig.state.firstSyncApproved && rig.state.googleAccount == nil && people == 1)
+        let refused = await rig.snapshot
+        #expect(refused.preview != nil && !refused.firstSyncApproved)
+
+        rig.setAccountEmail("me@example.com")
+        #expect(await rig.engine.approveFirstSync() == .started)
+        #expect(try rig.state.firstSyncApproved && rig.state.googleAccount == "me@example.com")
+        await rig.engine.stop()
+    }
+
     @Test("Two clicks on Start syncing at once start one run")
     func approveTwiceAtOnce() async throws {
         let rig = try firstSyncRig()
@@ -280,6 +304,36 @@ struct SyncEngineTests {
         await rig.engine.stop()
     }
 
+    @Test("Once an account is saved, a run that cannot tell which account is signed in fails and retries; it is not an account change")
+    func unknownEmailFailsTheRun() async throws {
+        let rig = try await EngineRig.linked()
+        defer { rig.cleanUp() }
+        _ = await started(rig)
+        try #require(rig.state.googleAccount == "me@example.com")
+        try await rig.base.setPhone("I1", "415-555-9999")
+        rig.setAccountEmail(nil)
+        let before = rig.google.listings
+
+        await rig.engine.syncNow()
+        let snapshot = await rig.snapshot
+        guard case .failed(let message) = snapshot.status else {
+            Issue.record("expected a failed status, got \(snapshot.status)")
+            return
+        }
+        #expect(message.contains("which Google account") && snapshot.nextAttemptAt != nil)
+        #expect(rig.google.listings == before, "Google was not read")
+        #expect(try rig.state.pause == nil && rig.state.googleAccount == "me@example.com")
+        let untouched = try await rig.base.googlePerson("people/c1")
+        #expect(untouched.phoneNumbers?.map(\.value) != ["415-555-9999"])
+
+        rig.setAccountEmail("me@example.com")
+        await rig.engine.syncNow()
+        #expect(await rig.snapshot.status == .idle)
+        let pushed = try await rig.base.googlePerson("people/c1")
+        #expect(pushed.phoneNumbers?.map(\.value) == ["415-555-9999"])
+        await rig.engine.stop()
+    }
+
     // MARK: pause and resume
 
     @Test("Pause is the kill switch: saved, no trigger or Sync now reaches Google, and it holds in a new engine")
@@ -306,6 +360,59 @@ struct SyncEngineTests {
         await next.advance(3600)
         #expect(await next.snapshot.status == .paused(.user) && next.google.listings == 0)
         await next.engine.stop()
+    }
+
+    @Test("If the pause cannot be saved it still holds, Sync now included, and the screen is told it will not survive a relaunch")
+    func pauseSaveFailure() async throws {
+        let rig = try await EngineRig.linked()
+        defer { rig.cleanUp() }
+        let first = await started(rig)
+        try await rig.base.setPhone("I1", "415-555-9999")
+
+        rig.flakyState.failWrites(true)
+        await rig.engine.pause()
+        let paused = await rig.snapshot
+        #expect(paused.isUserPaused)
+        let warning = try #require(paused.pauseSaveWarning)
+        #expect(warning.contains("relaunch") && warning.contains("disk is full"))
+        #expect(try rig.state.pause == nil, "nothing was saved")
+
+        await rig.engine.syncNow()
+        await rig.engine.trigger(.storeChanged)
+        await rig.advance(3600)
+        #expect(rig.google.listings == first, "the unsaved pause is still a pause")
+        #expect(await rig.snapshot.status == .paused(.user))
+
+        rig.flakyState.failWrites(false)
+        await rig.engine.resume()
+        let resumed = await rig.snapshot
+        #expect(!resumed.isUserPaused && resumed.pauseSaveWarning == nil)
+        #expect(rig.google.listings == first + 1)
+        await rig.engine.stop()
+    }
+
+    @Test("A pause that saves clears an earlier warning; a resume that cannot be saved stays paused and says so")
+    func resumeSaveFailure() async throws {
+        let rig = try await EngineRig.linked()
+        defer { rig.cleanUp() }
+        let first = await started(rig)
+        await rig.engine.pause()
+        let clean = await rig.snapshot
+        #expect(try clean.pauseSaveWarning == nil && rig.state.pause == .user)
+
+        rig.flakyState.failWrites(true)
+        await rig.engine.resume()
+        let stuck = await rig.snapshot
+        #expect(stuck.isUserPaused && stuck.status == .paused(.user))
+        let warning = try #require(stuck.pauseSaveWarning)
+        #expect(warning.contains("paused") && warning.contains("disk is full"))
+        #expect(try rig.state.pause == .user && rig.google.listings == first)
+
+        rig.flakyState.failWrites(false)
+        await rig.engine.resume()
+        let after = await rig.snapshot
+        #expect(try after.pauseSaveWarning == nil && rig.state.pause == nil && rig.google.listings == first + 1)
+        await rig.engine.stop()
     }
 
     @Test("Pausing during a run stops it; resuming clears the switch and runs once")

@@ -144,6 +144,35 @@ final class CountingGoogle: GoogleContactsClient, Sendable {
     }
 }
 
+/// Forwards to another state store and can make every write fail, to test what the engine does when saving does not work.
+final class FlakyStateStore: SyncStateStoring, Sendable {
+    struct WriteFailure: Error, LocalizedError {
+        var errorDescription: String? { "disk is full" }
+    }
+
+    private let inner: any SyncStateStoring
+    private let failing = Mutex(false)
+
+    init(_ inner: any SyncStateStoring) {
+        self.inner = inner
+    }
+
+    func failWrites(_ fail: Bool) { failing.withLock { $0 = fail } }
+
+    func load() throws -> SyncState { try inner.load() }
+
+    func save(_ state: SyncState) throws {
+        if failing.withLock({ $0 }) { throw WriteFailure() }
+        try inner.save(state)
+    }
+
+    @discardableResult
+    func update(_ change: (inout SyncState) throws -> Void) throws -> SyncState {
+        if failing.withLock({ $0 }) { throw WriteFailure() }
+        return try inner.update(change)
+    }
+}
+
 /// A `SyncEngine` over an `ExecutorRig`'s world and stores, driven by a manual clock.
 final class EngineRig: @unchecked Sendable {
     let base: ExecutorRig
@@ -151,17 +180,22 @@ final class EngineRig: @unchecked Sendable {
     let google: CountingGoogle
     let gate = WriteGate()
     let engine: SyncEngine
+    /// What the engine saves its state through; `failWrites` makes saving fail.
+    let flakyState: FlakyStateStore
     private final class Reason: Sendable {
-        let value = Mutex<String?>(nil)
+        let value: Mutex<String?>
+        init(_ initial: String? = nil) { value = Mutex(initial) }
     }
 
     private let notReady = Reason()
+    private let accountEmail = Reason("me@example.com")
 
     init(
         _ base: ExecutorRig, planner: SyncPlanner = SyncPlanner(), schedule: SyncSchedule = SyncSchedule(),
         acquireLock: (@Sendable () throws -> any SyncLockHolding)? = nil
     ) {
         self.base = base
+        flakyState = FlakyStateStore(base.stateStore)
         // The engine reads Google with the real field list, so a stored token must have been issued for it.
         if (try? base.stateStore.load().googleSyncToken) != nil {
             _ = try? base.stateStore.update { $0.fieldsVersion = GoogleChangeFeed.currentFieldsVersion }
@@ -169,14 +203,14 @@ final class EngineRig: @unchecked Sendable {
         let google = CountingGoogle(base.faulty)
         self.google = google
         let store = base.world.store, notes = base.world.notes
-        let notReady = notReady
+        let notReady = notReady, accountEmail = accountEmail
         let gate = gate
         engine = SyncEngine(
             environment: {
                 if let reason = notReady.value.withLock({ $0 }) { return .notReady(reason) }
-                return .ready(SyncEnvironment(store: store, notes: notes, google: google, accountEmail: "me@example.com"))
+                return .ready(SyncEnvironment(store: store, notes: notes, google: google, accountEmail: accountEmail.value.withLock { $0 }))
             },
-            links: base.linkStore, state: base.stateStore, reviews: base.reviews, journal: base.journal, history: base.history,
+            links: base.linkStore, state: flakyState, reviews: base.reviews, journal: base.journal, history: base.history,
             backups: base.backups, gate: gate, clock: clock, schedule: schedule, planner: planner, acquireLock: acquireLock
         )
     }
@@ -189,6 +223,8 @@ final class EngineRig: @unchecked Sendable {
     }
 
     func setNotReady(_ reason: String?) { notReady.value.withLock { $0 = reason } }
+    /// The signed-in account's email as the next run sees it; nil is "signed in, email unknown".
+    func setAccountEmail(_ email: String?) { accountEmail.value.withLock { $0 = email } }
 
     var snapshot: SyncSnapshot { get async { await engine.current } }
     var state: SyncState { get throws { try base.stateStore.load() } }

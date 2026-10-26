@@ -346,29 +346,49 @@ public actor SyncEngine {
 
     // MARK: user actions
 
-    /// The kill switch. Saved, so it holds across launches. Stops the run in flight (the journal settles whatever was
-    /// mid-air next time) and returns once it has stopped.
+    /// The kill switch. Saved, so it holds across launches; if saving fails it still holds in this process and
+    /// `SyncSnapshot.pauseSaveWarning` says it will not survive a relaunch. Stops the run in flight (the journal settles
+    /// whatever was mid-air next time) and returns once it has stopped.
     public func pause() async {
         guard started, disabledReason == nil else { return }
         userPaused = true
         awaitingConfirmation = false
         confirmedChain = []
-        _ = try? stateStore.update { $0.pause = .user }
+        var warning: String?
+        do {
+            try stateStore.update { $0.pause = .user }
+        } catch {
+            warning = "Syncing is paused, but the pause could not be saved, so it will not survive a relaunch of Contact Bridge (\(error.localizedDescription))."
+        }
         cancelPending()
         rerunWanted = false
-        publish { $0.status = .paused(.user) }
+        publish {
+            $0.status = .paused(.user)
+            $0.pauseSaveWarning = warning
+        }
         let active = runTask
         active?.cancel()
         await active?.value
         publish { $0.status = .paused(.user) }
     }
 
-    /// Clears the kill switch and runs once now.
+    /// Clears the kill switch and runs once now. If the change cannot be saved, syncing stays paused (a relaunch would
+    /// pause it again anyway) and `SyncSnapshot.pauseSaveWarning` says why.
     public func resume() async {
         guard started, disabledReason == nil, userPaused else { return }
+        do {
+            try stateStore.update { if $0.pause == .user { $0.pause = nil } }
+        } catch {
+            publish {
+                $0.pauseSaveWarning = "Syncing is still paused: resuming could not be saved (\(error.localizedDescription))."
+            }
+            return
+        }
         userPaused = false
-        _ = try? stateStore.update { if $0.pause == .user { $0.pause = nil } }
-        publish { $0.status = .idle }
+        publish {
+            $0.status = .idle
+            $0.pauseSaveWarning = nil
+        }
         await perform(RunOptions(trigger: .scheduled))
     }
 
@@ -447,7 +467,11 @@ public actor SyncEngine {
         var state = try stateStore.load()
         let approvingNow: Bool
         if case .approve = options.mode { approvingNow = true } else { approvingNow = false }
-        if state.pause == .user, state.firstSyncApproved || approvingNow { return .userPaused }
+        // `userPaused` too: a pause that could not be saved is not in `state`, but it still holds.
+        if state.pause == .user || userPaused, state.firstSyncApproved || approvingNow { return .userPaused }
+        if approvingNow, env.accountEmail == nil {
+            return .notReady("Couldn't confirm which Google account is signed in. Sign in with Google in Setup again, then start syncing.")
+        }
         let nowFn: @Sendable () -> Date = { [clock] in clock.now() }
         let executor = SyncExecutor(
             google: env.google, links: linkStore, state: stateStore, reviews: reviewStore, journal: journalStore,
@@ -496,7 +520,11 @@ public actor SyncEngine {
         if let shown {
             let preview = makePreview(plan, state: state, hasNotes: env.notes != nil, at: at)
             guard preview.counts == shown else { return .previewChanged(preview) }
-            try stateStore.update { $0.firstSyncApproved = true }
+            // The account the baselines belong to: without it the account guard has nothing to compare against.
+            try stateStore.update {
+                $0.firstSyncApproved = true
+                $0.googleAccount = $0.googleAccount ?? env.accountEmail
+            }
             approved = true
             publish { $0.firstSyncApproved = true }
         }
