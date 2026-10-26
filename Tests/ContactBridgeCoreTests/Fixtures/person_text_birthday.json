@@ -1,0 +1,7 @@
+{
+  "resourceName": "people/c27182818284590",
+  "etag": "%EgcBAj0LNy44",
+  "metadata": { "sources": [{ "type": "CONTACT", "id": "27182818284590", "etag": "#textBday==" }], "objectType": "PERSON" },
+  "names": [{ "metadata": { "primary": true }, "givenName": "Tex", "familyName": "Bday" }],
+  "birthdays": [{ "metadata": { "primary": true }, "text": "March 9th", "futureField": "text-only" }]
+}

@@ -1,0 +1,1 @@
+{ "error": { "code": 400, "message": "Sync token is expired. Clear local cache and retry call without the sync token.", "status": "FAILED_PRECONDITION" } }

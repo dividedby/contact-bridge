@@ -1,0 +1,18 @@
+{
+  "connections": [
+    {
+      "resourceName": "people/c1234567890123456789",
+      "etag": "%EgUBAj0LNy4=",
+      "metadata": { "deleted": true, "objectType": "PERSON" }
+    },
+    {
+      "resourceName": "people/c5550001112223334445",
+      "etag": "%EgcBAj0LNy43",
+      "metadata": { "sources": [{ "type": "CONTACT", "id": "5550001112223334445", "etag": "#new1etag=" }], "objectType": "PERSON" },
+      "names": [{ "metadata": { "primary": true }, "givenName": "Robert", "familyName": "Smith", "displayName": "Robert Smith" }]
+    }
+  ],
+  "nextSyncToken": "CMjZ0uDYo7oDEMjZ0uDYo7oDGgwI",
+  "totalPeople": 2,
+  "totalItems": 2
+}

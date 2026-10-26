@@ -1,0 +1,72 @@
+{
+  "connections": [
+    {
+      "resourceName": "people/c1234567890123456789",
+      "etag": "%EgUBAj0LNy4=",
+      "metadata": {
+        "sources": [
+          {
+            "type": "CONTACT",
+            "id": "1234567890123456789",
+            "etag": "#kQz1x2mWc0Y=",
+            "updateTime": "2025-11-02T14:21:07.318244Z"
+          }
+        ],
+        "objectType": "PERSON"
+      },
+      "names": [
+        {
+          "metadata": { "primary": true, "source": { "type": "CONTACT", "id": "1234567890123456789" } },
+          "displayName": "Ann Lee",
+          "familyName": "Lee",
+          "givenName": "Ann",
+          "displayNameLastFirst": "Lee, Ann",
+          "unstructuredName": "Ann Lee"
+        }
+      ],
+      "phoneNumbers": [
+        {
+          "metadata": { "primary": true, "source": { "type": "CONTACT", "id": "1234567890123456789" } },
+          "value": "(415) 555-2671",
+          "canonicalForm": "+14155552671",
+          "type": "mobile",
+          "formattedType": "Mobile"
+        }
+      ],
+      "emailAddresses": [
+        {
+          "metadata": { "primary": true, "source": { "type": "CONTACT", "id": "1234567890123456789" } },
+          "value": "ann@example.com",
+          "type": "home",
+          "formattedType": "Home"
+        }
+      ],
+      "memberships": [
+        {
+          "metadata": { "source": { "type": "CONTACT", "id": "1234567890123456789" } },
+          "contactGroupMembership": { "contactGroupId": "myContacts", "contactGroupResourceName": "contactGroups/myContacts" }
+        }
+      ]
+    },
+    {
+      "resourceName": "people/c9876543210987654321",
+      "etag": "%EgUBAj0LNy4=",
+      "metadata": {
+        "sources": [{ "type": "CONTACT", "id": "9876543210987654321", "etag": "#aB3dE5fGh7I=", "updateTime": "2024-06-18T09:02:55.001Z" }],
+        "objectType": "PERSON"
+      },
+      "names": [
+        { "metadata": { "primary": true }, "displayName": "Acme Support", "unstructuredName": "Acme Support" }
+      ],
+      "organizations": [
+        { "metadata": { "primary": true }, "name": "Acme Corp", "current": true }
+      ],
+      "phoneNumbers": [
+        { "value": "+1 800 555 0199", "canonicalForm": "+18005550199", "type": "work", "formattedType": "Work" }
+      ]
+    }
+  ],
+  "nextPageToken": "CgwI_9a7pAYQ4LuHtwM",
+  "totalPeople": 3,
+  "totalItems": 3
+}

@@ -1,0 +1,24 @@
+{
+  "connections": [
+    {
+      "resourceName": "people/c5550001112223334445",
+      "etag": "%EgUBAj0LNy4=",
+      "metadata": {
+        "sources": [{ "type": "CONTACT", "id": "5550001112223334445", "etag": "#zZ9yY8xX7wW=" }],
+        "objectType": "PERSON"
+      },
+      "names": [
+        { "metadata": { "primary": true }, "displayName": "Bob Smith", "familyName": "Smith", "givenName": "Bob" }
+      ],
+      "birthdays": [
+        { "metadata": { "primary": true }, "date": { "month": 3, "day": 9 } }
+      ],
+      "emailAddresses": [
+        { "value": "bob@example.com", "type": "work", "formattedType": "Work" }
+      ]
+    }
+  ],
+  "nextSyncToken": "CMjZ0uDYo7oDEMjZ0uDYo7oD",
+  "totalPeople": 3,
+  "totalItems": 3
+}

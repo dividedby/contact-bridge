@@ -1,0 +1,200 @@
+{
+  "resourceName": "people/c2468013579246801357",
+  "etag": "%EgcBAj0LNy43Pg==",
+  "metadata": {
+    "sources": [
+      {
+        "type": "CONTACT",
+        "id": "2468013579246801357",
+        "etag": "#fullETag==",
+        "updateTime": "2026-01-15T22:10:00.123456Z"
+      }
+    ],
+    "objectType": "PERSON"
+  },
+  "names": [
+    {
+      "metadata": {
+        "primary": true,
+        "source": {
+          "type": "CONTACT",
+          "id": "2468013579246801357"
+        }
+      },
+      "displayName": "Dr. Ann Marie Lee PhD",
+      "displayNameLastFirst": "Lee, Dr. Ann Marie, PhD",
+      "unstructuredName": "Dr. Ann Marie Lee PhD",
+      "familyName": "Lee",
+      "givenName": "Ann",
+      "middleName": "Marie",
+      "honorificPrefix": "Dr.",
+      "honorificSuffix": "PhD",
+      "phoneticGivenName": "An",
+      "phoneticFullName": "An Mari Li",
+      "phoneticHonorificPrefix": "Dokutā"
+    },
+    {
+      "metadata": {
+        "source": {
+          "type": "CONTACT",
+          "id": "2468013579246801357"
+        }
+      },
+      "displayName": "Annie L",
+      "givenName": "Annie",
+      "familyName": "L"
+    }
+  ],
+  "nicknames": [
+    {
+      "metadata": {
+        "primary": true
+      },
+      "value": "Annie"
+    }
+  ],
+  "organizations": [
+    {
+      "metadata": {
+        "primary": true
+      },
+      "type": "work",
+      "formattedType": "Work",
+      "name": "Acme Corp",
+      "title": "CTO",
+      "department": "R&D",
+      "current": true,
+      "jobDescription": "Runs engineering",
+      "startDate": {
+        "year": 2019,
+        "month": 4
+      },
+      "location": "Austin HQ",
+      "costCenter": "CC-1042",
+      "domain": "acme.com",
+      "symbol": "ACME",
+      "phoneticName": "Akumi"
+    }
+  ],
+  "phoneNumbers": [
+    {
+      "metadata": {
+        "primary": true
+      },
+      "value": "(415) 555-2671",
+      "canonicalForm": "+14155552671",
+      "type": "mobile",
+      "formattedType": "Mobile",
+      "futureField": "keep-phoneNumbers"
+    },
+    {
+      "value": "+1 212 555 3344",
+      "canonicalForm": "+12125553344",
+      "type": "homeFax",
+      "formattedType": "Home Fax"
+    },
+    {
+      "value": "555-0100",
+      "type": "Cabin",
+      "formattedType": "Cabin"
+    },
+    {
+      "value": "555-0101"
+    }
+  ],
+  "emailAddresses": [
+    {
+      "metadata": {
+        "primary": true
+      },
+      "value": "ann@acme.com",
+      "type": "work",
+      "formattedType": "Work",
+      "displayName": "Ann Lee",
+      "futureField": "keep-emailAddresses"
+    },
+    {
+      "value": "Ann@Example.com",
+      "type": "home",
+      "formattedType": "Home"
+    }
+  ],
+  "addresses": [
+    {
+      "metadata": {
+        "primary": true
+      },
+      "type": "home",
+      "formattedType": "Home",
+      "formattedValue": "1 Main St\nApt 2\nAustin, TX 78701\nUnited States",
+      "streetAddress": "1 Main St",
+      "extendedAddress": "Apt 2",
+      "poBox": "PO 99",
+      "city": "Austin",
+      "region": "TX",
+      "postalCode": "78701",
+      "country": "United States",
+      "countryCode": "US",
+      "futureField": "keep-addresses"
+    }
+  ],
+  "urls": [
+    {
+      "metadata": {
+        "primary": true
+      },
+      "value": "https://example.com/Ann",
+      "type": "homePage",
+      "formattedType": "Home Page",
+      "futureField": "keep-urls"
+    },
+    {
+      "value": "https://blog.example.com",
+      "type": "blog",
+      "formattedType": "Blog"
+    }
+  ],
+  "birthdays": [
+    {
+      "metadata": {
+        "primary": true
+      },
+      "date": {
+        "year": 1990,
+        "month": 3,
+        "day": 9
+      },
+      "futureField": "keep-birthdays"
+    }
+  ],
+  "memberships": [
+    {
+      "contactGroupMembership": {
+        "contactGroupId": "myContacts",
+        "contactGroupResourceName": "contactGroups/myContacts"
+      }
+    },
+    {
+      "contactGroupMembership": {
+        "contactGroupId": "6a2b4c",
+        "contactGroupResourceName": "contactGroups/6a2b4c"
+      }
+    }
+  ],
+  "clientData": [
+    {
+      "key": "contactBridge.sourceID",
+      "value": "B1C2D3E4-ICLOUD-ID:ABPerson"
+    },
+    {
+      "key": "otherApp.note",
+      "value": "keep me"
+    }
+  ],
+  "biographies": [
+    {
+      "value": "Never decoded",
+      "contentType": "TEXT_PLAIN"
+    }
+  ]
+}

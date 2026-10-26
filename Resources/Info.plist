@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleIdentifier</key>
+	<string>dev.dividedby.contactbridge</string>
+	<key>CFBundleName</key>
+	<string>Contact Bridge</string>
+	<key>CFBundleDisplayName</key>
+	<string>Contact Bridge</string>
+	<key>CFBundleExecutable</key>
+	<string>ContactBridgeApp</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleIconName</key>
+	<string>AppIcon</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>27.0</string>
+	<key>LSUIElement</key>
+	<false/>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSPrincipalClass</key>
+	<string>NSApplication</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Contact Bridge reads your contacts' notes through the Contacts app so it can back them up and keep them when merging duplicates.</string>
+	<key>NSContactsUsageDescription</key>
+	<string>Contact Bridge reads your iCloud contacts so it can merge duplicates and sync them to your Google account.</string>
+</dict>
+</plist>
