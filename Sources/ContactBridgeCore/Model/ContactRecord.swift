@@ -51,7 +51,7 @@ public struct PostalAddress: Sendable, Hashable, Codable {
 }
 
 /// Source-agnostic contact. Deliberately free of CNContact / People API types so matching and merging stay pure.
-/// Photos are out of scope. Notes are not modeled either (the CNContact note key needs a restricted entitlement); they are
+/// Photos are not modeled (`PhotoBaseline` and `PhotoFingerprint` handle them apart from the fields). Notes are not modeled either (the CNContact note key needs a restricted entitlement); they are
 /// read and written through the Contacts app's AppleScript dictionary (`NotesStoring`) and merged by `NotesMerge`.
 public struct ContactRecord: Sendable, Hashable, Codable, Identifiable {
     public var id: String

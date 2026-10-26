@@ -15,6 +15,8 @@ extension ContactStoreError: LocalizedError {
             "\(ids.count) contact(s) no longer exist in Contacts, probably changed elsewhere. Reload and try again."
         case .outsideSelectedContainer(let ids):
             "\(ids.count) contact(s) are outside the selected contacts account and were left untouched."
+        case .photosUnsupported:
+            "Contact photos cannot be read or changed here."
         }
     }
 }
@@ -78,6 +80,15 @@ extension GoogleListingError: LocalizedError {
         switch self {
         case .pagingDidNotTerminate(let source):
             "Google kept returning pages for \(source). Try again later."
+        }
+    }
+}
+
+extension PhotoEncodingError: LocalizedError {
+    public var errorDescription: String? {
+        switch self {
+        case .undecodable: "The photo could not be read as a picture, so it was left alone."
+        case .tooLarge: "The photo is too large to send to Google even after shrinking it, so it was left alone."
         }
     }
 }

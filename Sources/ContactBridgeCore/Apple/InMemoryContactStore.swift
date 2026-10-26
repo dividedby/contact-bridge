@@ -7,6 +7,8 @@ public struct StoreMutation: Sendable, Hashable {
         case update
         case delete
         case merge
+        /// A photo set or removed (`ids` holds the one contact).
+        case photo
     }
 
     public var kind: Kind
@@ -19,12 +21,16 @@ public struct StoreMutation: Sendable, Hashable {
 public final class InMemoryContactStore: ContactStoring {
     private struct State {
         var records: [ContactRecord]
+        /// Photo bytes by contact identifier.
+        var photos: [String: Data]
         var authorization: ContactAuthorization
         var nextID = 1
         /// Bumped by every mutation; the change token.
         var version = 0
         var containerID: String?
         var log: [StoreMutation] = []
+        var signatureReads = 0
+        var dataReads = 0
         var subscribers: [UUID: AsyncStream<Void>.Continuation] = [:]
     }
 
@@ -33,16 +39,20 @@ public final class InMemoryContactStore: ContactStoring {
 
     public init(
         records: [ContactRecord] = [],
+        photos: [String: Data] = [:],
         authorization: ContactAuthorization = .authorized,
         grantsAccess: Bool = true,
         containerID: String? = "mem-container"
     ) {
-        state = Mutex(State(records: records, authorization: authorization, containerID: containerID))
+        state = Mutex(State(records: records, photos: photos, authorization: authorization, containerID: containerID))
         self.grantsAccess = grantsAccess
     }
 
     /// Every create/update/delete so far, with the receipt that authorized it.
     public var mutationLog: [StoreMutation] { state.withLock { $0.log } }
+
+    /// How many `photoSignatures` calls and `photoData` calls have been made: the reads a scan that found nothing new avoids.
+    public var photoReads: (signatures: Int, data: Int) { state.withLock { ($0.signatureReads, $0.dataReads) } }
 
     /// Simulates the user switching to another account's container.
     public func setContainerID(_ id: String?) { state.withLock { $0.containerID = id } }
@@ -107,6 +117,7 @@ public final class InMemoryContactStore: ContactStoring {
             guard missing.isEmpty else { throw ContactStoreError.notFound(missing) }
             let doomed = Set(ids)
             state.records.removeAll { doomed.contains($0.sourceIdentifier) }
+            for id in ids { state.photos[id] = nil }
             state.version += 1
             state.log.append(StoreMutation(kind: .delete, ids: ids, receiptID: backup.id))
         }
@@ -132,8 +143,52 @@ public final class InMemoryContactStore: ContactStoring {
             state.records[index] = stored
             let gone = Set(doomed)
             state.records.removeAll { gone.contains($0.sourceIdentifier) }
+            // Like the real merge: the survivor keeps its own photo, else takes the first duplicate's.
+            if state.photos[survivor.sourceIdentifier] == nil {
+                for id in doomed {
+                    if let photo = state.photos[id] {
+                        state.photos[survivor.sourceIdentifier] = photo
+                        break
+                    }
+                }
+            }
+            for id in doomed { state.photos[id] = nil }
             state.version += 1
             state.log.append(StoreMutation(kind: .merge, ids: [stored.sourceIdentifier] + doomed, receiptID: backup.id))
+        }
+        notify()
+    }
+
+    public func photoSignatures(ids: [String]) async throws -> [String: PhotoSignature] {
+        try state.withLock { state in
+            try Self.requireAccess(state)
+            state.signatureReads += 1
+            let existing = Set(state.records.map(\.sourceIdentifier))
+            var signatures: [String: PhotoSignature] = [:]
+            for id in ids where existing.contains(id) {
+                let photo = state.photos[id]
+                signatures[id] = PhotoSignature(hasPhoto: photo != nil, thumbnailHash: photo.map(PhotoHash.sha256Hex))
+            }
+            return signatures
+        }
+    }
+
+    public func photoData(id: String) async throws -> Data? {
+        try state.withLock { state in
+            try Self.requireAccess(state)
+            guard state.records.contains(where: { $0.sourceIdentifier == id }) else { throw ContactStoreError.notFound([id]) }
+            state.dataReads += 1
+            return state.photos[id]
+        }
+    }
+
+    public func setPhoto(id: String, data: Data?, backup: BackupReceipt) async throws {
+        try state.withLock { state in
+            try Self.requireAccess(state)
+            guard state.records.contains(where: { $0.sourceIdentifier == id }) else { throw ContactStoreError.notFound([id]) }
+            state.photos[id] = data
+            state.version += 1
+            state.log.append(StoreMutation(kind: .photo, ids: [id], receiptID: backup.id))
         }
         notify()
     }

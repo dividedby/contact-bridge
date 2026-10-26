@@ -252,6 +252,7 @@ extension ReviewKind {
         case .deletedInGoogle: "Deleted in Google"
         case .deletedInICloudEditedInGoogle: "Deleted here, edited in Google"
         case .possibleLink: "Possible match"
+        case .photoConflict: "Photo differs"
         }
     }
 }

@@ -197,6 +197,62 @@ public final class CNContactStoreAdapter: ContactStoring, @unchecked Sendable {
         }
     }
 
+    // MARK: photos
+
+    /// Identifiers per predicate: the Contacts framework slows down on very long `withIdentifiers` lists.
+    private static let photoPredicateChunk = 100
+
+    private static var photoSignatureKeys: [CNKeyDescriptor] {
+        [CNContactIdentifierKey, CNContactImageDataAvailableKey, CNContactThumbnailImageDataKey].map { $0 as NSString }
+    }
+
+    /// Reads only the availability flag and the small thumbnail, in chunks. Contacts outside the container are left out, as
+    /// are ids that no longer exist.
+    public func photoSignatures(ids: [String]) async throws -> [String: PhotoSignature] {
+        try await requireAccess()
+        return try await onQueue {
+            let container = try self.resolveContainer()
+            let inContainer = Set(
+                try self.fetch(predicate: CNContact.predicateForContactsInContainer(withIdentifier: container.id), keys: [CNContactIdentifierKey as NSString])
+                    .map(\.identifier)
+            )
+            let wanted = Array(Set(ids)).filter(inContainer.contains).sorted()
+            var signatures: [String: PhotoSignature] = [:]
+            for chunk in wanted.chunked(into: Self.photoPredicateChunk) {
+                for contact in try self.fetch(predicate: CNContact.predicateForContacts(withIdentifiers: chunk), keys: Self.photoSignatureKeys) {
+                    signatures[contact.identifier] = PhotoSignature(
+                        hasPhoto: contact.imageDataAvailable, thumbnailHash: contact.thumbnailImageData.map(PhotoHash.sha256Hex)
+                    )
+                }
+            }
+            return signatures
+        }
+    }
+
+    public func photoData(id: String) async throws -> Data? {
+        try await requireAccess()
+        return try await onQueue {
+            let container = try self.resolveContainer()
+            let contacts = try self.fetchContacts(ids: [id], keys: [CNContactIdentifierKey, CNContactImageDataAvailableKey, CNContactImageDataKey].map { $0 as NSString })
+            try self.requireInContainer(contacts, container)
+            return contacts[0].imageDataAvailable ? contacts[0].imageData : nil
+        }
+    }
+
+    public func setPhoto(id: String, data: Data?, backup: BackupReceipt) async throws {
+        try await requireAccess()
+        try await onQueue {
+            let container = try self.resolveContainer()
+            let contacts = try self.fetchContacts(ids: [id], keys: [CNContactIdentifierKey, CNContactImageDataKey].map { $0 as NSString })
+            try self.requireInContainer(contacts, container)
+            guard let working = contacts[0].mutableCopy() as? CNMutableContact else { throw ContactStoreError.notFound([id]) }
+            working.imageData = data
+            let request = CNSaveRequest()
+            request.update(working)
+            try self.store.execute(request)
+        }
+    }
+
     // MARK: change detection
 
     /// `CNContactStore.currentHistoryToken`: moves on any change to the store, including other containers and this

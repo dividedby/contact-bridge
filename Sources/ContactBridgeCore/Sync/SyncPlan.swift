@@ -22,6 +22,8 @@ public enum ReviewKind: String, Sendable, Hashable, Codable, CaseIterable {
     case deletedInICloudEditedInGoogle
     /// An iCloud and a Google contact that might be the same person: link them or keep them apart.
     case possibleLink
+    /// The two contacts' photos disagree, or one was removed (`PhotoConflictReason` says which).
+    case photoConflict
 }
 
 /// A stable digest of a contact's modeled fields, so a review item can tell that the contact moved on since it was made.
@@ -45,12 +47,17 @@ public struct ReviewCandidate: Sendable, Hashable, Identifiable {
     public var icloudFingerprint: String?
     /// The field groups in conflict, in `SyncField` order. Empty for kinds that concern a whole contact.
     public var fields: [SyncField]
+    /// For `photoConflict`: the iCloud thumbnail hash and Google photo URL key the decision is about (not the etag, which
+    /// moves on every unrelated edit). A moved stamp means the item must be refreshed before it is applied.
+    public var photoStamp: String?
+    /// For `photoConflict`: what kind of disagreement it is.
+    public var photoReason: PhotoConflictReason?
 
     public var id: String { "\(kind.rawValue)|\(icloudID ?? "")|\(resourceName ?? "")" }
 
     public init(
         kind: ReviewKind, icloudID: String? = nil, resourceName: String? = nil, googleEtag: String? = nil,
-        icloudFingerprint: String? = nil, fields: [SyncField] = []
+        icloudFingerprint: String? = nil, fields: [SyncField] = [], photoStamp: String? = nil, photoReason: PhotoConflictReason? = nil
     ) {
         self.kind = kind
         self.icloudID = icloudID
@@ -58,6 +65,8 @@ public struct ReviewCandidate: Sendable, Hashable, Identifiable {
         self.googleEtag = googleEtag
         self.icloudFingerprint = icloudFingerprint
         self.fields = fields
+        self.photoStamp = photoStamp
+        self.photoReason = photoReason
     }
 }
 
@@ -185,6 +194,9 @@ public struct SyncPlan: Sendable, Hashable {
     /// left to choose, so `ReviewStore.reconcile` drops them. Nothing is written to either contact; the baseline stays as it is.
     public var settledReviews: [String] = []
     public var deferred = Deferred()
+    /// Photo changes to make or record, by `PhotoExecutor` after the field writes. They have their own limits and are not
+    /// part of `mutationCount`.
+    public var photoOps: [PlannedPhotoOp] = []
 
     /// Unlinked iCloud contacts that could not be matched or created because this run only saw part of Google's
     /// contacts. Run again with `requiresFullGoogleListing`.
@@ -220,6 +232,6 @@ public struct SyncPlan: Sendable, Hashable {
     /// with contacts waiting is not settled, so a screen must not call it "up to date".
     public var isEmpty: Bool {
         links.isEmpty && mutationCount == 0 && baselineRefreshes.isEmpty && droppedLinks.isEmpty && review.isEmpty && deferred.isEmpty
-            && waitingForNotes == 0 && unlinkedWaitingForFullListing == 0
+            && photoOps.isEmpty && waitingForNotes == 0 && unlinkedWaitingForFullListing == 0
     }
 }

@@ -142,6 +142,10 @@ final class CountingGoogle: GoogleContactsClient, Sendable {
     func addMembers(groupResourceName: String, memberResourceNames: [String]) async throws {
         try await inner.addMembers(groupResourceName: groupResourceName, memberResourceNames: memberResourceNames)
     }
+    func updateContactPhoto(resourceName: String, photoBytes: Data) async throws -> GooglePerson {
+        try await inner.updateContactPhoto(resourceName: resourceName, photoBytes: photoBytes)
+    }
+    func deleteContactPhoto(resourceName: String) async throws -> GooglePerson { try await inner.deleteContactPhoto(resourceName: resourceName) }
 }
 
 /// Forwards to another state store and can make every write fail, to test what the engine does when saving does not work.

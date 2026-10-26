@@ -216,4 +216,22 @@ public protocol GoogleContactsClient: Sendable {
     /// The group's resource name, creating the group if it does not exist.
     func ensureGroup(named name: String) async throws -> String
     func addMembers(groupResourceName: String, memberResourceNames: [String]) async throws
+
+    /// Sets the contact's own photo to these image bytes (JPEG; see `PhotoEncoder`). Not guarded by an etag: callers check
+    /// the photo they are replacing first. Repeating it with the same bytes is harmless. Returns the contact as it is now.
+    func updateContactPhoto(resourceName: String, photoBytes: Data) async throws -> GooglePerson
+    /// Removes the contact's own photo (a profile photo, if there is one, is not affected and shows through). Returns the
+    /// contact as it is now.
+    func deleteContactPhoto(resourceName: String) async throws -> GooglePerson
+}
+
+/// Clients that do not deal in photos (test doubles) refuse them.
+extension GoogleContactsClient {
+    public func updateContactPhoto(resourceName: String, photoBytes: Data) async throws -> GooglePerson {
+        throw GoogleAPIError.other(status: 501, message: "This client does not support contact photos")
+    }
+
+    public func deleteContactPhoto(resourceName: String) async throws -> GooglePerson {
+        throw GoogleAPIError.other(status: 501, message: "This client does not support contact photos")
+    }
 }

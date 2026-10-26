@@ -14,6 +14,10 @@ public struct ReviewItem: Sendable, Hashable, Codable, Identifiable {
     /// `ContactFingerprint` of the iCloud contact the decision is about; same use as `googleEtag`.
     public var icloudFingerprint: String?
     public var fields: [SyncField]
+    /// For `photoConflict`: see `ReviewCandidate.photoStamp`. Missing in files written before photo sync.
+    public var photoStamp: String?
+    /// For `photoConflict`: see `ReviewCandidate.photoReason`.
+    public var photoReason: PhotoConflictReason?
     /// Set for a conflict between two contacts that were only just linked. Their baselines were taken from both sides as
     /// they are, so no later plan derives the conflict again and its absence says nothing: only the user resolving it
     /// (`ReviewStoring.remove`), the contact vanishing from either side, or the plan finding the two sides agree
@@ -30,6 +34,8 @@ public struct ReviewItem: Sendable, Hashable, Codable, Identifiable {
         googleEtag = candidate.googleEtag
         icloudFingerprint = candidate.icloudFingerprint
         fields = candidate.fields
+        photoStamp = candidate.photoStamp
+        photoReason = candidate.photoReason
         self.pinned = pinned
         createdAt = now
         updatedAt = now
@@ -44,7 +50,7 @@ public struct ReviewItem: Sendable, Hashable, Codable, Identifiable {
 /// What a store update did, by item id.
 public struct ReviewReconciliation: Sendable, Hashable {
     public var added: [String] = []
-    /// Kept, but its etag, fingerprint or fields moved.
+    /// Kept, but its etag, fingerprint, fields or photo stamp moved.
     public var refreshed: [String] = []
     public var removed: [String] = []
 
@@ -63,7 +69,7 @@ public struct ReviewList: Sendable, Hashable, Codable, VersionedFileContents {
         self.items = items
     }
 
-    /// Adds new candidates and refreshes known ones in place (same id, new etag, fingerprint or fields; `createdAt` stays).
+    /// Adds new candidates and refreshes known ones in place (same id, new etag, fingerprint, fields or photo stamp; `createdAt` stays).
     mutating func upsert(_ candidates: [ReviewCandidate], pinned: Set<String> = [], at now: Date, into result: inout ReviewReconciliation) {
         for candidate in candidates {
             let isPinned = candidate.kind == .bothEdited && candidate.icloudID.map(pinned.contains) == true
@@ -75,11 +81,13 @@ public struct ReviewList: Sendable, Hashable, Codable, VersionedFileContents {
             let item = items[index]
             if isPinned { items[index].pinned = true }
             guard item.googleEtag != candidate.googleEtag || item.icloudFingerprint != candidate.icloudFingerprint
-                || item.fields != candidate.fields
+                || item.fields != candidate.fields || item.photoStamp != candidate.photoStamp || item.photoReason != candidate.photoReason
             else { continue }
             items[index].googleEtag = candidate.googleEtag
             items[index].icloudFingerprint = candidate.icloudFingerprint
             items[index].fields = candidate.fields
+            items[index].photoStamp = candidate.photoStamp
+            items[index].photoReason = candidate.photoReason
             items[index].updatedAt = now
             result.refreshed.append(candidate.id)
         }

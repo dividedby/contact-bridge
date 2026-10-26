@@ -14,7 +14,7 @@ public struct URLSessionGoogleContactsClient: GoogleContactsClient {
     /// Every modeled field plus the notes (`biographies`, kept in `GooglePerson.extras`) and the bookkeeping the sync
     /// needs. `modeledFields` stays the single source of truth. A sync token is only valid for the fields it was issued
     /// for, so changing this list makes `GoogleChangeFeed` start over with a full listing.
-    static let personFields = (GooglePersonMapper.modeledFields + ["biographies", "metadata", "clientData", "memberships"])
+    static let personFields = (GooglePersonMapper.modeledFields + ["biographies", "metadata", "clientData", "memberships", "photos"])
         .joined(separator: ",")
     /// The only fields `otherContacts.list` accepts that this app uses.
     static let otherContactsReadMask = "names,emailAddresses,phoneNumbers,metadata"
@@ -87,6 +87,28 @@ public struct URLSessionGoogleContactsClient: GoogleContactsClient {
 
     public func deleteContact(resourceName: String) async throws {
         _ = try await perform("DELETE", "\(resourceName):deleteContact", idempotent: true)
+    }
+
+    // MARK: photos
+
+    /// Both calls answer with `{"person": {...}}`. Repeating either is harmless (same bytes in, same photo out; nothing left
+    /// to delete), so server errors are retried like reads.
+    public func updateContactPhoto(resourceName: String, photoBytes: Data) async throws -> GooglePerson {
+        let body = UpdatePhotoBody(photoBytes: photoBytes, personFields: Self.personFields)
+        let data = try await perform("POST", "\(resourceName):updateContactPhoto", body: encode(body), idempotent: true)
+        return try photoResult(data)
+    }
+
+    public func deleteContactPhoto(resourceName: String) async throws -> GooglePerson {
+        let data = try await perform("DELETE", "\(resourceName):deleteContactPhoto", query: [("personFields", Self.personFields)], idempotent: true)
+        return try photoResult(data)
+    }
+
+    private func photoResult(_ data: Data) throws -> GooglePerson {
+        guard let person = try decode(PhotoMutationResponse.self, data).person else {
+            throw GoogleAPIError.other(status: 200, message: "Google answered without the contact")
+        }
+        return person
     }
 
     // MARK: batches
@@ -315,6 +337,16 @@ private struct BatchUpdateBody: Encodable {
     var contacts: [String: GooglePerson]
     var updateMask: String
     var readMask: String
+}
+
+private struct UpdatePhotoBody: Encodable {
+    /// Encoded as base64 by `JSONEncoder`.
+    var photoBytes: Data
+    var personFields: String
+}
+
+private struct PhotoMutationResponse: Decodable {
+    var person: GooglePerson?
 }
 
 private struct BatchDeleteBody: Encodable {

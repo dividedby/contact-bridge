@@ -105,6 +105,7 @@ struct SyncReviewView: View {
         case .deletedInGoogle: model.block(for: .deleteFromICloud)
         case .deletedInICloudEditedInGoogle: model.block(for: .restore)
         case .possibleLink: model.block(for: .link)
+        case .photoConflict: nil
         }
     }
 
@@ -148,6 +149,8 @@ struct SyncReviewView: View {
                 .controlSize(.large)
                 .disabled(disabled || model.block(for: .link) != nil)
                 .help("They are the same person")
+        case .photoConflict:
+            EmptyView()
         }
     }
 
@@ -161,6 +164,8 @@ struct SyncReviewView: View {
             "Keep deleted takes a Google backup (a day old at most) and logs the change. Restore takes a backup with notes first."
         case .possibleLink:
             "Linking and keeping separate change nothing in your contacts."
+        case .photoConflict:
+            "Choosing a photo takes a backup first, as other changes do."
         }
     }
 
@@ -195,6 +200,9 @@ struct SyncReviewView: View {
             RecordComparison(
                 left: detail.icloud, right: detail.google, leftTitle: "iCloud", rightTitle: "Google", leftNote: detail.icloudNote, rightNote: detail.googleNote
             )
+        case .photoConflict:
+            Text("The photos for this contact are different in iCloud and Google. Choosing between them is not available yet.")
+                .foregroundStyle(.secondary)
         }
     }
 

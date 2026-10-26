@@ -205,7 +205,7 @@ public struct SyncExecutor: Sendable {
         guard !plan.links.isEmpty || !plan.baselineRefreshes.isEmpty || !plan.droppedLinks.isEmpty else { return }
         try state.update { state in
             for link in plan.links { state.baselines[link.icloudID] = link.baseline }
-            for (id, baseline) in plan.baselineRefreshes { state.baselines[id] = baseline }
+            for (id, baseline) in plan.baselineRefreshes { state.store(baseline, for: id) }
             for id in plan.droppedLinks { state.baselines[id] = nil }
         }
         report.linksAdded = plan.links.count
@@ -289,8 +289,9 @@ public struct SyncExecutor: Sendable {
                 let confirmedAt = now()
                 try state.update { state in
                     for (item, person) in confirmed {
-                        state.baselines[item.update.icloudID] = item.update.baseline.afterUpdate(
-                            fields: item.update.fields, returned: person, at: confirmedAt
+                        state.store(
+                            item.update.baseline.afterUpdate(fields: item.update.fields, returned: person, at: confirmedAt),
+                            for: item.update.icloudID
                         )
                     }
                 }

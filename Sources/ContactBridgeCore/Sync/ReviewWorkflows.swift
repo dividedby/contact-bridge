@@ -257,7 +257,7 @@ public struct ReviewWorkflows: Sendable {
             }
             if !baselineOnly.isEmpty {
                 try state.update { state in
-                    for (id, settled) in baselineOnly { state.baselines[id] = settled }
+                    for (id, settled) in baselineOnly { state.store(settled, for: id) }
                 }
             }
             for (id, item) in itemByID where !failedIDs.contains(id) {
@@ -476,6 +476,7 @@ public struct ReviewWorkflows: Sendable {
                     warnings.append("The contact was restored, but its note was not: \(error.localizedDescription)")
                 }
             }
+            // No photo baseline: the restored contact is new and photo-less, so the next run looks at the pair's photos afresh.
             let stored = try await reread(newID) ?? created.record
             let baseline = SyncBaseline(
                 icloud: stored, google: record, googleEtag: person.etag ?? "", icloudNoteHash: icloudNoteHash,
@@ -606,7 +607,7 @@ public struct ReviewWorkflows: Sendable {
             let run = try await executor().execute(plan: plan)
             try Self.requireWritten(run, icloudSaved: didWriteICloud)
         case .baselineOnly(let settled):
-            try state.update { $0.baselines[icloudID] = settled }
+            try state.update { $0.store(settled, for: icloudID) }
         }
         try clear(item, covering: Set(draft.reviewFields))
         if didWriteICloud { try await advanceICloudToken(from: tokenBefore) }
@@ -628,7 +629,8 @@ public struct ReviewWorkflows: Sendable {
         let noteHash = resolved.note.map(NoteHash.hash)
         let settled = SyncBaseline(
             icloud: icloud, google: google, googleEtag: person.etag ?? baseline.googleEtag,
-            icloudNoteHash: noteHash ?? baseline.icloudNoteHash, googleNoteHash: noteHash ?? baseline.googleNoteHash, syncedAt: now()
+            icloudNoteHash: noteHash ?? baseline.icloudNoteHash, googleNoteHash: noteHash ?? baseline.googleNoteHash, syncedAt: now(),
+            photo: baseline.photo
         )
         let pushesNote = noteHash.map { $0 != GooglePersonMapper.noteHash(of: person) } ?? false
         guard resolved.changesGoogle || pushesNote else { return .baselineOnly(settled) }
