@@ -52,16 +52,20 @@ public enum ThreeWayDiff {
     ///     `unchanged`, is never pushed, and the baseline hashes stay as they are.
     ///   - googleEtag: the etag of `google`, recorded in `updatedBaseline` when given and nothing is held
     ///     for review.
+    ///   - labelsMatter: whether two edited list entries with the same key but different labels disagree. They do in an
+    ///     ongoing sync (a relabel is an edit to carry over). Linking two existing contacts passes false: each side keeps
+    ///     its own labels, and only entries one side lacks are a difference.
     public static func diff(
         icloud: ContactRecord, google: ContactRecord, base: SyncBaseline,
-        icloudNoteHash: String? = nil, googleNoteHash: String? = nil, googleEtag: String? = nil, at now: Date = Date()
+        icloudNoteHash: String? = nil, googleNoteHash: String? = nil, googleEtag: String? = nil, labelsMatter: Bool = true,
+        at now: Date = Date()
     ) -> LinkDiff {
         var changes: [SyncField: FieldChange] = [:]
         var pushFields = Set<SyncField>()
         var desired = google
 
         for field in SyncField.recordFields {
-            let change = classify(field, icloud: icloud, google: google, base: base)
+            let change = classify(field, icloud: icloud, google: google, base: base, labelsMatter: labelsMatter)
             changes[field] = change
             // Two edits that agree after normalizing still send iCloud's exact form when it differs from Google's.
             guard change == .pushToGoogle || change == .bothEditedEqual else { continue }
@@ -121,7 +125,9 @@ public enum ThreeWayDiff {
 
     // MARK: classification
 
-    private static func classify(_ field: SyncField, icloud: ContactRecord, google: ContactRecord, base: SyncBaseline) -> FieldChange {
+    private static func classify(
+        _ field: SyncField, icloud: ContactRecord, google: ContactRecord, base: SyncBaseline, labelsMatter: Bool
+    ) -> FieldChange {
         guard isList(field) else {
             let iChanged = exact(field, icloud) != exact(field, base.icloud)
             let gChanged = exact(field, google) != exact(field, base.google)
@@ -138,7 +144,8 @@ public enum ThreeWayDiff {
         let gChanged = currentGoogle.filter { !googleOnly.contains($0.key) } != baseGoogle.filter { !googleOnly.contains($0.key) }
         // An iCloud edit that adopts a Google-only entry makes it shared again.
         let stillGoogleOnly = googleOnly.subtracting(currentICloud.keys)
-        let equal = normalizedMap(field, icloud) == normalizedMap(field, google).filter { !stillGoogleOnly.contains($0.key) }
+        let theirs = normalizedMap(field, google).filter { !stillGoogleOnly.contains($0.key) }
+        let equal = labelsMatter ? normalizedMap(field, icloud) == theirs : Set(normalizedMap(field, icloud).keys) == Set(theirs.keys)
         let change = resolve(iChanged: iChanged, gChanged: gChanged, equal: equal)
         return change == .unchanged && currentGoogle != baseGoogle ? .googleOnlyChange : change
     }

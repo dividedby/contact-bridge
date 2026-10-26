@@ -5,7 +5,8 @@ import Foundation
 /// writes a contact.
 ///
 /// - A single-value group (name, nickname, company, birthday) is one pick: iCloud or Google. The default is Google where
-///   only Google edited it, iCloud where both did or where the pair was only just linked.
+///   only Google edited it, iCloud where both did or where the pair was only just linked, and always the side that has
+///   something where the other has nothing.
 /// - A list group (phones, emails, addresses, websites) has one row per entry, paired by its normalized key and judged
 ///   against both halves of the baseline. Every row says what happened (`EntryStatus`) and offers the actions that make
 ///   sense for it. A removal in Google is a row the user confirms, never silently undone, and an entry only Google has
@@ -158,12 +159,16 @@ public struct SyncReviewDraft: Sendable, Hashable {
         self.reviewFields = SyncField.allCases.filter(review.contains)
         notePushes = diff.changes[.note] == .pushToGoogle && icloudNote != nil
 
-        func defaultSide(_ field: SyncField) -> Side { diff.changes[field] == .googleEdited ? .google : .icloud }
+        // A side with nothing never wins by default: saving would erase what the other side has.
+        func defaultSide(_ field: SyncField, icloudText: String, googleText: String) -> Side {
+            if icloudText.isBlank != googleText.isBlank { return icloudText.isBlank ? .google : .icloud }
+            return diff.changes[field] == .googleEdited ? .google : .icloud
+        }
         singleRows = Self.singleFields.map { field in
             let i = Self.text(field, icloud), g = Self.text(field, google)
             return SingleRow(
                 field: field, icloudText: i, googleText: g, differs: Self.exact(field, icloud) != Self.exact(field, google),
-                isReview: review.contains(field), pick: defaultSide(field)
+                isReview: review.contains(field), pick: defaultSide(field, icloudText: i, googleText: g)
             )
         }
 
@@ -186,7 +191,8 @@ public struct SyncReviewDraft: Sendable, Hashable {
                 noteRow = NoteRow(
                     icloudText: icloudNote, googleText: googleNote,
                     combinedText: NotesMerge.combine(survivor: icloudNote, others: [(id: google.id, note: googleNote)]),
-                    pick: diff.changes[.note] == .googleEdited ? .google : .icloud,
+                    pick: icloudNote.isBlank != googleNote.isBlank ? (icloudNote.isBlank ? .google : .icloud)
+                        : diff.changes[.note] == .googleEdited ? .google : .icloud,
                     differs: NoteHash.hash(icloudNote) != NoteHash.hash(googleNote)
                 )
                 noteUnreadable = false

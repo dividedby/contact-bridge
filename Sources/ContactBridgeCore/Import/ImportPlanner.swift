@@ -107,8 +107,10 @@ public struct ImportPlanner: Sendable {
                 ($1.edge.match.confidence, $0.icloud.sourceIdentifier) < ($0.edge.match.confidence, $1.icloud.sourceIdentifier)
             }
             if let strongest {
-                // Reason texts start with "same phone" / "same email" when that identifier is shared (see DuplicateMatcher).
-                let sharesIdentifier = strongest.edge.match.reasons.contains { $0.hasPrefix("same phone") || $0.hasPrefix("same email") }
+                // Reason texts start with one of these when an identifier is shared (see DuplicateMatcher). A match with none of
+                // them rests on the name alone.
+                let identifierPrefixes = ["same phone", "same email", "same company and short code", "same website"]
+                let sharesIdentifier = strongest.edge.match.reasons.contains { reason in identifierPrefixes.contains { reason.hasPrefix($0) } }
                 var anyway = connection
                 anyway.source = .google
                 plan.links.append(ImportLink(

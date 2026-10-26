@@ -218,6 +218,77 @@ struct SyncReviewDraftTests {
         #expect(resolved.google.phones.first { $0.value == "415-555-0005" }?.label == "mobile")
     }
 
+    @Test("A blank side never wins by default: the other side's value is picked, whatever the diff says")
+    func blankSideNeverWinsByDefault() throws {
+        var mine = icloud(), theirs = google()
+        theirs.birthday = DateComponents(year: 1994, month: 4, day: 6)
+        // First link: the baseline is both sides as they are.
+        var draft = SyncReviewDraft(icloud: mine, google: theirs, base: baseline(mine, theirs), reviewFields: [.birthday])
+        var row = try #require(draft.singleRows.first { $0.field == .birthday })
+        #expect(row.needsChoice && row.pick == .google)
+        var resolved = draft.resolve()
+        #expect(resolved.icloud.birthday?.year == 1994 && resolved.google.birthday?.year == 1994)
+
+        draft.pick(.birthday, .icloud)
+        #expect(draft.singleRows.first { $0.field == .birthday }?.pick == .icloud, "an explicit pick still stands")
+
+        // The other way round, and Google-edited with a blank iCloud side that both edited.
+        mine.birthday = DateComponents(year: 1994, month: 4, day: 6)
+        theirs.birthday = nil
+        draft = SyncReviewDraft(icloud: mine, google: theirs, base: baseline(mine, theirs), reviewFields: [.birthday])
+        row = try #require(draft.singleRows.first { $0.field == .birthday })
+        #expect(row.pick == .icloud)
+        resolved = draft.resolve()
+        #expect(resolved.google.birthday?.year == 1994)
+
+        let before = icloud(org: "Acme")
+        let edited = SyncReviewDraft(
+            icloud: icloud(), google: google(org: "Fischer Design"), base: baseline(before, google(org: "Acme")), reviewFields: [.organization]
+        )
+        #expect(edited.singleRows.first { $0.field == .organization }?.pick == .google, "iCloud cleared it, Google changed it")
+    }
+
+    @Test("Keep iCloud for all still leaves Google's value where iCloud is blank")
+    func keepICloudKeepsGoogleOnly() throws {
+        let mine = icloud()
+        var theirs = google()
+        theirs.birthday = DateComponents(year: 1994, month: 4, day: 6)
+        var draft = SyncReviewDraft(icloud: mine, google: theirs, base: baseline(mine, theirs), reviewFields: [.birthday])
+        draft.chooseICloudEverywhere()
+        #expect(draft.keptFromGoogle == [.birthday])
+        let resolved = draft.resolve()
+        #expect(resolved.icloud.birthday == nil && resolved.google.birthday?.year == 1994 && !resolved.changesICloud && !resolved.changesGoogle)
+    }
+
+    @Test("A blank note never wins by default either")
+    func blankNoteNeverWins() throws {
+        let record = icloud()
+        let blankICloud = SyncReviewDraft(
+            icloud: record, google: google(), base: baseline(record, google(), notes: ("", "from Google")), reviewFields: [.note],
+            icloudNote: "", googleNote: "from Google"
+        )
+        #expect(blankICloud.noteRow?.pick == .google && blankICloud.resolve().note == "from Google")
+        let blankGoogle = SyncReviewDraft(
+            icloud: record, google: google(), base: baseline(record, google(), notes: ("from iCloud", "")), reviewFields: [.note],
+            icloudNote: "from iCloud", googleNote: ""
+        )
+        #expect(blankGoogle.noteRow?.pick == .icloud && blankGoogle.resolve().note == "from iCloud")
+        var kept = blankICloud
+        kept.chooseICloudEverywhere()
+        #expect(kept.keptFromGoogle == [.note] && kept.resolve().note == nil)
+    }
+
+    @Test("The same address spelled USA in one side and US in the other is one Same row")
+    func addressCountrySpellings() throws {
+        var mine = icloud(), theirs = google()
+        mine.postalAddresses = [Labeled(label: "home", value: PostalAddress(street: "308 Liberty St", city: "Hutto", state: "TX", postalCode: "78634", country: "USA"))]
+        theirs.postalAddresses = [Labeled(label: nil, value: PostalAddress(street: "308 Liberty St", city: "Hutto", state: "TX", postalCode: "78634", country: "US"))]
+        let draft = SyncReviewDraft(icloud: mine, google: theirs, base: baseline(mine, theirs), reviewFields: [.postalAddresses])
+        let rows = try #require(draft.lists.first?.rows)
+        #expect(rows.count == 1 && rows[0].status == .both && rows[0].icloudText != nil && rows[0].googleText != nil)
+        #expect(draft.isSettled)
+    }
+
     // MARK: note
 
     @Test("The note is a pick between iCloud, Google and the two combined")

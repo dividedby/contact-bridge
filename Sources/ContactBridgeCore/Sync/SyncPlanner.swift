@@ -49,10 +49,13 @@ public struct SyncPlanner: Sendable {
     ///   - allowMassGoogleDeletions: the user confirmed that a full Google listing really is missing that many linked
     ///     contacts (see `PauseReason.needsConfirmation`); they then become `deletedInGoogle` reviews as usual. An empty
     ///     listing is never let through.
+    ///   - openReviews: the stored review items. A pinned edit conflict (`canSettle`) is derived by no later plan, so the
+    ///     planner reports it in `settledReviews` when the live contacts it is about already agree on every group it names.
+    ///   - googleExtra: Google contacts the caller read by hand, for pinned conflicts the feed did not list.
     ///   - now: stamped on the baselines.
     public func plan(
         icloud: ICloudScan, google feed: GoogleFeed, state: SyncState, links: LinkTable, keepSeparate: Set<String> = [],
-        allowMassGoogleDeletions: Bool = false, now: Date
+        allowMassGoogleDeletions: Bool = false, openReviews: [ReviewItem] = [], googleExtra: [String: GooglePerson] = [:], now: Date
     ) -> SyncPlan {
         var plan = SyncPlan(isPreview: !state.firstSyncApproved)
         plan.notesReason = icloud.notesReason
@@ -75,6 +78,7 @@ public struct SyncPlanner: Sendable {
         let run = Run(planner: self, icloud: icloud, feed: feed, state: state, links: links, keepSeparate: keepSeparate, now: now)
         run.planLinked(into: &plan)
         run.planUnlinked(into: &plan)
+        plan.settledReviews = run.settledReviews(of: openReviews, googleExtra: googleExtra, plan: plan)
         applyCap(to: &plan)
         applyGuards(to: &plan, linkedCount: max(links.links.count, state.baselines.count))
 
@@ -91,6 +95,11 @@ public struct SyncPlanner: Sendable {
             )
         }
         return plan
+    }
+
+    /// A first-link conflict that is kept (pinned) until the user decides it, since the baseline already holds both sides.
+    public static func canSettle(_ item: ReviewItem) -> Bool {
+        item.pinned && (item.kind == .bothEdited || item.kind == .googleEdited) && item.icloudID != nil && item.resourceName != nil
     }
 
     // MARK: cap and guards
@@ -301,6 +310,28 @@ extension SyncPlanner {
             ThreeWayDiff.googleChanged(person, since: baseline, at: now)
         }
 
+        // MARK: settled conflicts
+
+        /// The pinned conflicts among `items` that the review screen would show as "The two sides agree now", judged on the live
+        /// contacts of this run (the same draft, baseline included). Anything not read this run is kept: iCloud not scanned,
+        /// Google's contact neither listed nor in `googleExtra`, no baseline yet, or a note conflict whose iCloud note was not read.
+        func settledReviews(of items: [ReviewItem], googleExtra: [String: GooglePerson], plan: SyncPlan) -> [String] {
+            guard scanned else { return [] }
+            let derived = Set(plan.review.map(\.id))
+            return items.filter(SyncPlanner.canSettle).compactMap { item -> String? in
+                guard !derived.contains(item.id), let id = item.icloudID, let name = item.resourceName, let record = icloudByID[id],
+                      let baseline = state.baselines[id], !feed.deleted.contains(name), let person = feed.people[name] ?? googleExtra[name],
+                      !person.isDeleted, let google = GooglePersonMapper.record(from: person, source: .google)
+                else { return nil }
+                let icloudNote = icloud.noteHashes[id] == nil ? nil : icloud.noteTexts[id] ?? ""
+                let draft = SyncReviewDraft(
+                    icloud: record, google: google, base: baseline, reviewFields: item.fields, icloudNote: icloudNote,
+                    googleNote: GooglePersonMapper.note(of: person)
+                )
+                return !draft.noteUnreadable && draft.isSettled ? item.id : nil
+            }
+        }
+
         // MARK: linking
 
         /// Records a link with a baseline taken from both sides as they are now. Field groups that already differ become
@@ -326,14 +357,17 @@ extension SyncPlanner {
             ))
 
             // Against an empty baseline every group that has data on either side counts as edited, so a group that is
-            // not "both edited to the same thing" is a genuine difference.
+            // not "both edited to the same thing" is a genuine difference. Labels are not: each side keeps its own, and the
+            // review screen shows entries with the same key as the same.
             let empty = NoteHash.hash("")
             let probe = SyncBaseline(
                 icloud: ContactRecord(id: id, source: .icloud, sourceIdentifier: id),
                 google: ContactRecord(id: name, source: .google, sourceIdentifier: name), googleEtag: "",
                 icloudNoteHash: empty, googleNoteHash: empty, syncedAt: now
             )
-            let diff = ThreeWayDiff.diff(icloud: record, google: google, base: probe, icloudNoteHash: iHash, googleNoteHash: gHash, at: now)
+            let diff = ThreeWayDiff.diff(
+                icloud: record, google: google, base: probe, icloudNoteHash: iHash, googleNoteHash: gHash, labelsMatter: false, at: now
+            )
             let differing = SyncField.allCases.filter {
                 switch diff.changes[$0] {
                 case .pushToGoogle?, .googleEdited?, .bothEditedDifferent?: true

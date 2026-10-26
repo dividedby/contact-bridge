@@ -16,7 +16,8 @@ public struct ReviewItem: Sendable, Hashable, Codable, Identifiable {
     public var fields: [SyncField]
     /// Set for a conflict between two contacts that were only just linked. Their baselines were taken from both sides as
     /// they are, so no later plan derives the conflict again and its absence says nothing: only the user resolving it
-    /// (`ReviewStoring.remove`), or the contact vanishing from either side (`reconcile`), removes the item.
+    /// (`ReviewStoring.remove`), the contact vanishing from either side, or the plan finding the two sides agree
+    /// (`SyncPlan.settledReviews`; both in `reconcile`), removes the item.
     public var pinned: Bool
     public var createdAt: Date
     public var updatedAt: Date
@@ -103,6 +104,9 @@ public struct ReviewList: Sendable, Hashable, Codable, VersionedFileContents {
         remove(
             where: { ($0.kind == .googleEdited || $0.kind == .bothEdited) && $0.icloudID.map(gone.contains) == true }, into: &result
         )
+        // A first-link conflict whose two sides were found to agree: what Save would record, without anything to choose.
+        let settled = Set(plan.settledReviews)
+        remove(where: { $0.pinned && settled.contains($0.id) }, into: &result)
         // A conflict missing from a plan that did not look at everything is unseen, not resolved.
         if plan.reviewIsComplete {
             let current = Set(plan.review.map(\.id))
@@ -117,7 +121,7 @@ public protocol ReviewStoring: Sendable {
     /// Brings the stored items in line with the plan's candidates: new ones are added, ones with the same id and a moved
     /// etag or fingerprint are refreshed, and stored items the plan no longer reports are removed, but only when
     /// `plan.reviewIsComplete` (otherwise an absent item was not looked at, not resolved). Stored `newInGoogle` items
-    /// for contacts in `ignoredGoogle` are removed regardless.
+    /// for contacts in `ignoredGoogle` are removed regardless, and so are pinned conflicts in `plan.settledReviews`.
     @discardableResult
     func reconcile(with plan: SyncPlan, ignoredGoogle: Set<String>, at now: Date) throws -> ReviewReconciliation
     /// Adds or refreshes candidates the executor found while writing (a delete turned into a review).

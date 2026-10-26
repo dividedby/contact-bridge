@@ -58,7 +58,10 @@ final class SyncWorld: @unchecked Sendable {
     }
 
     /// - Parameter autoFull: list Google in full when `SyncPlanner.requiresFullGoogleListing` says so, as the engine will.
-    func plan(_ trigger: SyncTrigger = .scheduled, requireFullListing: Bool = false, autoFull: Bool = true) async throws -> SyncPlan {
+    func plan(
+        _ trigger: SyncTrigger = .scheduled, requireFullListing: Bool = false, autoFull: Bool = true, reviews: [ReviewItem] = [],
+        googleExtra: [String: GooglePerson] = [:]
+    ) async throws -> SyncPlan {
         let running = contactsRunning
         let scanner = ICloudScanner(store: store, notes: notes, contactsAppRunning: { running }, now: { [clock] in clock })
         let scan = try await scanner.scan(state: state, links: links, trigger: trigger)
@@ -67,7 +70,10 @@ final class SyncWorld: @unchecked Sendable {
             .fetch(state: state, accountEmail: account, requireFullListing: full)
         lastScan = scan
         lastFeed = feed
-        return planner.plan(icloud: scan, google: feed, state: state, links: links, keepSeparate: state.keepSeparate, now: clock)
+        return planner.plan(
+            icloud: scan, google: feed, state: state, links: links, keepSeparate: state.keepSeparate, openReviews: reviews,
+            googleExtra: googleExtra, now: clock
+        )
     }
 
     /// Stores the links, baselines and checkpoint of `plan`, as a completed run would, and approves syncing.

@@ -96,6 +96,27 @@ struct ReviewStoreTests {
         #expect(try store.load().isEmpty)
     }
 
+    @Test("A pinned conflict the plan found settled is dropped; an ordinary one with the same id and other conflicts stay")
+    func settledPinnedConflicts() throws {
+        let store = InMemoryReviewStore()
+        let record = ContactRecord(id: "I1", source: .icloud, sourceIdentifier: "I1", givenName: "Ann")
+        let first = ReviewCandidate(kind: .bothEdited, icloudID: "I1", resourceName: "people/c1", googleEtag: "e1", fields: [.phones])
+        var linking = plan([first], complete: true)
+        linking.links = [PlannedLink(
+            icloudID: "I1", resourceName: "people/c1", origin: .matched, isNewLink: true,
+            baseline: SyncBaseline(icloud: record, google: record, googleEtag: "e1", syncedAt: t0), reasons: []
+        )]
+        try store.reconcile(with: linking, at: t0)
+        try store.reconcile(with: plan([both], complete: true), at: t0)
+        #expect(try store.load().count == 2)
+
+        var settled = plan([], complete: false)
+        settled.settledReviews = [first.id, both.id]
+        let result = try store.reconcile(with: settled, at: t1)
+        #expect(result.removed == [first.id], "the unpinned item is not the plan's to settle")
+        #expect(try store.load().map(\.id) == [both.id])
+    }
+
     @Test("A pinned conflict (and any other edit conflict) is dropped once the contact is gone from either side, even in a partial plan")
     func goneContactsClearConflicts() throws {
         let record = ContactRecord(id: "I1", source: .icloud, sourceIdentifier: "I1", givenName: "Ann")

@@ -798,4 +798,42 @@ struct SyncEngineTests {
         try await holder.value
         #expect(rig.google.listings == before)
     }
+
+    // MARK: stale first-link conflicts
+
+    /// A first-link conflict as Phase 2 stored it: pinned, because the baseline already holds both sides.
+    private func pinFirstLinkConflict(_ rig: EngineRig, _ id: String, _ resourceName: String) throws -> String {
+        let baseline = try #require(try rig.state.baselines[id])
+        let candidate = ReviewCandidate(kind: .bothEdited, icloudID: id, resourceName: resourceName, googleEtag: baseline.googleEtag, fields: [.phones])
+        var plan = SyncPlan(isPreview: false)
+        plan.review = [candidate]
+        plan.links = [PlannedLink(icloudID: id, resourceName: resourceName, origin: .matched, isNewLink: true, baseline: baseline, reasons: [])]
+        try rig.base.reviews.reconcile(with: plan, at: SyncFixtures.t0)
+        return candidate.id
+    }
+
+    @Test("A pinned first-link conflict whose sides agree is cleared by the next full read, and nothing is written")
+    func clearsSettledPinnedConflict() async throws {
+        let rig = try await EngineRig.linked(count: 2)
+        defer { rig.cleanUp() }
+        let stale = try pinFirstLinkConflict(rig, "I1", "people/c1")
+        let real = try pinFirstLinkConflict(rig, "I2", "people/c2")
+        try await rig.base.world.editGoogle("people/c2", mask: "phoneNumbers") {
+            $0.phoneNumbers = ($0.phoneNumbers ?? []) + [GooglePhoneNumber(value: "415-555-0099", type: "home")]
+        }
+        let people = await rig.base.world.google.allPeople
+        let contacts = try await rig.base.world.store.fetchAll()
+
+        await rig.start()
+        await rig.engine.waitForRuns(1)
+        #expect(try rig.base.reviews.load().map(\.id).contains(stale), "iCloud was not read in the first run: nothing is known about the pair")
+
+        await rig.engine.syncNow()
+        let left = try rig.base.reviews.load().map(\.id)
+        #expect(!left.contains(stale) && left.contains(real), "\(left)")
+        let peopleAfter = await rig.base.world.google.allPeople
+        let contactsAfter = try await rig.base.world.store.fetchAll()
+        #expect(peopleAfter == people && contactsAfter == contacts)
+        await rig.engine.stop()
+    }
 }

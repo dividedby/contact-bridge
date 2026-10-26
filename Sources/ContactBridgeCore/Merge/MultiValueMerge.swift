@@ -56,15 +56,15 @@ extension MergePlan {
         return key.isEmpty ? nil : key
     }
 
-    /// Never nil for an address with any non-blank field: a part that folds to nothing ("#") keeps its raw text.
+    /// Never nil for an address with any non-blank field: a part that folds to nothing ("#") keeps its raw text. The
+    /// country is its ISO code (from the record, or from the name: "USA" and "US" agree), else its folded text.
     static func addressKey(_ address: PostalAddress) -> String? {
         guard !address.isEmpty else { return nil }
-        return [address.street, address.city, address.state, address.postalCode, address.country]
-            .map { part in
-                let folded = NameNormalizer.foldedKey(part)
-                return folded.isEmpty ? part.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() : folded
-            }
-            .joined(separator: "|")
+        let parts = [address.street, address.city, address.state, address.postalCode].map { part in
+            let folded = NameNormalizer.foldedKey(part)
+            return folded.isEmpty ? part.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() : folded
+        }
+        return (parts + [CountryNormalizer.key(country: address.country, isoCode: address.isoCountryCode)]).joined(separator: "|")
     }
 
     static func describe(_ address: PostalAddress) -> String {

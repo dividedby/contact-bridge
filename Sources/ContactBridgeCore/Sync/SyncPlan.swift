@@ -181,6 +181,9 @@ public struct SyncPlan: Sendable, Hashable {
     /// The links the forget-links guard counted, when it is what paused the plan (`pause` is `.needsConfirmation`).
     public var guardedForgottenLinks: [DroppedLinkInfo] = []
     public var review: [ReviewCandidate] = []
+    /// Ids of stored pinned conflicts (`SyncPlanner.plan(openReviews:)`) whose two sides, read live, already agree: nothing is
+    /// left to choose, so `ReviewStore.reconcile` drops them. Nothing is written to either contact; the baseline stays as it is.
+    public var settledReviews: [String] = []
     public var deferred = Deferred()
 
     /// Unlinked iCloud contacts that could not be matched or created because this run only saw part of Google's

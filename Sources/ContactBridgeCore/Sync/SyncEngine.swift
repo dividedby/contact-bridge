@@ -478,9 +478,13 @@ public actor SyncEngine {
             shown = counts
         }
         let at = clock.now()
+        // Pinned first-link conflicts are never derived again; the planner drops those whose live sides agree.
+        let open = planState.firstSyncApproved && scan.status == .changed ? try reviewStore.load() : []
+        let pinnedPeople = try await readPinnedPeople(open, feed: feed, google: env.google)
         var plan = planner.plan(
             icloud: scan, google: feed, state: planState, links: table, keepSeparate: planState.keepSeparate,
-            allowMassGoogleDeletions: options.confirmedSummaries.contains { $0.hasPrefix(SyncPlanner.googleMissingSummaryPrefix) }, now: at
+            allowMassGoogleDeletions: options.confirmedSummaries.contains { $0.hasPrefix(SyncPlanner.googleMissingSummaryPrefix) },
+            openReviews: open, googleExtra: pinnedPeople, now: at
         )
         if case .needsConfirmation(let summary)? = plan.pause, options.confirmedSummaries.contains(summary) {
             plan.pause = nil
@@ -509,6 +513,23 @@ public actor SyncEngine {
             report: report, waitingForNotes: plan.waitingForNotes, unlinkedWaitingForFullListing: plan.unlinkedWaitingForFullListing,
             notesUnavailable: plan.notesUnavailable, hasDeferred: !plan.deferred.isEmpty, reviews: reviews, unconfirmedCreates: unconfirmed
         ))
+    }
+
+    /// The Google contacts of pinned conflicts that an incremental feed did not list (it lists only what changed). One that
+    /// cannot be read is left out, and its conflict stays open.
+    private func readPinnedPeople(_ items: [ReviewItem], feed: GoogleFeed, google: any GoogleContactsClient) async throws -> [String: GooglePerson] {
+        var people: [String: GooglePerson] = [:]
+        let names = Set(items.filter(SyncPlanner.canSettle).compactMap(\.resourceName)).sorted()
+        for name in names where feed.people[name] == nil && !feed.deleted.contains(name) {
+            do {
+                people[name] = try await google.getPerson(resourceName: name)
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                continue
+            }
+        }
+        return people
     }
 
     // MARK: results
