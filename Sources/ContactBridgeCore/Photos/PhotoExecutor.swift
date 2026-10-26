@@ -56,6 +56,33 @@ public struct PhotoRunReport: Sendable, Hashable {
     /// Everything the plan asked for was done, or is bound to be planned again without help. When false the engine keeps its
     /// tokens where they were, so the next run reads the same changes again.
     public var isComplete: Bool { carried == 0 && halted == nil && !skipped.contains { $0.needsAnotherLook } }
+
+    /// Why photo changes were left for the next run, one line per reason, so "tried again on the next run" is not a mystery.
+    public var putOffReasons: [String] {
+        var counts: [String: Int] = [:]
+        var order: [String] = []
+        for item in skipped {
+            let message: String
+            switch item.reason {
+            case .failed(let text): message = text
+            case .notAttempted(let text): message = text
+            case .couldNotSaveOld(let text): message = "the photo being replaced could not be saved to the photo history first (\(text))"
+            default: continue
+            }
+            if counts[message] == nil { order.append(message) }
+            counts[message, default: 0] += 1
+        }
+        var lines = order.map { message in
+            let count = counts[message] ?? 0
+            return "\(count) photo change\(count == 1 ? " was" : "s were") put off until the next run: \(message)"
+        }
+        if carried > 0 {
+            lines.append(
+                "\(carried) Google photo change\(carried == 1 ? " waits" : "s wait") for the next run: Google takes at most \(PhotoExecutor.maxGoogleWrites) photo changes per run."
+            )
+        }
+        return lines
+    }
 }
 
 /// Carries out the photo ops of a plan, after the field writes and inside the same `WriteGate` lock. The ops were decided on

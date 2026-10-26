@@ -93,6 +93,8 @@ struct PhotoEngineTests {
 
         let first = await rig.engine.snapshot
         #expect(first.lastRun?.photosToGoogle == 0 && first.lastRun?.leftForNextRun == 1)
+        let putOff = first.lastRun?.warnings.filter { $0.contains("put off until the next run") } ?? []
+        #expect(putOff.count == 1 && putOff.first?.contains("try later") == true, "the screen says why")
         let held = try rig.engine.state
         #expect(held.icloudChangeToken == tokensBefore.icloudChangeToken && held.googleSyncToken == tokensBefore.googleSyncToken)
         #expect(await rig.photos.googlePhoto(1) == nil)
@@ -214,5 +216,24 @@ struct PhotoEngineTests {
         let downloads = await rig.photos.fetcher.requested
         #expect(writes.isEmpty && downloads.isEmpty)
         await rig.engine.engine.stop()
+    }
+
+    @Test("Put-off photo changes are counted by reason; ones that need no retry are left out, and carried writes say why")
+    func putOffReasons() {
+        var report = PhotoRunReport()
+        report.skipped = [
+            .init(icloudID: "I1", reason: .failed("backup failed")),
+            .init(icloudID: "I2", reason: .notAttempted("backup failed")),
+            .init(icloudID: "I3", reason: .failed("download failed")),
+            .init(icloudID: "I4", reason: .icloudChanged),
+            .init(icloudID: "I5", reason: .permanent("refused")),
+        ]
+        report.carried = 2
+        #expect(report.putOffReasons == [
+            "2 photo changes were put off until the next run: backup failed",
+            "1 photo change was put off until the next run: download failed",
+            "2 Google photo changes wait for the next run: Google takes at most 60 photo changes per run.",
+        ])
+        #expect(PhotoRunReport().putOffReasons.isEmpty)
     }
 }

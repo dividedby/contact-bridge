@@ -568,7 +568,7 @@ public actor SyncEngine {
             // A rate limit or sign-in problem in the photo phase stops the run like one in the field phase: back-off, the
             // "stopped" notice, and no follow-up run straight into it.
             report.halted = report.halted ?? report.photo.halted
-            report.warnings += report.photo.warnings
+            report.warnings += report.photo.warnings + report.photo.putOffReasons
             report.warnings += observed.failures.values.sorted { $0.resourceName < $1.resourceName }.map {
                 "A contact photo could not be read and will be left alone until it changes: \($0.message)"
             }

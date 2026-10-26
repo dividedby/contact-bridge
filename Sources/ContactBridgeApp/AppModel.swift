@@ -1082,7 +1082,7 @@ final class ReviewModel {
                 notice = nil
                 resultMessage = message
                 if !warnings.isEmpty { app.alert = AlertInfo(title: "Done, with a note", message: warnings.joined(separator: "\n")) }
-                await settle()
+                settle(revealing: [current.id])
             case .changedSinceShown(let fresh):
                 notice = "This changed since you looked, so nothing was done. Check it again."
                 if let fresh {
@@ -1090,7 +1090,7 @@ final class ReviewModel {
                 } else {
                     detail = nil
                     resultMessage = "That item changed and was refreshed. Nothing was done."
-                    await settle()
+                    settle()
                 }
             }
         } catch {
@@ -1100,13 +1100,16 @@ final class ReviewModel {
     }
 
     /// After a change to contacts: other screens' lists are stale, and the engine settles baselines and the review list.
-    private func settle() async {
-        await app.backup.refresh()
+    /// The sync runs in the background, so the next item can be opened while it does; `decided` stay hidden until it ends.
+    private func settle(revealing decided: Set<String> = []) {
         app.importing.reset()
         app.dedupe.reset()
         app.cleanup.reset()
-        await app.sync.syncNow()
-        hidden = []
+        Task {
+            await app.backup.refresh()
+            await app.sync.syncNow()
+            hidden.subtract(decided)
+        }
     }
 
     // MARK: keep iCloud for all
@@ -1126,7 +1129,7 @@ final class ReviewModel {
             let report = try await app.makeReviewWorkflows().keepICloudForAll(items)
             bulkReport = report
             hidden.formUnion(report.applied)
-            await settle()
+            settle(revealing: Set(report.applied))
         } catch {
             showingBulk = false
             app.present(error, title: "Could not keep iCloud for all")
@@ -1155,7 +1158,7 @@ final class ReviewModel {
                 : try await workflows.keepGooglePhotosForAll(items, confirmed: confirmed)
             photoBulkReport = report
             hidden.formUnion(report.applied)
-            if report.needsConfirmation == nil { await settle() }
+            if report.needsConfirmation == nil { settle(revealing: Set(report.applied)) }
         } catch {
             photoBulkSide = nil
             app.present(error, title: "Could not keep \(side.name) photos for all")
@@ -1188,7 +1191,7 @@ final class ReviewModel {
             try await app.makeReviewWorkflows().unignore([contact.resourceName])
             ignored.removeAll { $0.id == contact.id }
             resultMessage = "\(contact.name) will be offered again on the next sync."
-            await settle()
+            settle()
         } catch {
             app.present(error, title: "Could not show that contact again")
         }
