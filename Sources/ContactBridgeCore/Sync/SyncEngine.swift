@@ -470,7 +470,7 @@ public actor SyncEngine {
         // `userPaused` too: a pause that could not be saved is not in `state`, but it still holds.
         if state.pause == .user || userPaused, state.firstSyncApproved || approvingNow { return .userPaused }
         if approvingNow, env.accountEmail == nil {
-            return .notReady("Couldn't confirm which Google account is signed in. Sign in with Google in Setup again, then start syncing.")
+            return .notReady("Couldn't confirm which Google account is signed in. Sign out in Setup, then sign in again and allow access to your email address, then start syncing.")
         }
         let nowFn: @Sendable () -> Date = { [clock] in clock.now() }
         let executor = SyncExecutor(

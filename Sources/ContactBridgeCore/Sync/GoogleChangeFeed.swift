@@ -61,7 +61,7 @@ extension GoogleChangeFeedError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .accountUnconfirmed:
-            "Couldn't confirm which Google account is signed in, so Google was left alone this time. Sign in again in Setup if this keeps happening."
+            "Couldn't confirm which Google account is signed in, so Google was left alone this time. Sign out in Setup, then sign in again and allow access to your email address."
         }
     }
 }
