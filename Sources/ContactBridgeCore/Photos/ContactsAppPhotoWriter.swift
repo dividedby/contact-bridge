@@ -34,16 +34,23 @@ public struct ContactsAppUnavailable: Error, Sendable, Equatable {
 }
 
 /// Uses the Automation permission for Contacts that notes already need. Opens Contacts hidden when it is not running, and
-/// quits it again in `finish` if it opened it.
+/// quits it again in `finish` if it opened it. Once Contacts could not be reached, the run's other photos are put off at
+/// once instead of each waiting for it again (the sync holds its write lock meanwhile).
 public struct ContactsAppPhotoWriter: ContactsAppPhotoWriting {
     private let runner: any AppleScriptRunning
     private let launcher: (any ContactsAppLaunching)?
     private let retryDelay: Duration
-    /// Whether this writer opened Contacts and has not quit it yet.
-    private let openedContacts = Flag()
+    private let run = RunState()
 
-    private final class Flag: Sendable {
-        let value = Mutex(false)
+    /// What this writer knows until `finish`. A class around a `Mutex`, which a copyable struct cannot hold directly.
+    private final class RunState: Sendable {
+        struct Values {
+            /// This writer opened Contacts and has not quit it yet.
+            var openedContacts = false
+            var unreachable: ContactsAppUnavailable?
+        }
+
+        let values = Mutex(Values())
     }
 
     public init(
@@ -101,9 +108,20 @@ public struct ContactsAppPhotoWriter: ContactsAppPhotoWriting {
             arguments.append(picture)
         }
         let handler = data == nil ? Self.removeHandler : Self.setHandler
-        // A hidden Contacts with no window can be quit by macOS within seconds (automatic termination under memory
-        // pressure), also in the middle of a write: it is opened again and the write repeated.
-        for attempt in 1...Self.attempts {
+        if let unreachable = run.values.withLock({ $0.unreachable }) { throw unreachable }
+        do {
+            try await write(handler: handler, arguments: arguments)
+        } catch let unreachable as ContactsAppUnavailable {
+            run.values.withLock { $0.unreachable = unreachable }
+            throw unreachable
+        }
+    }
+
+    /// A hidden Contacts with no window can be quit by macOS within seconds (automatic termination under memory pressure),
+    /// also in the middle of a write: it is opened again and the write repeated, up to `attempts` times.
+    private func write(handler: String, arguments: [NSAppleEventDescriptor]) async throws {
+        var attempt = 1
+        while true {
             do {
                 try await openContactsIfNeeded()
                 _ = try await ContactsAppScript.retryingLaunch(after: retryDelay) {
@@ -111,21 +129,26 @@ public struct ContactsAppPhotoWriter: ContactsAppPhotoWriting {
                 }
                 return
             } catch let error as AppleScriptError where Self.contactsGone.contains(error.number) && attempt < Self.attempts {
-                continue
-            } catch let error as AppleScriptError where Self.unreachable.keys.contains(error.number) {
-                throw ContactsAppUnavailable(reason: Self.unreachable[error.number] ?? error.message)
+                attempt += 1
+                try await Task.sleep(for: retryDelay)
+            } catch let error as AppleScriptError {
+                if let unavailable = Self.unavailable(error) { throw unavailable }
+                throw error
             }
         }
     }
 
     /// Times a write is tried when Contacts goes away under it.
     static let attempts = 3
-    /// The Contacts app is not there (any more): -600 not running, -609 the connection to it went away.
-    static let contactsGone: Set<Int> = [AppleScriptError.appNotRunning, -609]
+    /// The Contacts app is not there (any more).
+    static let contactsGone: Set<Int> = [AppleScriptError.appNotRunning, AppleScriptError.connectionInvalid]
 
     public func finish() async {
-        guard openedContacts.value.withLock({ opened in defer { opened = false }; return opened }) else { return }
-        await launcher?.quitIfStillHidden()
+        let opened = run.values.withLock { values in
+            defer { values = RunState.Values() }
+            return values.openedContacts
+        }
+        if opened { await launcher?.quitIfStillHidden() }
     }
 
     private func openContactsIfNeeded() async throws {
@@ -140,7 +163,7 @@ public struct ContactsAppPhotoWriter: ContactsAppPhotoWriting {
         } catch {
             throw ContactsAppUnavailable(reason: "it is not running and could not be opened (\(error.localizedDescription))")
         }
-        openedContacts.value.withLock { $0 = true }
+        run.values.withLock { $0.openedContacts = true }
     }
 
     private func reopen() async throws {
@@ -159,11 +182,13 @@ public struct ContactsAppPhotoWriter: ContactsAppPhotoWriting {
                 return
             } catch let error as AppleScriptError where error.number == AppleScriptError.appNotRunning {
                 try await Task.sleep(for: retryDelay)
-            } catch let error as AppleScriptError where error.number == -609 {
+            } catch let error as AppleScriptError where error.number == AppleScriptError.connectionInvalid {
                 // Quit again while starting up: open it once more.
                 try await reopen()
-            } catch let error as AppleScriptError where Self.unreachable.keys.contains(error.number) {
-                throw ContactsAppUnavailable(reason: Self.unreachable[error.number] ?? error.message)
+                try await Task.sleep(for: retryDelay)
+            } catch let error as AppleScriptError {
+                if let unavailable = Self.unavailable(error) { throw unavailable }
+                throw error
             }
         }
         throw ContactsAppUnavailable(reason: "it was opened but did not answer")
@@ -173,9 +198,14 @@ public struct ContactsAppPhotoWriter: ContactsAppPhotoWriting {
     static let unreachable: [Int: String] = [
         AppleScriptError.appNotRunning: "it is not running",
         AppleScriptError.notAuthorized: "Contact Bridge is not allowed to control it (System Settings > Privacy & Security > Automation)",
-        -609: "it quit while the photo was being written",
-        -1712: "it did not answer in time",
+        AppleScriptError.connectionInvalid: "it quit while the photo was being written",
+        AppleScriptError.timedOut: "it did not answer in time",
     ]
+
+    /// `error` as `ContactsAppUnavailable` when it means Contacts was not reached; nil when Contacts refused.
+    static func unavailable(_ error: AppleScriptError) -> ContactsAppUnavailable? {
+        unreachable[error.number].map { ContactsAppUnavailable(reason: $0) }
+    }
 
     /// AppleScript's `TIFF picture` ('TIFF'), the class of a person's `image`.
     static let tiffType: DescType = 0x5449_4646

@@ -12,7 +12,7 @@ struct ContactsAppLauncher: ContactsAppLaunching {
     }
 
     func isRunning() async -> Bool {
-        await MainActor.run { !Self.running().isEmpty }
+        !Self.running().isEmpty
     }
 
     func openHidden() async throws {
@@ -27,10 +27,8 @@ struct ContactsAppLauncher: ContactsAppLaunching {
     }
 
     func quitIfStillHidden() async {
-        await MainActor.run {
-            for app in Self.running() where app.isHidden {
-                app.terminate()
-            }
+        for app in Self.running() where app.isHidden {
+            app.terminate()
         }
     }
 }

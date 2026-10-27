@@ -1,26 +1,18 @@
 import Foundation
 
-/// One-time fixes to stored photo records, run before a sync run plans when `SyncState.photoRepairVersion` is behind. Each
-/// version's step runs once, in order, from the version the state is at.
+/// Fixes to stored photo records, run before a sync run plans when `SyncState.photoRepairVersion` is behind.
 ///
-/// Version 1: once iCloud has synced a contact photo, macOS reports it only as a centre-square thumbnail
+/// Version 1, once: once iCloud has synced a contact photo, macOS reports it only as a centre-square thumbnail
 /// (`ICloudPhotoRead`). Records made before this was handled read such a photo as missing, which turned photos sync had just
 /// copied into "removed in iCloud" questions, and fingerprinted pictures whole, so a cropped thumbnail of a wide photo
 /// looked like another picture. Every pair whose iCloud contact has a photo (or thumbnail) is therefore looked at afresh,
 /// as if for the first time, and its photo questions are dropped. A pair whose iCloud contact really has no photo keeps its
 /// record and its questions: a removal the user made is still asked about.
 ///
-/// Version 2: iCloud photos the Contacts framework refused with error 134092 were given up on until a photo changed. They
-/// now go through the Contacts app instead (`ContactsAppPhotoWriter`), so those pairs are looked at afresh and tried again.
-/// A pair is only read again when a side changed or its record is missing, so the record is dropped, not just the failure.
-///
-/// Version 3: the first build of version 2 cleared those failures but kept the records, which then held nothing at all and
-/// left the pairs unread. Records that hold nothing are dropped, so those pairs are looked at afresh too. A pair with no photo
-/// on either side holds an empty record as well; looked at again, it is recorded the same way.
-///
-/// Versions 4 and 5: the Contacts app fallback gave up on photos when Contacts was not running (a script cannot launch it)
-/// and when macOS quit the hidden Contacts in the middle of a write. It now opens Contacts itself and writes again when it
-/// goes away, so version 2's step runs once more. Every later fix to the fallback does the same.
+/// Versions 2 to 5, each time the version moves: iCloud photos the Contacts framework refused with error 134092 were given
+/// up on until a photo changed. They now go through the Contacts app (`ContactsAppPhotoWriter`), and each version fixed a
+/// way that fallback still gave up, so the photos given up on for 134092 are tried again. A later fix to the fallback bumps
+/// the version for the same reason.
 public enum PhotoRepair {
     public static let currentVersion = 5
 
@@ -30,7 +22,6 @@ public enum PhotoRepair {
         let from = try state.load().photoRepairVersion
         var fresh: [String] = []
         if from < 1 { fresh = try await lookAfresh(store: store, state: state, reviews: reviews) }
-        if from < 3 { try dropEmptyRecords(state: state) }
         try retryLostPictureFiles(state: state)
         try state.update { $0.photoRepairVersion = currentVersion }
         return fresh
@@ -49,30 +40,25 @@ public enum PhotoRepair {
         return fresh.sorted()
     }
 
-    /// Drops the records of photos given up on for error 134092; returns their iCloud ids.
+    /// Clears the 134092 failure markers; returns the iCloud ids. A record left holding nothing is dropped: it was a pair's
+    /// first look (a copy that never happened), and an unchanged pair is only read again when its record is missing. A
+    /// record that holds more stays, so what it says (a removal the user asked for, say) is planned again, not undone.
     @discardableResult
     static func retryLostPictureFiles(state: any SyncStateStoring) throws -> [String] {
-        try dropRecords(state: state) { $0.failure?.message.contains("134092") == true }
-    }
-
-    /// Drops photo records that hold no picture, key, waiting removal or failure; returns their iCloud ids.
-    @discardableResult
-    static func dropEmptyRecords(state: any SyncStateStoring) throws -> [String] {
-        try dropRecords(state: state) { photo in
-            photo.icloud == nil && photo.google == nil && photo.googleProfile == nil && photo.icloudHint == nil
-                && photo.googleURLKey == nil && photo.googleProfileKey == nil && photo.pendingRemoval == nil && photo.failure == nil
-        }
-    }
-
-    private static func dropRecords(state: any SyncStateStoring, where matches: (PhotoBaseline) -> Bool) throws -> [String] {
-        var dropped: [String] = []
+        var retried: [String] = []
         try state.update {
             for (id, baseline) in $0.baselines {
-                guard let photo = baseline.photo, matches(photo) else { continue }
-                $0.baselines[id]?.photo = nil
-                dropped.append(id)
+                guard var photo = baseline.photo, photo.failure?.message.contains("134092") == true else { continue }
+                photo.failure = nil
+                $0.baselines[id]?.photo = holdsNothing(photo) ? nil : photo
+                retried.append(id)
             }
         }
-        return dropped.sorted()
+        return retried.sorted()
+    }
+
+    private static func holdsNothing(_ photo: PhotoBaseline) -> Bool {
+        photo.icloud == nil && photo.google == nil && photo.googleProfile == nil && photo.icloudHint == nil
+            && photo.googleURLKey == nil && photo.googleProfileKey == nil && photo.pendingRemoval == nil && photo.failure == nil
     }
 }

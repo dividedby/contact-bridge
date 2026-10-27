@@ -112,19 +112,19 @@ struct PhotoContactsAppFallbackTests {
         try await copiesI2(rig)
     }
 
-    @Test("Repair from version 2 (failure cleared, empty record kept) drops the empty record, and the photo then goes in")
-    func repairDropsEmptyRecords() async throws {
-        let (rig, settled) = try await givenUp()
+    @Test("A 134092 failure on a record that holds more (a removal the user asked for) only loses its marker")
+    func repairKeepsRecordsThatHoldMore() async throws {
+        let rig = try await PhotoRig.linked(count: 2)
         defer { rig.cleanUp() }
-        try rig.base.stateStore.update {
-            $0.baselines["I2"]?.photo?.failure = nil
-            $0.photoRepairVersion = 2
-        }
-        #expect(try await rig.look(.syncNow).plan.photoOps.isEmpty, "an empty record leaves the pair unread")
+        let fingerprint = try #require(ImageIOPhotoFingerprinter().fingerprint(of: one))
+        let lost = PhotoBaseline.Failure(stamp: "s", message: ContactStoreError.photoNotSaved.localizedDescription, at: SyncFixtures.t0)
+        let record = PhotoBaseline(icloud: fingerprint, icloudHint: "h", syncedAt: SyncFixtures.t0, failure: lost)
+        try rig.base.stateStore.update { $0.baselines["I1"]?.photo = record }
 
-        try await PhotoRepair.run(store: rig.store, state: rig.base.stateStore, reviews: rig.base.reviews)
-        #expect(try rig.photoBaseline("I2") == nil && rig.photoBaseline("I1") == settled)
-        try await copiesI2(rig)
+        #expect(try PhotoRepair.retryLostPictureFiles(state: rig.base.stateStore) == ["I1"])
+        var expected = record
+        expected.failure = nil
+        #expect(try rig.photoBaseline("I1") == expected, "kept, so the pair is not taken for new and its photo not copied back")
     }
 
     @Test("A Contacts app that cannot be reached puts the photo off to the next run instead of giving up on it")
@@ -145,6 +145,17 @@ struct PhotoContactsAppFallbackTests {
         try await PhotoRepair.run(store: rig.store, state: rig.base.stateStore, reviews: rig.base.reviews)
         #expect(try rig.photoBaseline("I2") == nil && rig.photoBaseline("I1") == settled)
         try await copiesI2(rig)
+    }
+
+    @Test("A picture the fallback cannot convert is given up on with its own reason, not the 134092 one")
+    func fallbackKeepsItsOwnErrors() async throws {
+        struct Undecodable: ContactsAppPhotoWriting {
+            func setPhoto(_ data: Data?, forID id: String) async throws { throw PhotoEncodingError.undecodable }
+        }
+        let (rig, ops) = try await refusedCopy()
+        defer { rig.cleanUp() }
+        let report = try await rig.executor(icloudFallback: Undecodable()).execute(ops)
+        #expect(report.givenUp.map(\.message) == [PhotoEncodingError.undecodable.localizedDescription])
     }
 
     @Test("Other failure markers are left alone by the repair")
@@ -254,5 +265,19 @@ struct PhotoContactsAppFallbackTests {
             try await ContactsAppPhotoWriter(runner: alwaysGone, retryDelay: .zero).setPhoto(one, forID: "ABC-1:ABPerson")
         }
         #expect(alwaysGone.calls.count == 3, "three attempts, then put off to the next run")
+    }
+
+    @Test("Once Contacts could not be reached, the run's other photos are put off without waiting again; finish starts over")
+    func writerRemembersUnreachable() async throws {
+        let notRunning: Result<NSAppleEventDescriptor, AppleScriptError> = .failure(AppleScriptError(number: AppleScriptError.appNotRunning, message: ""))
+        let runner = FakeAppleScriptRunner(responses: Array(repeating: notRunning, count: 6) + [awake, done])
+        let writer = ContactsAppPhotoWriter(runner: runner, retryDelay: .zero)
+        await #expect(throws: ContactsAppUnavailable.self) { try await writer.setPhoto(one, forID: "A:ABPerson") }
+        await #expect(throws: ContactsAppUnavailable.self) { try await writer.setPhoto(one, forID: "B:ABPerson") }
+        #expect(runner.calls.count == 6, "the second photo did not try again")
+
+        await writer.finish()
+        try await writer.setPhoto(one, forID: "B:ABPerson")
+        #expect(runner.calls.count == 8)
     }
 }

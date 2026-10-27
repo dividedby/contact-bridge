@@ -467,8 +467,9 @@ public struct PhotoExecutor: Sendable {
     }
 
     /// The Contacts framework's save, then on error 134092 the Contacts app's. Whether the photo took is decided by reading
-    /// it back afterwards, as for any iCloud write. A Contacts app that could not be reached is tried again next run; one that
-    /// refused the photo leaves the original error.
+    /// it back afterwards, as for any iCloud write. A Contacts app that could not be reached is tried again next run, a
+    /// picture that cannot be converted and a contact the Contacts app does not have keep their own errors, and a write the
+    /// Contacts app refused leaves the original one.
     private func setICloudPhoto(_ data: Data?, for id: String, backup: BackupReceipt) async throws {
         do {
             try await store.setPhoto(id: id, data: data, backup: backup)
@@ -476,10 +477,14 @@ public struct PhotoExecutor: Sendable {
             guard let icloudFallback else { throw ContactStoreError.photoNotSaved }
             do {
                 try await icloudFallback.setPhoto(data, forID: id)
-            } catch is CancellationError {
-                throw CancellationError()
-            } catch let unavailable as ContactsAppUnavailable {
-                throw unavailable
+            } catch let error as CancellationError {
+                throw error
+            } catch let error as ContactsAppUnavailable {
+                throw error
+            } catch let error as PhotoEncodingError {
+                throw error
+            } catch NotesAccessError.contactNotFound {
+                throw ContactStoreError.notFound([id])
             } catch {
                 throw ContactStoreError.photoNotSaved
             }
