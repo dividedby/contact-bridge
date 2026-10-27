@@ -21,6 +21,15 @@ public struct PhotoRunReport: Sendable, Hashable {
             case permanent(String)
             /// Never tried: an earlier call hit an error that stops the run.
             case notAttempted(String)
+
+            /// What went wrong, in words for the user; nil for the reasons that need no explaining.
+            public var message: String? {
+                switch self {
+                case .couldNotSaveOld(let text): "the photo being replaced could not be saved to the photo history first (\(text))"
+                case .failed(let text), .permanent(let text), .notAttempted(let text): text
+                case .googleChanged, .icloudChanged, .notLinked, .vanished: nil
+                }
+            }
         }
 
         public var icloudID: String
@@ -70,13 +79,8 @@ public struct PhotoRunReport: Sendable, Hashable {
         var counts: [String: Int] = [:]
         var order: [String] = []
         for item in skipped {
-            let message: String
-            switch item.reason {
-            case .failed(let text): message = text
-            case .notAttempted(let text): message = text
-            case .couldNotSaveOld(let text): message = "the photo being replaced could not be saved to the photo history first (\(text))"
-            default: continue
-            }
+            if case .permanent = item.reason { continue }
+            guard let message = item.reason.message else { continue }
             if counts[message] == nil { order.append(message) }
             counts[message, default: 0] += 1
         }
@@ -213,11 +217,12 @@ public struct PhotoExecutor: Sendable {
     }
 
     /// A failed step: permanent ones are given up on, the rest are noted and tried again next run.
-    private func failed(_ op: PlannedPhotoOp, _ error: any Error, _ progress: inout RunProgress) throws {
+    /// `step` says which step failed, for a failure that is tried again (given-up messages are grouped as they are).
+    private func failed(_ op: PlannedPhotoOp, _ error: any Error, _ progress: inout RunProgress, step: String? = nil) throws {
         if PhotoErrors.isPermanent(error) {
             try giveUp(op, error, &progress)
         } else {
-            progress.skip(op, .failed(error.localizedDescription))
+            progress.skip(op, .failed(step.map { "\($0) (\(error.localizedDescription))" } ?? error.localizedDescription))
         }
     }
 
@@ -249,7 +254,7 @@ public struct PhotoExecutor: Sendable {
                 progress.skip(op, .vanished)
                 return
             } catch {
-                try failed(op, error, &progress)
+                try failed(op, error, &progress, step: "the iCloud photo could not be read")
                 return
             }
         }
@@ -263,7 +268,7 @@ public struct PhotoExecutor: Sendable {
         } catch is CancellationError {
             throw CancellationError()
         } catch {
-            try fail(op, error, &progress)
+            try fail(op, error, &progress, step: "the Google contact could not be checked")
             return
         }
         let current = GooglePersonMapper.photos(of: person).contact
@@ -310,8 +315,9 @@ public struct PhotoExecutor: Sendable {
         } catch is CancellationError {
             throw CancellationError()
         } catch {
-            progress.googleBackupFailure = error.localizedDescription
-            progress.skip(op, .failed(error.localizedDescription))
+            let message = Self.backupFailed(error)
+            progress.googleBackupFailure = message
+            progress.skip(op, .failed(message))
             return
         }
 
@@ -332,7 +338,7 @@ public struct PhotoExecutor: Sendable {
         } catch is CancellationError {
             throw CancellationError()
         } catch {
-            try fail(op, error, &progress)
+            try fail(op, error, &progress, step: upload == nil ? "Google did not remove the photo" : "Google did not take the photo")
             return
         }
         progress.lastGoogleWrite = now()
@@ -346,13 +352,17 @@ public struct PhotoExecutor: Sendable {
     }
 
     /// A failed Google call: noted, and the run stops if every later call would fail the same way.
-    private func fail(_ op: PlannedPhotoOp, _ error: any Error, _ progress: inout RunProgress) throws {
+    private func fail(_ op: PlannedPhotoOp, _ error: any Error, _ progress: inout RunProgress, step: String? = nil) throws {
         if let api = error as? GoogleAPIError, let reason = SyncExecutor.haltReason(for: api) {
             progress.skip(op, .failed(error.localizedDescription))
             progress.report.halted = progress.report.halted ?? reason
         } else {
-            try failed(op, error, &progress)
+            try failed(op, error, &progress, step: step)
         }
+    }
+
+    private static func backupFailed(_ error: any Error) -> String {
+        "the backup taken before a photo change could not be made (\(error.localizedDescription))"
     }
 
     // MARK: iCloud
@@ -385,8 +395,9 @@ public struct PhotoExecutor: Sendable {
                 } catch is CancellationError {
                     throw CancellationError()
                 } catch {
-                    progress.icloudBackupFailure = error.localizedDescription
-                    progress.skip(op, .failed(error.localizedDescription))
+                    let message = Self.backupFailed(error)
+                    progress.icloudBackupFailure = message
+                    progress.skip(op, .failed(message))
                     return
                 }
             }
@@ -410,7 +421,7 @@ public struct PhotoExecutor: Sendable {
         } catch ContactStoreError.notFound {
             progress.skip(op, .vanished)
         } catch {
-            try failed(op, error, &progress)
+            try failed(op, error, &progress, step: "the photo could not be copied to iCloud")
         }
         if let finished {
             try saveBaseline(finished, for: op.icloudID)

@@ -95,7 +95,7 @@ public struct URLSessionGoogleContactsClient: GoogleContactsClient {
     /// to delete), so server errors are retried like reads.
     public func updateContactPhoto(resourceName: String, photoBytes: Data) async throws -> GooglePerson {
         let body = UpdatePhotoBody(photoBytes: photoBytes, personFields: Self.personFields)
-        let data = try await perform("POST", "\(resourceName):updateContactPhoto", body: encode(body), idempotent: true)
+        let data = try await perform("PATCH", "\(resourceName):updateContactPhoto", body: encode(body), idempotent: true)
         return try photoResult(data)
     }
 

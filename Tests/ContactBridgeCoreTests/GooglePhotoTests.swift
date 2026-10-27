@@ -146,13 +146,13 @@ struct GooglePhotoClientTests {
 
     // MARK: updateContactPhoto
 
-    @Test("updateContactPhoto posts the base64 bytes and the person fields to people/...:updateContactPhoto and returns the person")
+    @Test("updateContactPhoto PATCHes the base64 bytes and the person fields to people/...:updateContactPhoto and returns the person")
     func update() async throws {
-        await transport.route("POST", ":updateContactPhoto", [.json(200, #"{"person":{"resourceName":"people/c1","etag":"E9"}}"#)])
+        await transport.route("PATCH", ":updateContactPhoto", [.json(200, #"{"person":{"resourceName":"people/c1","etag":"E9"}}"#)])
         let updated = try await client().updateContactPhoto(resourceName: "people/c1", photoBytes: bytes)
 
         let request = try #require(await transport.requests.first)
-        #expect(request.method == "POST")
+        #expect(request.method == "PATCH")
         #expect(request.url.absoluteString.hasPrefix(base + "people/c1:updateContactPhoto"), "the colon stays literal")
         #expect(request.url.path == "/v1/people/c1:updateContactPhoto")
         #expect(request.query.isEmpty)
@@ -165,7 +165,7 @@ struct GooglePhotoClientTests {
 
     @Test("updateContactPhoto waits out a rate limit and retries, and retries a server error, since the same bytes can be sent twice")
     func updateRetries() async throws {
-        await transport.route("POST", ":updateContactPhoto", [
+        await transport.route("PATCH", ":updateContactPhoto", [
             .json(429, #"{"error":{"code":429,"message":"slow down","status":"RESOURCE_EXHAUSTED"}}"#, headers: ["Retry-After": "7"]),
             .json(503, "{}"),
             .json(200, #"{"person":{"resourceName":"people/c1","etag":"E2"}}"#),
@@ -179,7 +179,7 @@ struct GooglePhotoClientTests {
 
     @Test("updateContactPhoto with the rate limit never lifting gives up with rateLimited")
     func updateRateLimited() async throws {
-        await transport.route("POST", ":updateContactPhoto", [.json(429, #"{"error":{"code":429,"message":"slow","status":"RESOURCE_EXHAUSTED"}}"#)])
+        await transport.route("PATCH", ":updateContactPhoto", [.json(429, #"{"error":{"code":429,"message":"slow","status":"RESOURCE_EXHAUSTED"}}"#)])
         await #expect(throws: GoogleAPIError.rateLimited(retryAfter: nil)) {
             try await client().updateContactPhoto(resourceName: "people/c1", photoBytes: bytes)
         }
@@ -188,9 +188,9 @@ struct GooglePhotoClientTests {
 
     @Test("updateContactPhoto reports a missing contact, a rejected photo, and an answer with no contact")
     func updateErrors() async throws {
-        await transport.route("POST", "people/gone:updateContactPhoto", [.json(404, #"{"error":{"code":404,"message":"not found","status":"NOT_FOUND"}}"#)])
-        await transport.route("POST", "people/bad:updateContactPhoto", [.json(400, #"{"error":{"code":400,"message":"Invalid photo","status":"INVALID_ARGUMENT"}}"#)])
-        await transport.route("POST", "people/empty:updateContactPhoto", [.json(200, "{}")])
+        await transport.route("PATCH", "people/gone:updateContactPhoto", [.json(404, #"{"error":{"code":404,"message":"not found","status":"NOT_FOUND"}}"#)])
+        await transport.route("PATCH", "people/bad:updateContactPhoto", [.json(400, #"{"error":{"code":400,"message":"Invalid photo","status":"INVALID_ARGUMENT"}}"#)])
+        await transport.route("PATCH", "people/empty:updateContactPhoto", [.json(200, "{}")])
         await #expect(throws: GoogleAPIError.notFound) { try await client().updateContactPhoto(resourceName: "people/gone", photoBytes: bytes) }
         await #expect(throws: GoogleAPIError.other(status: 400, message: "Invalid photo")) {
             try await client().updateContactPhoto(resourceName: "people/bad", photoBytes: bytes)

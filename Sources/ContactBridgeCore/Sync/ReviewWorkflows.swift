@@ -698,8 +698,8 @@ public struct ReviewWorkflows: Sendable {
                 case .notLinked, .vanished:
                     try reviews.remove(ids: [item.id])
                     return .changedSinceShown(nil)
-                case .failed(let message), .permanent(let message), .couldNotSaveOld(let message), .notAttempted(let message):
-                    throw ReviewWorkflowError.photoFailed(message)
+                case .failed, .permanent, .couldNotSaveOld, .notAttempted:
+                    throw ReviewWorkflowError.photoFailed(skipped.reason.message ?? "nothing was written.")
                 }
             }
             throw ReviewWorkflowError.photoFailed(report.halted ?? "nothing was written.")
@@ -791,9 +791,10 @@ public struct ReviewWorkflows: Sendable {
                 } else if let skipped = run.skipped.first(where: { $0.icloudID == id }) {
                     switch skipped.reason {
                     case .googleChanged, .icloudChanged, .notLinked, .vanished: report.changedSinceShown.append(entry.item.id)
-                    case .failed(let message), .permanent(let message), .couldNotSaveOld(let message), .notAttempted(let message):
+                    case .failed, .permanent, .couldNotSaveOld, .notAttempted:
                         report.failed.append(BulkKeepReport.Failure(
-                            itemID: entry.item.id, name: current.baselines[id]?.icloud.displayName ?? "Contact", reason: message
+                            itemID: entry.item.id, name: current.baselines[id]?.icloud.displayName ?? "Contact",
+                            reason: skipped.reason.message ?? "nothing was written."
                         ))
                     }
                 }
