@@ -114,6 +114,8 @@ public struct ContactsAppPhotoWriter: ContactsAppPhotoWriting {
         } catch let unreachable as ContactsAppUnavailable {
             run.values.withLock { $0.unreachable = unreachable }
             throw unreachable
+        } catch let error as AppleScriptError where error.number == AppleScriptError.noSuchObject {
+            throw NotesAccessError.contactNotFound(id)
         }
     }
 

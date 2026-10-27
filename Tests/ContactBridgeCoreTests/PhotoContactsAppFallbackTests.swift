@@ -158,6 +158,16 @@ struct PhotoContactsAppFallbackTests {
         #expect(report.givenUp.map(\.message) == [PhotoEncodingError.undecodable.localizedDescription])
     }
 
+    @Test("A contact the Contacts app does not have (-1728) counts as gone, not as given up for 134092")
+    func fallbackContactNotFound() async throws {
+        let (rig, ops) = try await refusedCopy()
+        defer { rig.cleanUp() }
+        let missing = FakeAppleScriptRunner(responses: [awake, .failure(AppleScriptError(number: AppleScriptError.noSuchObject, message: "No contact with that id."))])
+        let report = try await rig.executor(icloudFallback: ContactsAppPhotoWriter(runner: missing, retryDelay: .zero)).execute(ops)
+        #expect(report.skipped.map(\.reason) == [.vanished] && report.givenUp.isEmpty)
+        #expect(try rig.photoBaseline("I2")?.failure == nil)
+    }
+
     @Test("Other failure markers are left alone by the repair")
     func repairKeepsOtherFailures() async throws {
         let rig = try await PhotoRig.linked(count: 2)
