@@ -50,27 +50,57 @@ struct PhotoContactsAppFallbackTests {
         }
     }
 
-    @Test("Repair version 2 clears only 134092 markers, skips version 1's step, and the photo then goes in")
-    func repairRetriesLostPictureFiles() async throws {
+    /// I2's copy given up on for 134092, I1 settled with the same picture on both sides; then a quiet run, so the next
+    /// listing is incremental and names nobody.
+    private func givenUp() async throws -> (PhotoRig, settled: PhotoBaseline) {
         let (rig, ops) = try await refusedCopy()
-        defer { rig.cleanUp() }
         try await rig.setICloudPhoto("I1", one)
         try await rig.setGooglePhoto(1, one)
         _ = try await rig.executor().execute(ops)
         _ = try await rig.executor().execute(try await rig.look(.syncNow, fullListing: true).plan.photoOps)
         let settled = try #require(try rig.photoBaseline("I1"))
         try #require(try rig.photoBaseline("I2")?.failure != nil)
-        #expect(try await rig.look(.syncNow, fullListing: true).plan.photoOps.isEmpty, "given up on: not planned again")
+        // Stores the tokens: from here on Google lists only what changes.
+        let quiet = try await rig.sync()
+        #expect(try quiet.photos.copiedToICloud == 0 && rig.photoBaseline("I2")?.failure != nil, "given up on: not tried again")
+        #expect(try await rig.look(.syncNow).feed.people.isEmpty, "an incremental listing that names nobody")
+        return (rig, settled)
+    }
+
+    /// The next incremental run plans I2's copy and the Contacts app puts it in.
+    private func copiesI2(_ rig: PhotoRig) async throws {
+        let again = try await rig.look(.syncNow).plan.photoOps
+        #expect(again.map(\.icloudID) == ["I2"])
+        let report = try await rig.executor(icloudFallback: ContactsAppStandIn(store: rig.store)).execute(again)
+        #expect(report.copiedToICloud == 1 && report.isComplete)
+        #expect(try await rig.icloudPhoto("I2") != nil)
+    }
+
+    @Test("Repair from version 1 drops only the 134092 pair's record, skips version 1's step, and the photo then goes in")
+    func repairRetriesLostPictureFiles() async throws {
+        let (rig, settled) = try await givenUp()
+        defer { rig.cleanUp() }
 
         try rig.base.stateStore.update { $0.photoRepairVersion = 1 }
         let fresh = try await PhotoRepair.run(store: rig.store, state: rig.base.stateStore, reviews: rig.base.reviews)
         #expect(try fresh.isEmpty && rig.photoBaseline("I1") == settled, "version 1's look afresh did not run again")
-        #expect(try rig.photoBaseline("I2")?.failure == nil && rig.state.photoRepairVersion == PhotoRepair.currentVersion)
+        #expect(try rig.photoBaseline("I2") == nil && rig.state.photoRepairVersion == PhotoRepair.currentVersion)
+        try await copiesI2(rig)
+    }
 
-        let again = try await rig.look(.syncNow, fullListing: true).plan.photoOps
-        #expect(again.map(\.icloudID) == ["I2"])
-        let report = try await rig.executor(icloudFallback: ContactsAppStandIn(store: rig.store)).execute(again)
-        #expect(report.copiedToICloud == 1 && report.isComplete)
+    @Test("Repair from version 2 (failure cleared, empty record kept) drops the empty record, and the photo then goes in")
+    func repairDropsEmptyRecords() async throws {
+        let (rig, settled) = try await givenUp()
+        defer { rig.cleanUp() }
+        try rig.base.stateStore.update {
+            $0.baselines["I2"]?.photo?.failure = nil
+            $0.photoRepairVersion = 2
+        }
+        #expect(try await rig.look(.syncNow).plan.photoOps.isEmpty, "an empty record leaves the pair unread")
+
+        try await PhotoRepair.run(store: rig.store, state: rig.base.stateStore, reviews: rig.base.reviews)
+        #expect(try rig.photoBaseline("I2") == nil && rig.photoBaseline("I1") == settled)
+        try await copiesI2(rig)
     }
 
     @Test("Other failure markers are left alone by the repair")

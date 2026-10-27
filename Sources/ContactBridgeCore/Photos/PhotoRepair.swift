@@ -11,10 +11,14 @@ import Foundation
 /// record and its questions: a removal the user made is still asked about.
 ///
 /// Version 2: iCloud photos the Contacts framework refused with error 134092 were given up on until a photo changed. They
-/// now go through the Contacts app instead (`ContactsAppPhotoWriter`), so those failure markers are cleared and the photos
-/// are tried again.
+/// now go through the Contacts app instead (`ContactsAppPhotoWriter`), so those pairs are looked at afresh and tried again.
+/// A pair is only read again when a side changed or its record is missing, so the record is dropped, not just the failure.
+///
+/// Version 3: the first build of version 2 cleared those failures but kept the records, which then held nothing at all and
+/// left the pairs unread. Records that hold nothing are dropped, so those pairs are looked at afresh too. A pair with no photo
+/// on either side holds an empty record as well; looked at again, it is recorded the same way.
 public enum PhotoRepair {
-    public static let currentVersion = 2
+    public static let currentVersion = 3
 
     /// Returns the iCloud ids looked at afresh by version 1.
     @discardableResult
@@ -23,6 +27,7 @@ public enum PhotoRepair {
         var fresh: [String] = []
         if from < 1 { fresh = try await lookAfresh(store: store, state: state, reviews: reviews) }
         if from < 2 { try retryLostPictureFiles(state: state) }
+        if from < 3 { try dropEmptyRecords(state: state) }
         try state.update { $0.photoRepairVersion = currentVersion }
         return fresh
     }
@@ -40,16 +45,30 @@ public enum PhotoRepair {
         return fresh.sorted()
     }
 
-    /// Clears the failure markers of photos given up on for error 134092; returns their iCloud ids.
+    /// Drops the records of photos given up on for error 134092; returns their iCloud ids.
     @discardableResult
     static func retryLostPictureFiles(state: any SyncStateStoring) throws -> [String] {
-        var cleared: [String] = []
+        try dropRecords(state: state) { $0.failure?.message.contains("134092") == true }
+    }
+
+    /// Drops photo records that hold no picture, key, waiting removal or failure; returns their iCloud ids.
+    @discardableResult
+    static func dropEmptyRecords(state: any SyncStateStoring) throws -> [String] {
+        try dropRecords(state: state) { photo in
+            photo.icloud == nil && photo.google == nil && photo.googleProfile == nil && photo.icloudHint == nil
+                && photo.googleURLKey == nil && photo.googleProfileKey == nil && photo.pendingRemoval == nil && photo.failure == nil
+        }
+    }
+
+    private static func dropRecords(state: any SyncStateStoring, where matches: (PhotoBaseline) -> Bool) throws -> [String] {
+        var dropped: [String] = []
         try state.update {
-            for (id, baseline) in $0.baselines where baseline.photo?.failure?.message.contains("134092") == true {
-                $0.baselines[id]?.photo?.failure = nil
-                cleared.append(id)
+            for (id, baseline) in $0.baselines {
+                guard let photo = baseline.photo, matches(photo) else { continue }
+                $0.baselines[id]?.photo = nil
+                dropped.append(id)
             }
         }
-        return cleared.sorted()
+        return dropped.sorted()
     }
 }
