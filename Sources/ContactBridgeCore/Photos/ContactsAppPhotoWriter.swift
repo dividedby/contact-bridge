@@ -101,15 +101,27 @@ public struct ContactsAppPhotoWriter: ContactsAppPhotoWriting {
             arguments.append(picture)
         }
         let handler = data == nil ? Self.removeHandler : Self.setHandler
-        try await openContactsIfNeeded()
-        do {
-            _ = try await ContactsAppScript.retryingLaunch(after: retryDelay) {
-                try await ContactsAppScript.call(handler: handler, in: Self.script, arguments: arguments, runner: runner)
+        // A hidden Contacts with no window can be quit by macOS within seconds (automatic termination under memory
+        // pressure), also in the middle of a write: it is opened again and the write repeated.
+        for attempt in 1...Self.attempts {
+            do {
+                try await openContactsIfNeeded()
+                _ = try await ContactsAppScript.retryingLaunch(after: retryDelay) {
+                    try await ContactsAppScript.call(handler: handler, in: Self.script, arguments: arguments, runner: runner)
+                }
+                return
+            } catch let error as AppleScriptError where Self.contactsGone.contains(error.number) && attempt < Self.attempts {
+                continue
+            } catch let error as AppleScriptError where Self.unreachable.keys.contains(error.number) {
+                throw ContactsAppUnavailable(reason: Self.unreachable[error.number] ?? error.message)
             }
-        } catch let error as AppleScriptError where Self.unreachable.keys.contains(error.number) {
-            throw ContactsAppUnavailable(reason: Self.unreachable[error.number] ?? error.message)
         }
     }
+
+    /// Times a write is tried when Contacts goes away under it.
+    static let attempts = 3
+    /// The Contacts app is not there (any more): -600 not running, -609 the connection to it went away.
+    static let contactsGone: Set<Int> = [AppleScriptError.appNotRunning, -609]
 
     public func finish() async {
         guard openedContacts.value.withLock({ opened in defer { opened = false }; return opened }) else { return }
@@ -118,13 +130,22 @@ public struct ContactsAppPhotoWriter: ContactsAppPhotoWriting {
 
     private func openContactsIfNeeded() async throws {
         guard let launcher, await !launcher.isRunning() else { return }
+        try await open(launcher)
+        try await waitUntilAnswering()
+    }
+
+    private func open(_ launcher: any ContactsAppLaunching) async throws {
         do {
             try await launcher.openHidden()
         } catch {
             throw ContactsAppUnavailable(reason: "it is not running and could not be opened (\(error.localizedDescription))")
         }
         openedContacts.value.withLock { $0 = true }
-        try await waitUntilAnswering()
+    }
+
+    private func reopen() async throws {
+        guard let launcher else { return }
+        if await !launcher.isRunning() { try await open(launcher) }
     }
 
     /// Times `retryDelay` that a just-opened Contacts is given to answer.
@@ -138,6 +159,9 @@ public struct ContactsAppPhotoWriter: ContactsAppPhotoWriting {
                 return
             } catch let error as AppleScriptError where error.number == AppleScriptError.appNotRunning {
                 try await Task.sleep(for: retryDelay)
+            } catch let error as AppleScriptError where error.number == -609 {
+                // Quit again while starting up: open it once more.
+                try await reopen()
             } catch let error as AppleScriptError where Self.unreachable.keys.contains(error.number) {
                 throw ContactsAppUnavailable(reason: Self.unreachable[error.number] ?? error.message)
             }
@@ -149,6 +173,7 @@ public struct ContactsAppPhotoWriter: ContactsAppPhotoWriting {
     static let unreachable: [Int: String] = [
         AppleScriptError.appNotRunning: "it is not running",
         AppleScriptError.notAuthorized: "Contact Bridge is not allowed to control it (System Settings > Privacy & Security > Automation)",
+        -609: "it quit while the photo was being written",
         -1712: "it did not answer in time",
     ]
 

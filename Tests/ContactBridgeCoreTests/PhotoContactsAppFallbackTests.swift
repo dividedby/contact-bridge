@@ -137,11 +137,11 @@ struct PhotoContactsAppFallbackTests {
         #expect(try rig.photoBaseline("I2")?.failure == nil)
     }
 
-    @Test("Repair from version 3 drops the records of 134092 photos given up on again")
-    func repairFromVersion3() async throws {
+    @Test("Repair from versions 3 and 4 drops the records of 134092 photos given up on again", arguments: [3, 4])
+    func repairFromLaterVersions(version: Int) async throws {
         let (rig, settled) = try await givenUp()
         defer { rig.cleanUp() }
-        try rig.base.stateStore.update { $0.photoRepairVersion = 3 }
+        try rig.base.stateStore.update { $0.photoRepairVersion = version }
         try await PhotoRepair.run(store: rig.store, state: rig.base.stateStore, reviews: rig.base.reviews)
         #expect(try rig.photoBaseline("I2") == nil && rig.photoBaseline("I1") == settled)
         try await copiesI2(rig)
@@ -232,9 +232,27 @@ struct PhotoContactsAppFallbackTests {
         }
 
         let notRunning = AppleScriptError(number: AppleScriptError.appNotRunning, message: "")
-        let silent = FakeAppleScriptRunner(responses: [.failure(notRunning), .failure(notRunning)])
+        // Three attempts, each tried once more after a moment.
+        let silent = FakeAppleScriptRunner(responses: Array(repeating: .failure(notRunning), count: 6))
         await #expect(throws: ContactsAppUnavailable(reason: "it is not running")) {
             try await ContactsAppPhotoWriter(runner: silent, retryDelay: .zero).setPhoto(one, forID: "ABC-1:ABPerson")
         }
+    }
+
+    @Test("Contacts quit by macOS in the middle of a write is opened again and the write repeated")
+    func writerReopensWhenContactsQuits() async throws {
+        let gone: Result<NSAppleEventDescriptor, AppleScriptError> = .failure(AppleScriptError(number: -609, message: "connection is invalid"))
+        let launcher = FakeLauncher(running: false)
+        // Opened and answering; the write loses Contacts; the write is repeated (wake, then the handler) and goes through.
+        let runner = FakeAppleScriptRunner(responses: [awake, awake, gone, awake, done])
+        let writer = ContactsAppPhotoWriter(runner: runner, launcher: launcher, retryDelay: .zero)
+        try await writer.setPhoto(one, forID: "ABC-1:ABPerson")
+        #expect(runner.calls.count == 5 && launcher.calls == ["open"])
+
+        let alwaysGone = FakeAppleScriptRunner(responses: Array(repeating: gone, count: 3))
+        await #expect(throws: ContactsAppUnavailable(reason: "it quit while the photo was being written")) {
+            try await ContactsAppPhotoWriter(runner: alwaysGone, retryDelay: .zero).setPhoto(one, forID: "ABC-1:ABPerson")
+        }
+        #expect(alwaysGone.calls.count == 3, "three attempts, then put off to the next run")
     }
 }

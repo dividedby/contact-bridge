@@ -18,11 +18,11 @@ import Foundation
 /// left the pairs unread. Records that hold nothing are dropped, so those pairs are looked at afresh too. A pair with no photo
 /// on either side holds an empty record as well; looked at again, it is recorded the same way.
 ///
-/// Version 4: the Contacts app fallback gave up on these photos when Contacts was not running, because a script cannot
-/// launch it. It now opens Contacts first, and a Contacts app it cannot reach is tried again instead of given up on, so
-/// version 2's step runs once more.
+/// Versions 4 and 5: the Contacts app fallback gave up on photos when Contacts was not running (a script cannot launch it)
+/// and when macOS quit the hidden Contacts in the middle of a write. It now opens Contacts itself and writes again when it
+/// goes away, so version 2's step runs once more. Every later fix to the fallback does the same.
 public enum PhotoRepair {
-    public static let currentVersion = 4
+    public static let currentVersion = 5
 
     /// Returns the iCloud ids looked at afresh by version 1.
     @discardableResult
@@ -30,9 +30,8 @@ public enum PhotoRepair {
         let from = try state.load().photoRepairVersion
         var fresh: [String] = []
         if from < 1 { fresh = try await lookAfresh(store: store, state: state, reviews: reviews) }
-        if from < 2 { try retryLostPictureFiles(state: state) }
         if from < 3 { try dropEmptyRecords(state: state) }
-        if from == 3 { try retryLostPictureFiles(state: state) }
+        try retryLostPictureFiles(state: state)
         try state.update { $0.photoRepairVersion = currentVersion }
         return fresh
     }
