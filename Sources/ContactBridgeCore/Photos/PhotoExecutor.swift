@@ -222,7 +222,7 @@ public struct PhotoExecutor: Sendable {
         if PhotoErrors.isPermanent(error) {
             try giveUp(op, error, &progress)
         } else {
-            progress.skip(op, .failed(step.map { "\($0) (\(error.localizedDescription))" } ?? error.localizedDescription))
+            progress.skip(op, .failed(Self.message(error, step: step)))
         }
     }
 
@@ -354,11 +354,15 @@ public struct PhotoExecutor: Sendable {
     /// A failed Google call: noted, and the run stops if every later call would fail the same way.
     private func fail(_ op: PlannedPhotoOp, _ error: any Error, _ progress: inout RunProgress, step: String? = nil) throws {
         if let api = error as? GoogleAPIError, let reason = SyncExecutor.haltReason(for: api) {
-            progress.skip(op, .failed(error.localizedDescription))
+            progress.skip(op, .failed(Self.message(error, step: step)))
             progress.report.halted = progress.report.halted ?? reason
         } else {
             try failed(op, error, &progress, step: step)
         }
+    }
+
+    private static func message(_ error: any Error, step: String?) -> String {
+        step.map { "\($0) (\(error.localizedDescription))" } ?? error.localizedDescription
     }
 
     private static func backupFailed(_ error: any Error) -> String {

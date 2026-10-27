@@ -60,6 +60,19 @@ struct PhotoFailureTests {
         #expect(report.putOffReasons.first?.contains("Google did not take the photo") == true)
     }
 
+    @Test("A failure that stops the run still says which step failed")
+    func haltingFailureNamesTheStep() async throws {
+        let rig = try await PhotoRig.linked(count: 2)
+        defer { rig.cleanUp() }
+        try await rig.setICloudPhoto("I1", one)
+        await rig.google.inject(.error(.rateLimited(retryAfter: nil)), on: .updateContactPhoto)
+
+        let report = try await rig.executor().execute(try await ops(rig))
+        #expect(report.halted != nil)
+        let message = try #require(report.skipped.first { $0.icloudID == "I1" }?.reason.message)
+        #expect(message.hasPrefix("Google did not take the photo ("), "\(message)")
+    }
+
     // MARK: permanent failures on a write
 
     @Test("A photo Google refuses is recorded on the pair, warned about once, and not tried again until a photo changes")
