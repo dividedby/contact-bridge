@@ -1,22 +1,56 @@
 import Foundation
 import ImageIO
+import Synchronization
 import UniformTypeIdentifiers
 
 /// Sets or removes an iCloud contact's photo through the Contacts app, for contacts whose photo `CNContactStore` cannot save
 /// (Cocoa error 134092, `ContactStoreError.photoNotSaved`). On such a contact the Contacts app's own write still works and
 /// the photo reads back through the Contacts framework, while the framework's save keeps failing (seen on macOS 27).
 public protocol ContactsAppPhotoWriting: Sendable {
-    /// Sets the photo to these image bytes, or removes it when `data` is nil.
+    /// Sets the photo to these image bytes, or removes it when `data` is nil. Throws `ContactsAppUnavailable` when the
+    /// Contacts app could not be reached, which is worth trying again.
     func setPhoto(_ data: Data?, forID id: String) async throws
+    /// Called once the run's photo writes are done.
+    func finish() async
 }
 
-/// Uses the Automation permission for Contacts that notes already need.
+extension ContactsAppPhotoWriting {
+    public func finish() async {}
+}
+
+/// Opens and quits the Contacts app (`NSWorkspace` in the app). A script cannot launch Contacts from inside the sandbox: it
+/// fails with -600 when Contacts is not running.
+public protocol ContactsAppLaunching: Sendable {
+    func isRunning() async -> Bool
+    /// Opens Contacts in the background, hidden and without taking the focus.
+    func openHidden() async throws
+    /// Quits Contacts if it is still hidden: nobody started using it since `openHidden`.
+    func quitIfStillHidden() async
+}
+
+/// The Contacts app could not be reached to write a photo; the write is tried again next run.
+public struct ContactsAppUnavailable: Error, Sendable, Equatable {
+    public var reason: String
+}
+
+/// Uses the Automation permission for Contacts that notes already need. Opens Contacts hidden when it is not running, and
+/// quits it again in `finish` if it opened it.
 public struct ContactsAppPhotoWriter: ContactsAppPhotoWriting {
     private let runner: any AppleScriptRunning
+    private let launcher: (any ContactsAppLaunching)?
     private let retryDelay: Duration
+    /// Whether this writer opened Contacts and has not quit it yet.
+    private let openedContacts = Flag()
 
-    public init(runner: any AppleScriptRunning = NSAppleScriptRunner(), retryDelay: Duration = .seconds(1)) {
+    private final class Flag: Sendable {
+        let value = Mutex(false)
+    }
+
+    public init(
+        runner: any AppleScriptRunning = NSAppleScriptRunner(), launcher: (any ContactsAppLaunching)? = nil, retryDelay: Duration = .seconds(1)
+    ) {
         self.runner = runner
+        self.launcher = launcher
         self.retryDelay = retryDelay
     }
 
@@ -67,10 +101,37 @@ public struct ContactsAppPhotoWriter: ContactsAppPhotoWriting {
             arguments.append(picture)
         }
         let handler = data == nil ? Self.removeHandler : Self.setHandler
-        _ = try await ContactsAppScript.retryingLaunch(after: retryDelay) {
-            try await ContactsAppScript.call(handler: handler, in: Self.script, arguments: arguments, runner: runner)
+        try await openContactsIfNeeded()
+        do {
+            _ = try await ContactsAppScript.retryingLaunch(after: retryDelay) {
+                try await ContactsAppScript.call(handler: handler, in: Self.script, arguments: arguments, runner: runner)
+            }
+        } catch let error as AppleScriptError where Self.unreachable.keys.contains(error.number) {
+            throw ContactsAppUnavailable(reason: Self.unreachable[error.number] ?? error.message)
         }
     }
+
+    public func finish() async {
+        guard openedContacts.value.withLock({ opened in defer { opened = false }; return opened }) else { return }
+        await launcher?.quitIfStillHidden()
+    }
+
+    private func openContactsIfNeeded() async throws {
+        guard let launcher, await !launcher.isRunning() else { return }
+        do {
+            try await launcher.openHidden()
+        } catch {
+            throw ContactsAppUnavailable(reason: "it is not running and could not be opened (\(error.localizedDescription))")
+        }
+        openedContacts.value.withLock { $0 = true }
+    }
+
+    /// AppleScript errors that mean Contacts was not reached, rather than that it refused the photo.
+    static let unreachable: [Int: String] = [
+        AppleScriptError.appNotRunning: "it is not running",
+        AppleScriptError.notAuthorized: "Contact Bridge is not allowed to control it (System Settings > Privacy & Security > Automation)",
+        -1712: "it did not answer in time",
+    ]
 
     /// AppleScript's `TIFF picture` ('TIFF'), the class of a person's `image`.
     static let tiffType: DescType = 0x5449_4646

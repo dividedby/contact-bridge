@@ -74,7 +74,7 @@ struct AppDependencies {
             syncJournal: SyncJournalStore(),
             syncHistory: SyncHistoryStore(),
             photoSupport: SyncPhotoSupport(
-                fetcher: URLSessionGooglePhotoFetcher(), history: PhotoHistoryStore(), icloudFallback: ContactsAppPhotoWriter()
+                fetcher: URLSessionGooglePhotoFetcher(), history: PhotoHistoryStore(), icloudFallback: ContactsAppPhotoWriter(launcher: ContactsAppLauncher())
             ),
             writeGate: WriteGate(),
             acquireSyncLock: { try SyncProcessLock.acquire() },

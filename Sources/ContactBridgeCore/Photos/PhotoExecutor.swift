@@ -188,30 +188,36 @@ public struct PhotoExecutor: Sendable {
         // Read once: inside the write gate only this run changes the baselines, and it never removes one.
         let baselinedIDs = Set(try state.load().baselines.keys)
         var progress = RunProgress()
-        for op in ops {
-            try Task.checkCancellation()
-            guard linked[op.icloudID]?.googleResourceName == op.resourceName, baselinedIDs.contains(op.icloudID) else {
-                progress.skip(op, .notLinked)
-                continue
-            }
-            switch op.kind {
-            case .recordBaseline:
-                progress.pendingBaselines[op.icloudID] = op.baseline
-                if progress.pendingBaselines.count >= Self.baselineBatch { try flushBaselines(&progress) }
-                progress.report.recorded += 1
-                progress.report.completed.append(op.icloudID)
-            case .copyToGoogle, .deleteOnGoogle:
-                if let halted = progress.report.halted {
-                    progress.skip(op, .notAttempted(halted))
-                } else if progress.googleWritesMade >= maxGoogleWrites {
-                    progress.report.carried += 1
-                } else {
-                    try await writeGoogle(op, &progress)
+        do {
+            for op in ops {
+                try Task.checkCancellation()
+                guard linked[op.icloudID]?.googleResourceName == op.resourceName, baselinedIDs.contains(op.icloudID) else {
+                    progress.skip(op, .notLinked)
+                    continue
                 }
-            case .copyToICloud, .deleteOnICloud:
-                try await writeICloud(op, &progress)
+                switch op.kind {
+                case .recordBaseline:
+                    progress.pendingBaselines[op.icloudID] = op.baseline
+                    if progress.pendingBaselines.count >= Self.baselineBatch { try flushBaselines(&progress) }
+                    progress.report.recorded += 1
+                    progress.report.completed.append(op.icloudID)
+                case .copyToGoogle, .deleteOnGoogle:
+                    if let halted = progress.report.halted {
+                        progress.skip(op, .notAttempted(halted))
+                    } else if progress.googleWritesMade >= maxGoogleWrites {
+                        progress.report.carried += 1
+                    } else {
+                        try await writeGoogle(op, &progress)
+                    }
+                case .copyToICloud, .deleteOnICloud:
+                    try await writeICloud(op, &progress)
+                }
             }
+        } catch {
+            await icloudFallback?.finish()
+            throw error
         }
+        await icloudFallback?.finish()
         try flushBaselines(&progress)
         // Our own iCloud writes moved the store's token; step the saved one past them so they are not read as edits.
         if let before = progress.icloudTokenBefore {
@@ -461,7 +467,8 @@ public struct PhotoExecutor: Sendable {
     }
 
     /// The Contacts framework's save, then on error 134092 the Contacts app's. Whether the photo took is decided by reading
-    /// it back afterwards, as for any iCloud write; a fallback that fails leaves the original error.
+    /// it back afterwards, as for any iCloud write. A Contacts app that could not be reached is tried again next run; one that
+    /// refused the photo leaves the original error.
     private func setICloudPhoto(_ data: Data?, for id: String, backup: BackupReceipt) async throws {
         do {
             try await store.setPhoto(id: id, data: data, backup: backup)
@@ -471,6 +478,8 @@ public struct PhotoExecutor: Sendable {
                 try await icloudFallback.setPhoto(data, forID: id)
             } catch is CancellationError {
                 throw CancellationError()
+            } catch let unavailable as ContactsAppUnavailable {
+                throw unavailable
             } catch {
                 throw ContactStoreError.photoNotSaved
             }

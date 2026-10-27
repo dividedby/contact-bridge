@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 @testable import ContactBridgeCore
 
@@ -15,6 +16,29 @@ struct PhotoContactsAppFallbackTests {
 
     private struct RefusingContactsApp: ContactsAppPhotoWriting {
         func setPhoto(_ data: Data?, forID id: String) async throws { throw NotesAccessError.notAuthorized }
+    }
+
+    private struct UnreachableContactsApp: ContactsAppPhotoWriting {
+        func setPhoto(_ data: Data?, forID id: String) async throws { throw ContactsAppUnavailable(reason: "it is not running") }
+    }
+
+    /// Records what was asked of it; `opens` false makes opening fail.
+    private final class FakeLauncher: ContactsAppLaunching {
+        let running: Mutex<Bool>
+        let opens: Bool
+        let log = Mutex<[String]>([])
+        init(running: Bool, opens: Bool = true) {
+            self.running = Mutex(running)
+            self.opens = opens
+        }
+        func isRunning() async -> Bool { running.withLock { $0 } }
+        func openHidden() async throws {
+            log.withLock { $0.append("open") }
+            guard opens else { throw CocoaError(.fileNoSuchFile) }
+            running.withLock { $0 = true }
+        }
+        func quitIfStillHidden() async { log.withLock { $0.append("quit") } }
+        var calls: [String] { log.withLock { $0 } }
     }
 
     /// I2's Google photo is to be copied into iCloud, where the framework refuses it.
@@ -103,6 +127,26 @@ struct PhotoContactsAppFallbackTests {
         try await copiesI2(rig)
     }
 
+    @Test("A Contacts app that cannot be reached puts the photo off to the next run instead of giving up on it")
+    func unreachableIsPutOff() async throws {
+        let (rig, ops) = try await refusedCopy()
+        defer { rig.cleanUp() }
+        let report = try await rig.executor(icloudFallback: UnreachableContactsApp()).execute(ops)
+        #expect(report.givenUp.isEmpty && !report.isComplete && report.leftForNextRun == 1)
+        #expect(report.skipped.first?.reason.message?.contains("could not be reached") == true)
+        #expect(try rig.photoBaseline("I2")?.failure == nil)
+    }
+
+    @Test("Repair from version 3 drops the records of 134092 photos given up on again")
+    func repairFromVersion3() async throws {
+        let (rig, settled) = try await givenUp()
+        defer { rig.cleanUp() }
+        try rig.base.stateStore.update { $0.photoRepairVersion = 3 }
+        try await PhotoRepair.run(store: rig.store, state: rig.base.stateStore, reviews: rig.base.reviews)
+        #expect(try rig.photoBaseline("I2") == nil && rig.photoBaseline("I1") == settled)
+        try await copiesI2(rig)
+    }
+
     @Test("Other failure markers are left alone by the repair")
     func repairKeepsOtherFailures() async throws {
         let rig = try await PhotoRig.linked(count: 2)
@@ -150,5 +194,38 @@ struct PhotoContactsAppFallbackTests {
             try await ContactsAppPhotoWriter(runner: idle, retryDelay: .zero).setPhoto(Data("not a picture".utf8), forID: "ABC-1:ABPerson")
         }
         #expect(idle.calls.isEmpty)
+    }
+
+    @Test("Contacts is opened hidden only when it is not running, and quit afterwards only if the writer opened it")
+    func writerOpensAndQuits() async throws {
+        let closed = FakeLauncher(running: false)
+        let writer = ContactsAppPhotoWriter(runner: FakeAppleScriptRunner(responses: [awake, done, awake, done]), launcher: closed, retryDelay: .zero)
+        try await writer.setPhoto(one, forID: "ABC-1:ABPerson")
+        try await writer.setPhoto(nil, forID: "ABC-1:ABPerson")
+        await writer.finish()
+        await writer.finish()
+        #expect(closed.calls == ["open", "quit"])
+
+        let open = FakeLauncher(running: true)
+        let user = ContactsAppPhotoWriter(runner: FakeAppleScriptRunner(responses: [awake, done]), launcher: open, retryDelay: .zero)
+        try await user.setPhoto(one, forID: "ABC-1:ABPerson")
+        await user.finish()
+        #expect(open.calls.isEmpty, "a Contacts app the user had open is left alone")
+    }
+
+    @Test("Contacts that cannot be opened, or does not answer, is reported as unreachable")
+    func writerUnreachable() async throws {
+        let idle = FakeAppleScriptRunner()
+        await #expect(throws: ContactsAppUnavailable.self) {
+            try await ContactsAppPhotoWriter(runner: idle, launcher: FakeLauncher(running: false, opens: false), retryDelay: .zero)
+                .setPhoto(one, forID: "ABC-1:ABPerson")
+        }
+        #expect(idle.calls.isEmpty)
+
+        let notRunning = AppleScriptError(number: AppleScriptError.appNotRunning, message: "")
+        let silent = FakeAppleScriptRunner(responses: [.failure(notRunning), .failure(notRunning)])
+        await #expect(throws: ContactsAppUnavailable(reason: "it is not running")) {
+            try await ContactsAppPhotoWriter(runner: silent, retryDelay: .zero).setPhoto(one, forID: "ABC-1:ABPerson")
+        }
     }
 }

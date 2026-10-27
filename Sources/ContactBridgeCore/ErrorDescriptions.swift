@@ -94,3 +94,9 @@ extension PhotoEncodingError: LocalizedError {
         }
     }
 }
+
+extension ContactsAppUnavailable: LocalizedError {
+    public var errorDescription: String? {
+        "macOS Contacts refuses this photo directly (Cocoa error 134092) and the Contacts app could not be reached: \(reason)"
+    }
+}
