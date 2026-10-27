@@ -33,6 +33,8 @@ public final class InMemoryContactStore: ContactStoring {
         var dataReads = 0
         /// Photo saves report success but leave no photo, like a save iCloud did not keep.
         var dropsPhotoWrites = false
+        /// Photo saves on these contacts throw `photoNotSaved`, like a contact whose picture file macOS lost.
+        var refusedPhotoIDs: Set<String> = []
         var subscribers: [UUID: AsyncStream<Void>.Continuation] = [:]
     }
 
@@ -61,6 +63,19 @@ public final class InMemoryContactStore: ContactStoring {
 
     /// Simulates photo saves that report success but do not stay.
     public func setDropsPhotoWrites(_ drops: Bool) { state.withLock { $0.dropsPhotoWrites = drops } }
+
+    /// Simulates contacts whose photo the Contacts framework cannot save (error 134092).
+    public func setRefusesPhotoWrites(_ ids: Set<String>) { state.withLock { $0.refusedPhotoIDs = ids } }
+
+    /// A photo write the way the Contacts app makes it: not refused for the contacts above.
+    public func setPhotoAsContactsApp(id: String, data: Data?) throws {
+        try state.withLock { state in
+            guard state.records.contains(where: { $0.sourceIdentifier == id }) else { throw ContactStoreError.notFound([id]) }
+            state.photos[id] = data
+            state.version += 1
+        }
+        notify()
+    }
 
     public func authorizationStatus() async -> ContactAuthorization {
         state.withLock { $0.authorization }
@@ -191,6 +206,7 @@ public final class InMemoryContactStore: ContactStoring {
         try state.withLock { state in
             try Self.requireAccess(state)
             guard state.records.contains(where: { $0.sourceIdentifier == id }) else { throw ContactStoreError.notFound([id]) }
+            if state.refusedPhotoIDs.contains(id) { throw ContactStoreError.photoNotSaved }
             state.photos[id] = state.dropsPhotoWrites ? nil : data
             state.version += 1
             state.log.append(StoreMutation(kind: .photo, ids: [id], receiptID: backup.id))

@@ -57,7 +57,9 @@ public struct ContactsAppNotesProvider: NotesStoring {
         guard !ContactsAppIDs.uuidPart(of: id).isEmpty else { throw NotesAccessError.contactNotFound(id) }
         let arguments = [id, ContactsAppIDs.uuidPart(of: id), note ?? ""].map { NSAppleEventDescriptor(string: $0) }
         do {
-            _ = try await perform { try await runner.call(handler: Self.setNoteHandler, in: Self.setNoteScript, arguments: arguments) }
+            _ = try await perform {
+                try await ContactsAppScript.call(handler: Self.setNoteHandler, in: Self.setNoteScript, arguments: arguments, runner: runner)
+            }
         } catch NotesAccessError.scriptFailed(-1728, _) {
             throw NotesAccessError.contactNotFound(id)
         }
@@ -65,13 +67,9 @@ public struct ContactsAppNotesProvider: NotesStoring {
 
     // MARK: helpers
 
-    /// Runs once; on -600 (Contacts not running yet, it launches on demand) waits and runs once more.
     private func perform<T>(_ operation: () async throws -> T) async throws -> T {
         do {
-            return try await operation()
-        } catch let error as AppleScriptError where error.number == AppleScriptError.appNotRunning {
-            try await Task.sleep(for: retryDelay)
-            do { return try await operation() } catch let retry as AppleScriptError { throw Self.map(retry) }
+            return try await ContactsAppScript.retryingLaunch(after: retryDelay, operation)
         } catch let error as AppleScriptError {
             throw Self.map(error)
         }
@@ -107,6 +105,32 @@ public struct ContactsAppNotesProvider: NotesStoring {
             }
             return (id, note.isEmpty ? nil : note)
         }
+    }
+}
+
+/// Running a script against the Contacts app.
+enum ContactsAppScript {
+    /// Runs once; on -600 (Contacts not running yet, it launches on demand) waits and runs once more.
+    static func retryingLaunch<T>(after delay: Duration, _ operation: () async throws -> T) async throws -> T {
+        do {
+            return try await operation()
+        } catch let error as AppleScriptError where error.number == AppleScriptError.appNotRunning {
+            try await Task.sleep(for: delay)
+            return try await operation()
+        }
+    }
+
+    /// A plain script that makes Contacts answer, launching it if needed.
+    static let wakeScript = #"tell application id "com.apple.AddressBook" to count people"#
+
+    /// Calls `handler` after `wakeScript`. A handler call that is itself what launches Contacts can leave Contacts not
+    /// answering, this and every later call (seen on macOS 27: minutes with no reply, until Contacts was quit), while the
+    /// same call after a plain script returned in under a second.
+    static func call(
+        handler: String, in source: String, arguments: [NSAppleEventDescriptor], runner: any AppleScriptRunning
+    ) async throws -> NSAppleEventDescriptor {
+        _ = try await runner.run(source: wakeScript)
+        return try await runner.call(handler: handler, in: source, arguments: arguments)
     }
 }
 

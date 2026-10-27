@@ -149,14 +149,20 @@ struct ContactsAppNotesProviderTests {
 
     // MARK: write
 
+    /// The answer to `ContactsAppScript.wakeScript`.
+    private let awake: Result<NSAppleEventDescriptor, AppleScriptError> = .success(NSAppleEventDescriptor(int32: 3))
+
     @Test("Writing passes the note as a handler argument and never puts it in the script source")
     func setNoteUsesHandlerCall() async throws {
         let nasty = "He said \"hi\"\\n\\\n line two\r\n\tTab ☕️ 日本語 'single' ¶"
-        let runner = FakeAppleScriptRunner(responses: [.success(NSAppleEventDescriptor.null())])
+        let runner = FakeAppleScriptRunner(responses: [awake, .success(NSAppleEventDescriptor.null())])
         try await provider(runner).setNote(nasty, forID: "ABC-123:ABPerson")
 
-        #expect(runner.calls.count == 1)
-        guard case .call(let handler, let source, let arguments) = runner.calls[0] else { Issue.record("expected a handler call"); return }
+        #expect(runner.calls.count == 2)
+        guard case .run(let wake) = runner.calls[0], case .call(let handler, let source, let arguments) = runner.calls[1] else {
+            Issue.record("expected a plain script, then a handler call"); return
+        }
+        #expect(wake == ContactsAppScript.wakeScript, "Contacts is made to answer before the handler call")
         #expect(handler == "setNote")
         #expect(source.contains("on setNote("))
         #expect(!source.contains("ABC-123") && !source.contains("日本語") && !source.contains("line two"))
@@ -189,9 +195,9 @@ struct ContactsAppNotesProviderTests {
 
     @Test("A nil note clears the note with an empty string")
     func setNil() async throws {
-        let runner = FakeAppleScriptRunner(responses: [.success(NSAppleEventDescriptor.null())])
+        let runner = FakeAppleScriptRunner(responses: [awake, .success(NSAppleEventDescriptor.null())])
         try await provider(runner).setNote(nil, forID: "X:ABPerson")
-        guard case .call(_, _, let arguments) = runner.calls[0] else { Issue.record("expected a handler call"); return }
+        guard case .call(_, _, let arguments) = runner.calls[1] else { Issue.record("expected a handler call"); return }
         #expect(ScriptValue.strings(ScriptValue.list(arguments)).last == .some(""))
     }
 
@@ -200,11 +206,13 @@ struct ContactsAppNotesProviderTests {
         let denied = FakeAppleScriptRunner(responses: [.failure(AppleScriptError(number: -1743, message: ""))])
         await #expect(throws: NotesAccessError.notAuthorized) { try await provider(denied).setNote("x", forID: "A") }
 
-        let missing = FakeAppleScriptRunner(responses: [.failure(AppleScriptError(number: -1728, message: "no such person"))])
+        let missing = FakeAppleScriptRunner(responses: [awake, .failure(AppleScriptError(number: -1728, message: "no such person"))])
         await #expect(throws: NotesAccessError.contactNotFound("A")) { try await provider(missing).setNote("x", forID: "A") }
 
-        let flaky = FakeAppleScriptRunner(responses: [.failure(AppleScriptError(number: -600, message: "")), .success(NSAppleEventDescriptor.null())])
+        let flaky = FakeAppleScriptRunner(responses: [
+            .failure(AppleScriptError(number: -600, message: "")), awake, .success(NSAppleEventDescriptor.null()),
+        ])
         try await provider(flaky).setNote("x", forID: "A")
-        #expect(flaky.calls.count == 2)
+        #expect(flaky.calls.count == 3)
     }
 }

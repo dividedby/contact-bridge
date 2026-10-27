@@ -73,7 +73,9 @@ struct AppDependencies {
             reviews: ReviewStore(),
             syncJournal: SyncJournalStore(),
             syncHistory: SyncHistoryStore(),
-            photoSupport: SyncPhotoSupport(fetcher: URLSessionGooglePhotoFetcher(), history: PhotoHistoryStore()),
+            photoSupport: SyncPhotoSupport(
+                fetcher: URLSessionGooglePhotoFetcher(), history: PhotoHistoryStore(), icloudFallback: ContactsAppPhotoWriter()
+            ),
             writeGate: WriteGate(),
             acquireSyncLock: { try SyncProcessLock.acquire() },
             contactsAppRunning: { !NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.AddressBook").isEmpty },

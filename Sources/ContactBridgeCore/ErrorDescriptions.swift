@@ -18,7 +18,7 @@ extension ContactStoreError: LocalizedError {
         case .photosUnsupported:
             "Contact photos cannot be read or changed here."
         case .photoNotSaved:
-            "macOS Contacts could not save this contact's photo (Cocoa error 134092: its database seems to have lost the contact's old picture file). Setting a photo on the contact in the Contacts app may repair it."
+            "macOS Contacts could not save this contact's photo, directly or through the Contacts app (Cocoa error 134092: its database seems to have lost the contact's old picture file). Setting the photo by hand in the Contacts app may still work."
         }
     }
 }

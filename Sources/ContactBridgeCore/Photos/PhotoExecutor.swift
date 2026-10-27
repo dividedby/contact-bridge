@@ -106,7 +106,8 @@ public struct PhotoRunReport: Sendable, Hashable {
 ///   and the old photo is saved to `PhotoHistoryStoring` (if it cannot be, the photo is not touched).
 /// - Google writes are at least `minGoogleWriteInterval` apart and at most `maxGoogleWrites` per run; the rest are carried.
 /// - Uploads to Google are `PhotoEncoder.jpegForGoogle` of the iCloud photo; iCloud gets Google's `=s1024` bytes as they
-///   were downloaded. iCloud writes need a fresh backup, and move the stored iCloud change token afterwards.
+///   were downloaded. iCloud writes need a fresh backup, and move the stored iCloud change token afterwards. An iCloud write
+///   the Contacts framework refuses with error 134092 is tried once through the Contacts app (`icloudFallback`).
 /// - A rate limit or sign-in problem stops the run (`halted`); the rest is not attempted.
 public struct PhotoExecutor: Sendable {
     public static let maxGoogleWrites = 60
@@ -124,6 +125,7 @@ public struct PhotoExecutor: Sendable {
     private let history: any PhotoHistoryStoring
     private let backups: BackupCoordinator
     private let fetcher: any GooglePhotoFetching
+    private let icloudFallback: (any ContactsAppPhotoWriting)?
     private let containerID: String?
     private let needsNotes: Bool
     private let now: @Sendable () -> Date
@@ -132,11 +134,13 @@ public struct PhotoExecutor: Sendable {
     private let minInterval: TimeInterval
 
     /// - Parameters:
+    ///   - icloudFallback: writes an iCloud photo the Contacts framework cannot save; nil leaves such a photo given up on.
     ///   - needsNotes: the iCloud backup must hold notes (they can be read); false when notes access is not granted.
     ///   - sleep: waits between Google writes; tests pass one that does not wait.
     public init(
         google: any GoogleContactsClient, store: any ContactStoring, links: any LinkStoring, state: any SyncStateStoring,
         reviews: any ReviewStoring, history: any PhotoHistoryStoring, backups: BackupCoordinator, fetcher: any GooglePhotoFetching,
+        icloudFallback: (any ContactsAppPhotoWriting)? = nil,
         containerID: String? = nil, needsNotes: Bool = true, now: @escaping @Sendable () -> Date = { Date() },
         sleep: @escaping @Sendable (TimeInterval) async throws -> Void = { try await Task.sleep(for: .seconds($0)) },
         maxGoogleWrites: Int = PhotoExecutor.maxGoogleWrites, minGoogleWriteInterval: TimeInterval = PhotoExecutor.minGoogleWriteInterval
@@ -149,6 +153,7 @@ public struct PhotoExecutor: Sendable {
         self.history = history
         self.backups = backups
         self.fetcher = fetcher
+        self.icloudFallback = icloudFallback
         self.containerID = containerID
         self.needsNotes = needsNotes
         self.now = now
@@ -429,7 +434,7 @@ public struct PhotoExecutor: Sendable {
             }
             if progress.icloudTokenBefore == nil { progress.icloudTokenBefore = .some(try await store.changeToken()) }
             guard let receipt = progress.icloudReceipt else { return }
-            try await store.setPhoto(id: op.icloudID, data: bytes, backup: receipt)
+            try await setICloudPhoto(bytes, for: op.icloudID, backup: receipt)
             // A save that macOS reports as done is read back before it counts: a photo that did not stay is tried again.
             let after = try await store.photoSignatures(ids: [op.icloudID])[op.icloudID]
             guard (after?.hasPhoto ?? false) == (bytes != nil) else {
@@ -454,6 +459,23 @@ public struct PhotoExecutor: Sendable {
             progress.report.completed.append(op.icloudID)
         }
     }
+
+    /// The Contacts framework's save, then on error 134092 the Contacts app's. Whether the photo took is decided by reading
+    /// it back afterwards, as for any iCloud write; a fallback that fails leaves the original error.
+    private func setICloudPhoto(_ data: Data?, for id: String, backup: BackupReceipt) async throws {
+        do {
+            try await store.setPhoto(id: id, data: data, backup: backup)
+        } catch ContactStoreError.photoNotSaved {
+            guard let icloudFallback else { throw ContactStoreError.photoNotSaved }
+            do {
+                try await icloudFallback.setPhoto(data, forID: id)
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                throw ContactStoreError.photoNotSaved
+            }
+        }
+    }
 }
 
 /// What the sync engine needs to sync photos. Without it (demo mode before its photos exist, tests that are not about
@@ -462,27 +484,28 @@ public struct SyncPhotoSupport: Sendable {
     public var fetcher: any GooglePhotoFetching
     public var history: any PhotoHistoryStoring
     public var fingerprinter: any PhotoFingerprinting
+    /// Writes iCloud photos the Contacts framework refuses (`PhotoExecutor`'s `icloudFallback`).
+    public var icloudFallback: (any ContactsAppPhotoWriting)?
     /// Waits between Google photo writes.
     public var sleep: @Sendable (TimeInterval) async throws -> Void
 
     public init(
         fetcher: any GooglePhotoFetching, history: any PhotoHistoryStoring,
-        fingerprinter: any PhotoFingerprinting = ImageIOPhotoFingerprinter(),
+        fingerprinter: any PhotoFingerprinting = ImageIOPhotoFingerprinter(), icloudFallback: (any ContactsAppPhotoWriting)? = nil,
         sleep: @escaping @Sendable (TimeInterval) async throws -> Void = { try await Task.sleep(for: .seconds($0)) }
     ) {
         self.fetcher = fetcher
         self.history = history
         self.fingerprinter = fingerprinter
+        self.icloudFallback = icloudFallback
         self.sleep = sleep
     }
 }
 
 /// One line per reason for photos that are left alone until they change, naming the contacts, instead of one line each.
 public enum PhotoNotice {
-    /// Names listed in a line before the rest are counted.
-    static let namesShown = 10
-
-    /// `failures` are (contact name, message); `verb` is what could not be done ("synced").
+    /// `failures` are (contact name, message); `verb` is what could not be done ("synced"). Every name is listed: each one
+    /// is a contact to fix by hand.
     public static func lines(_ failures: [(name: String, message: String)], couldNotBe verb: String) -> [String] {
         var byMessage: [String: [String]] = [:]
         var order: [String] = []
@@ -492,8 +515,7 @@ public enum PhotoNotice {
         }
         return order.map { message in
             let names = byMessage[message] ?? []
-            var shown = names.prefix(namesShown).joined(separator: ", ")
-            if names.count > namesShown { shown += " and \(names.count - namesShown) more" }
+            let shown = names.joined(separator: ", ")
             return names.count == 1
                 ? "A contact photo could not be \(verb) and is left alone until it changes (\(shown)): \(message)"
                 : "\(names.count) contact photos could not be \(verb) and are left alone until a photo changes (\(shown)): \(message)"
