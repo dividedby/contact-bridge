@@ -72,13 +72,15 @@ final class PhotoRig: @unchecked Sendable {
 
     func executor(
         state: (any SyncStateStoring)? = nil, maxGoogleWrites: Int = PhotoExecutor.maxGoogleWrites,
-        google client: (any GoogleContactsClient)? = nil, fetcher: (any GooglePhotoFetching)? = nil
+        google client: (any GoogleContactsClient)? = nil, fetcher: (any GooglePhotoFetching)? = nil,
+        icloudFallback: (any ContactsAppPhotoWriting)? = nil
     ) -> PhotoExecutor {
         let clock = base.clock
         let sleeps = recordedSleeps
         return PhotoExecutor(
             google: client ?? base.faulty, store: store, links: base.linkStore, state: state ?? base.stateStore, reviews: base.reviews,
-            history: photoHistory, backups: base.backups, fetcher: fetcher ?? self.fetcher, now: { clock.now() },
+            history: photoHistory, backups: base.backups, fetcher: fetcher ?? self.fetcher, icloudFallback: icloudFallback,
+            now: { clock.now() },
             sleep: { seconds in sleeps.values.withLock { $0.append(seconds) } }, maxGoogleWrites: maxGoogleWrites
         )
     }

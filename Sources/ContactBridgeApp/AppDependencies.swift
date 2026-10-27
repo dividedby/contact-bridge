@@ -73,10 +73,12 @@ struct AppDependencies {
             reviews: ReviewStore(),
             syncJournal: SyncJournalStore(),
             syncHistory: SyncHistoryStore(),
-            photoSupport: SyncPhotoSupport(fetcher: URLSessionGooglePhotoFetcher(), history: PhotoHistoryStore()),
+            photoSupport: SyncPhotoSupport(
+                fetcher: URLSessionGooglePhotoFetcher(), history: PhotoHistoryStore(), icloudFallback: ContactsAppPhotoWriter(launcher: ContactsAppLauncher())
+            ),
             writeGate: WriteGate(),
             acquireSyncLock: { try SyncProcessLock.acquire() },
-            contactsAppRunning: { !NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.AddressBook").isEmpty },
+            contactsAppRunning: { !ContactsAppLauncher.running().isEmpty },
             backupDirectory: BackupWriter.defaultDirectory,
             defaults: .standard,
             loginItem: SMAppServiceLoginItem(),

@@ -338,7 +338,7 @@ struct PhotoFailureTests {
         #expect(again.observed.failures.isEmpty && after == requested, "the profile photo is not downloaded again")
     }
 
-    @Test("Photos given up on are one line per reason naming the contacts, with the rest counted past ten")
+    @Test("Photos given up on are one line per reason naming every contact")
     func givenUpLines() {
         let lost = "macOS Contacts could not save this contact's photo"
         let many = (1...12).map { (name: "Person \($0)", message: lost) }
@@ -346,7 +346,7 @@ struct PhotoFailureTests {
         #expect(lines == [
             "A contact photo could not be synced and is left alone until it changes (Ada): bad image",
             "12 contact photos could not be synced and are left alone until a photo changes (Person 1, Person 2, Person 3, Person 4, "
-                + "Person 5, Person 6, Person 7, Person 8, Person 9, Person 10 and 2 more): \(lost)",
+                + "Person 5, Person 6, Person 7, Person 8, Person 9, Person 10, Person 11, Person 12): \(lost)",
         ])
         #expect(PhotoNotice.lines([], couldNotBe: "read").isEmpty)
     }

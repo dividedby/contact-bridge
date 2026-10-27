@@ -6,6 +6,12 @@ public struct AppleScriptError: Error, Sendable, Equatable {
     public static let notAuthorized = -1743
     /// procNotFound: the target app is not running (or still launching).
     public static let appNotRunning = -600
+    /// connectionInvalid: the target app went away while an event was out (it quit or was quit).
+    public static let connectionInvalid = -609
+    /// errAETimeout: the target app did not answer in time.
+    public static let timedOut = -1712
+    /// errAENoSuchObject: what the script asked for is not there (the scripts here raise it for an unknown contact).
+    public static let noSuchObject = -1728
 
     public var number: Int
     public var message: String

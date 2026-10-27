@@ -1,0 +1,293 @@
+import Foundation
+import Synchronization
+import Testing
+@testable import ContactBridgeCore
+
+/// iCloud photos the Contacts framework refuses with error 134092, written through the Contacts app instead.
+struct PhotoContactsAppFallbackTests {
+    private let one = PhotoPictures.picture(1)
+    private let two = PhotoPictures.picture(2)
+
+    /// Writes the way the Contacts app does: the store's refusal does not apply.
+    private struct ContactsAppStandIn: ContactsAppPhotoWriting {
+        let store: InMemoryContactStore
+        func setPhoto(_ data: Data?, forID id: String) async throws { try store.setPhotoAsContactsApp(id: id, data: data) }
+    }
+
+    private struct RefusingContactsApp: ContactsAppPhotoWriting {
+        func setPhoto(_ data: Data?, forID id: String) async throws { throw NotesAccessError.notAuthorized }
+    }
+
+    private struct UnreachableContactsApp: ContactsAppPhotoWriting {
+        func setPhoto(_ data: Data?, forID id: String) async throws { throw ContactsAppUnavailable(reason: "it is not running") }
+    }
+
+    /// Records what was asked of it; `opens` false makes opening fail.
+    private final class FakeLauncher: ContactsAppLaunching {
+        let running: Mutex<Bool>
+        let opens: Bool
+        let log = Mutex<[String]>([])
+        init(running: Bool, opens: Bool = true) {
+            self.running = Mutex(running)
+            self.opens = opens
+        }
+        func isRunning() async -> Bool { running.withLock { $0 } }
+        func openHidden() async throws {
+            log.withLock { $0.append("open") }
+            guard opens else { throw CocoaError(.fileNoSuchFile) }
+            running.withLock { $0 = true }
+        }
+        func quitIfStillHidden() async { log.withLock { $0.append("quit") } }
+        var calls: [String] { log.withLock { $0 } }
+    }
+
+    /// I2's Google photo is to be copied into iCloud, where the framework refuses it.
+    private func refusedCopy() async throws -> (PhotoRig, [PlannedPhotoOp]) {
+        let rig = try await PhotoRig.linked(count: 2)
+        try await rig.setGooglePhoto(2, two)
+        rig.store.setRefusesPhotoWrites(["I2"])
+        let ops = try await rig.look(.syncNow, fullListing: true).plan.photoOps.filter { $0.icloudID == "I2" }
+        try #require(ops.map(\.kind) == [.copyToICloud(source: .googleContact)])
+        return (rig, ops)
+    }
+
+    @Test("A photo the framework refuses with 134092 goes in through the Contacts app and counts once it reads back")
+    func fallbackWrites() async throws {
+        let (rig, ops) = try await refusedCopy()
+        defer { rig.cleanUp() }
+
+        let report = try await rig.executor(icloudFallback: ContactsAppStandIn(store: rig.store)).execute(ops)
+        #expect(report.copiedToICloud == 1 && report.skipped.isEmpty && report.isComplete)
+        #expect(try await rig.icloudPhoto("I2") != nil)
+        #expect(try rig.photoBaseline("I2")?.icloudHint != nil && rig.photoBaseline("I2")?.failure == nil)
+    }
+
+    @Test("Without the Contacts app, or when it fails too, the photo is given up on with the 134092 message")
+    func fallbackMissingOrFailing() async throws {
+        for fallback in [nil, RefusingContactsApp()] as [(any ContactsAppPhotoWriting)?] {
+            let (rig, ops) = try await refusedCopy()
+            defer { rig.cleanUp() }
+            let report = try await rig.executor(icloudFallback: fallback).execute(ops)
+            #expect(report.copiedToICloud == 0 && report.givenUp.map(\.icloudID) == ["I2"])
+            #expect(try rig.photoBaseline("I2")?.failure?.message.contains("134092") == true)
+            #expect(try await rig.icloudPhoto("I2") == nil)
+        }
+    }
+
+    /// I2's copy given up on for 134092, I1 settled with the same picture on both sides; then a quiet run, so the next
+    /// listing is incremental and names nobody.
+    private func givenUp() async throws -> (PhotoRig, settled: PhotoBaseline) {
+        let (rig, ops) = try await refusedCopy()
+        try await rig.setICloudPhoto("I1", one)
+        try await rig.setGooglePhoto(1, one)
+        _ = try await rig.executor().execute(ops)
+        _ = try await rig.executor().execute(try await rig.look(.syncNow, fullListing: true).plan.photoOps)
+        let settled = try #require(try rig.photoBaseline("I1"))
+        try #require(try rig.photoBaseline("I2")?.failure != nil)
+        // Stores the tokens: from here on Google lists only what changes.
+        let quiet = try await rig.sync()
+        #expect(try quiet.photos.copiedToICloud == 0 && rig.photoBaseline("I2")?.failure != nil, "given up on: not tried again")
+        #expect(try await rig.look(.syncNow).feed.people.isEmpty, "an incremental listing that names nobody")
+        return (rig, settled)
+    }
+
+    /// The next incremental run plans I2's copy and the Contacts app puts it in.
+    private func copiesI2(_ rig: PhotoRig) async throws {
+        let again = try await rig.look(.syncNow).plan.photoOps
+        #expect(again.map(\.icloudID) == ["I2"])
+        let report = try await rig.executor(icloudFallback: ContactsAppStandIn(store: rig.store)).execute(again)
+        #expect(report.copiedToICloud == 1 && report.isComplete)
+        #expect(try await rig.icloudPhoto("I2") != nil)
+    }
+
+    @Test("Repair from version 1 drops only the 134092 pair's record, skips version 1's step, and the photo then goes in")
+    func repairRetriesLostPictureFiles() async throws {
+        let (rig, settled) = try await givenUp()
+        defer { rig.cleanUp() }
+
+        try rig.base.stateStore.update { $0.photoRepairVersion = 1 }
+        let fresh = try await PhotoRepair.run(store: rig.store, state: rig.base.stateStore, reviews: rig.base.reviews)
+        #expect(try fresh.isEmpty && rig.photoBaseline("I1") == settled, "version 1's look afresh did not run again")
+        #expect(try rig.photoBaseline("I2") == nil && rig.state.photoRepairVersion == PhotoRepair.currentVersion)
+        try await copiesI2(rig)
+    }
+
+    @Test("A 134092 failure on a record that holds more (a removal the user asked for) only loses its marker")
+    func repairKeepsRecordsThatHoldMore() async throws {
+        let rig = try await PhotoRig.linked(count: 2)
+        defer { rig.cleanUp() }
+        let fingerprint = try #require(ImageIOPhotoFingerprinter().fingerprint(of: one))
+        let lost = PhotoBaseline.Failure(stamp: "s", message: ContactStoreError.photoNotSaved.localizedDescription, at: SyncFixtures.t0)
+        let record = PhotoBaseline(icloud: fingerprint, icloudHint: "h", syncedAt: SyncFixtures.t0, failure: lost)
+        try rig.base.stateStore.update { $0.baselines["I1"]?.photo = record }
+
+        #expect(try PhotoRepair.retryLostPictureFiles(state: rig.base.stateStore) == ["I1"])
+        var expected = record
+        expected.failure = nil
+        #expect(try rig.photoBaseline("I1") == expected, "kept, so the pair is not taken for new and its photo not copied back")
+    }
+
+    @Test("A Contacts app that cannot be reached puts the photo off to the next run instead of giving up on it")
+    func unreachableIsPutOff() async throws {
+        let (rig, ops) = try await refusedCopy()
+        defer { rig.cleanUp() }
+        let report = try await rig.executor(icloudFallback: UnreachableContactsApp()).execute(ops)
+        #expect(report.givenUp.isEmpty && !report.isComplete && report.leftForNextRun == 1)
+        #expect(report.skipped.first?.reason.message?.contains("could not be reached") == true)
+        #expect(try rig.photoBaseline("I2")?.failure == nil)
+    }
+
+    @Test("Repair from versions 3 and 4 drops the records of 134092 photos given up on again", arguments: [3, 4])
+    func repairFromLaterVersions(version: Int) async throws {
+        let (rig, settled) = try await givenUp()
+        defer { rig.cleanUp() }
+        try rig.base.stateStore.update { $0.photoRepairVersion = version }
+        try await PhotoRepair.run(store: rig.store, state: rig.base.stateStore, reviews: rig.base.reviews)
+        #expect(try rig.photoBaseline("I2") == nil && rig.photoBaseline("I1") == settled)
+        try await copiesI2(rig)
+    }
+
+    @Test("A picture the fallback cannot convert is given up on with its own reason, not the 134092 one")
+    func fallbackKeepsItsOwnErrors() async throws {
+        struct Undecodable: ContactsAppPhotoWriting {
+            func setPhoto(_ data: Data?, forID id: String) async throws { throw PhotoEncodingError.undecodable }
+        }
+        let (rig, ops) = try await refusedCopy()
+        defer { rig.cleanUp() }
+        let report = try await rig.executor(icloudFallback: Undecodable()).execute(ops)
+        #expect(report.givenUp.map(\.message) == [PhotoEncodingError.undecodable.localizedDescription])
+    }
+
+    @Test("A contact the Contacts app does not have (-1728) counts as gone, not as given up for 134092")
+    func fallbackContactNotFound() async throws {
+        let (rig, ops) = try await refusedCopy()
+        defer { rig.cleanUp() }
+        let missing = FakeAppleScriptRunner(responses: [awake, .failure(AppleScriptError(number: AppleScriptError.noSuchObject, message: "No contact with that id."))])
+        let report = try await rig.executor(icloudFallback: ContactsAppPhotoWriter(runner: missing, retryDelay: .zero)).execute(ops)
+        #expect(report.skipped.map(\.reason) == [.vanished] && report.givenUp.isEmpty)
+        #expect(try rig.photoBaseline("I2")?.failure == nil)
+    }
+
+    @Test("Other failure markers are left alone by the repair")
+    func repairKeepsOtherFailures() async throws {
+        let rig = try await PhotoRig.linked(count: 2)
+        defer { rig.cleanUp() }
+        let stamp = PhotoBaseline.Failure(stamp: "s", message: "Google refused the picture", at: SyncFixtures.t0)
+        try rig.base.stateStore.update { $0.baselines["I1"]?.photo = PhotoBaseline(syncedAt: SyncFixtures.t0, failure: stamp) }
+        #expect(try PhotoRepair.retryLostPictureFiles(state: rig.base.stateStore).isEmpty)
+        #expect(try rig.photoBaseline("I1")?.failure == stamp)
+    }
+
+    // MARK: the writer
+
+    private let awake: Result<NSAppleEventDescriptor, AppleScriptError> = .success(NSAppleEventDescriptor(int32: 3))
+    private let done: Result<NSAppleEventDescriptor, AppleScriptError> = .success(NSAppleEventDescriptor(boolean: true))
+
+    @Test("Setting sends the id, its UUID part and a TIFF picture; removing sends no picture")
+    func writerScripts() async throws {
+        let runner = FakeAppleScriptRunner(responses: [awake, done, awake, done])
+        let writer = ContactsAppPhotoWriter(runner: runner, retryDelay: .zero)
+        try await writer.setPhoto(one, forID: "ABC-1:ABPerson")
+        try await writer.setPhoto(nil, forID: "ABC-1:ABPerson")
+
+        guard case .run(let wake) = runner.calls[0], case .call(let setHandler, _, let setArguments) = runner.calls[1],
+              case .call(let removeHandler, _, let removeArguments) = runner.calls[3]
+        else { Issue.record("expected a plain script before each handler call"); return }
+        #expect(wake == ContactsAppScript.wakeScript)
+        #expect(setHandler == "setPhoto" && removeHandler == "removePhoto")
+        #expect(setArguments.prefix(2).map(\.stringValue) == ["ABC-1:ABPerson", "ABC-1"] && setArguments.count == 3)
+        #expect(setArguments[2].descriptorType == ContactsAppPhotoWriter.tiffType)
+        let tiff = setArguments[2].data
+        #expect(tiff.starts(with: [0x4D, 0x4D]) || tiff.starts(with: [0x49, 0x49]), "TIFF byte-order mark")
+        #expect(removeArguments.map(\.stringValue) == ["ABC-1:ABPerson", "ABC-1"])
+    }
+
+    @Test("Contacts not running yet is tried once more; a picture that cannot be decoded sends nothing")
+    func writerRetryAndBadPicture() async throws {
+        let runner = FakeAppleScriptRunner(responses: [
+            .failure(AppleScriptError(number: AppleScriptError.appNotRunning, message: "not running")), awake, done,
+        ])
+        try await ContactsAppPhotoWriter(runner: runner, retryDelay: .zero).setPhoto(one, forID: "ABC-1:ABPerson")
+        #expect(runner.calls.count == 3)
+
+        let idle = FakeAppleScriptRunner()
+        await #expect(throws: PhotoEncodingError.undecodable) {
+            try await ContactsAppPhotoWriter(runner: idle, retryDelay: .zero).setPhoto(Data("not a picture".utf8), forID: "ABC-1:ABPerson")
+        }
+        #expect(idle.calls.isEmpty)
+    }
+
+    @Test("Contacts is opened hidden only when it is not running, and quit afterwards only if the writer opened it")
+    func writerOpensAndQuits() async throws {
+        let closed = FakeLauncher(running: false)
+        let notYet: Result<NSAppleEventDescriptor, AppleScriptError> = .failure(AppleScriptError(number: AppleScriptError.appNotRunning, message: ""))
+        // Opened, then not answering twice before it does; then the two writes.
+        let runner = FakeAppleScriptRunner(responses: [notYet, notYet, awake, awake, done, awake, done])
+        let writer = ContactsAppPhotoWriter(runner: runner, launcher: closed, retryDelay: .zero)
+        try await writer.setPhoto(one, forID: "ABC-1:ABPerson")
+        try await writer.setPhoto(nil, forID: "ABC-1:ABPerson")
+        await writer.finish()
+        await writer.finish()
+        #expect(closed.calls == ["open", "quit"] && runner.calls.count == 7)
+
+        let open = FakeLauncher(running: true)
+        let user = ContactsAppPhotoWriter(runner: FakeAppleScriptRunner(responses: [awake, done]), launcher: open, retryDelay: .zero)
+        try await user.setPhoto(one, forID: "ABC-1:ABPerson")
+        await user.finish()
+        #expect(open.calls.isEmpty, "a Contacts app the user had open is left alone")
+    }
+
+    @Test("Contacts that cannot be opened, or does not answer, is reported as unreachable")
+    func writerUnreachable() async throws {
+        let idle = FakeAppleScriptRunner()
+        await #expect(throws: ContactsAppUnavailable.self) {
+            try await ContactsAppPhotoWriter(runner: idle, launcher: FakeLauncher(running: false, opens: false), retryDelay: .zero)
+                .setPhoto(one, forID: "ABC-1:ABPerson")
+        }
+        #expect(idle.calls.isEmpty)
+
+        let neverAnswers = FakeAppleScriptRunner(responses: Array(repeating: .failure(AppleScriptError(number: -600, message: "")), count: 60))
+        await #expect(throws: ContactsAppUnavailable(reason: "it was opened but did not answer")) {
+            try await ContactsAppPhotoWriter(runner: neverAnswers, launcher: FakeLauncher(running: false), retryDelay: .zero)
+                .setPhoto(one, forID: "ABC-1:ABPerson")
+        }
+
+        let notRunning = AppleScriptError(number: AppleScriptError.appNotRunning, message: "")
+        // Three attempts, each tried once more after a moment.
+        let silent = FakeAppleScriptRunner(responses: Array(repeating: .failure(notRunning), count: 6))
+        await #expect(throws: ContactsAppUnavailable(reason: "it is not running")) {
+            try await ContactsAppPhotoWriter(runner: silent, retryDelay: .zero).setPhoto(one, forID: "ABC-1:ABPerson")
+        }
+    }
+
+    @Test("Contacts quit by macOS in the middle of a write is opened again and the write repeated")
+    func writerReopensWhenContactsQuits() async throws {
+        let gone: Result<NSAppleEventDescriptor, AppleScriptError> = .failure(AppleScriptError(number: -609, message: "connection is invalid"))
+        let launcher = FakeLauncher(running: false)
+        // Opened and answering; the write loses Contacts; the write is repeated (wake, then the handler) and goes through.
+        let runner = FakeAppleScriptRunner(responses: [awake, awake, gone, awake, done])
+        let writer = ContactsAppPhotoWriter(runner: runner, launcher: launcher, retryDelay: .zero)
+        try await writer.setPhoto(one, forID: "ABC-1:ABPerson")
+        #expect(runner.calls.count == 5 && launcher.calls == ["open"])
+
+        let alwaysGone = FakeAppleScriptRunner(responses: Array(repeating: gone, count: 3))
+        await #expect(throws: ContactsAppUnavailable(reason: "it quit while the photo was being written")) {
+            try await ContactsAppPhotoWriter(runner: alwaysGone, retryDelay: .zero).setPhoto(one, forID: "ABC-1:ABPerson")
+        }
+        #expect(alwaysGone.calls.count == 3, "three attempts, then put off to the next run")
+    }
+
+    @Test("Once Contacts could not be reached, the run's other photos are put off without waiting again; finish starts over")
+    func writerRemembersUnreachable() async throws {
+        let notRunning: Result<NSAppleEventDescriptor, AppleScriptError> = .failure(AppleScriptError(number: AppleScriptError.appNotRunning, message: ""))
+        let runner = FakeAppleScriptRunner(responses: Array(repeating: notRunning, count: 6) + [awake, done])
+        let writer = ContactsAppPhotoWriter(runner: runner, retryDelay: .zero)
+        await #expect(throws: ContactsAppUnavailable.self) { try await writer.setPhoto(one, forID: "A:ABPerson") }
+        await #expect(throws: ContactsAppUnavailable.self) { try await writer.setPhoto(one, forID: "B:ABPerson") }
+        #expect(runner.calls.count == 6, "the second photo did not try again")
+
+        await writer.finish()
+        try await writer.setPhoto(one, forID: "B:ABPerson")
+        #expect(runner.calls.count == 8)
+    }
+}

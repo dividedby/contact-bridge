@@ -611,8 +611,8 @@ public actor SyncEngine {
         let nowFn: @Sendable () -> Date = { [clock] in clock.now() }
         let photoReport = try await PhotoExecutor(
             google: env.google, store: env.store, links: linkStore, state: stateStore, reviews: reviewStore, history: support.history,
-            backups: backups, fetcher: support.fetcher, containerID: env.containerID, needsNotes: env.notes != nil, now: nowFn,
-            sleep: support.sleep
+            backups: backups, fetcher: support.fetcher, icloudFallback: support.icloudFallback, containerID: env.containerID,
+            needsNotes: env.notes != nil, now: nowFn, sleep: support.sleep
         ).execute(plan.photoOps)
         if report.checkpointCommitted, !photoReport.isComplete {
             try stateStore.update {

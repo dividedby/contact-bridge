@@ -899,7 +899,8 @@ public struct ReviewWorkflows: Sendable {
     private func runPhotoOps(_ ops: [PlannedPhotoOp], _ support: SyncPhotoSupport) async throws -> PhotoRunReport {
         try await PhotoExecutor(
             google: google, store: store, links: links, state: state, reviews: reviews, history: support.history, backups: backups,
-            fetcher: support.fetcher, containerID: containerID, needsNotes: notes != nil, now: now, sleep: support.sleep
+            fetcher: support.fetcher, icloudFallback: support.icloudFallback, containerID: containerID, needsNotes: notes != nil, now: now,
+            sleep: support.sleep
         ).execute(ops)
     }
 
