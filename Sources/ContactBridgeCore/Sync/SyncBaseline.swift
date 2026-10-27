@@ -30,6 +30,12 @@ public struct SyncBaseline: Sendable, Hashable, Codable {
         self.syncedAt = syncedAt
         self.photo = photo
     }
+
+    /// Whether the iCloud note differs from the last sync's. Unknown on either side (nil) counts as unchanged, as in
+    /// `ThreeWayDiff`.
+    func icloudNoteMoved(to current: String?) -> Bool {
+        current.flatMap { current in icloudNoteHash.map { $0 != current } } ?? false
+    }
 }
 
 /// Why sync is stopped until the user acts.

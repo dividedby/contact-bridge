@@ -300,7 +300,7 @@ struct PhotoExecutorTests {
         let edited = try await ops(rig)
         let uploads = FlakyStateStore(rig.base.stateStore)
         let again = try await rig.executor(state: uploads).execute(edited)
-        #expect(again.copiedToGoogle == 1 && uploads.writeCount <= 2)
+        #expect(again.copiedToGoogle == 1 && uploads.writeCount == 1)
         #expect(try rig.photoBaseline("I1")?.google != nil)
     }
 
