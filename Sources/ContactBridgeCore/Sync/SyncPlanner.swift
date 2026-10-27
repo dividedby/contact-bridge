@@ -317,11 +317,15 @@ extension SyncPlanner {
             let record = icloudByID[id] ?? baseline.icloud
             // Same etag as the baseline: Google did not change it, whatever the listing says.
             let fresh = person.flatMap { $0.etag != baseline.googleEtag ? $0 : nil }
+            let icloudNoteHash = scanned ? icloud.noteHashes[id] : baseline.icloudNoteHash
+            // Neither side moved: the diff would find nothing to push, review or refresh. Most pairs on most runs.
+            let noteMoved = icloudNoteHash.flatMap { current in baseline.icloudNoteHash.map { $0 != current } } ?? false
+            if fresh == nil, record == baseline.icloud, !noteMoved { return }
             let google = fresh.flatMap { GooglePersonMapper.record(from: $0, source: .google) } ?? baseline.google
             let etag = fresh?.etag ?? baseline.googleEtag
             let diff = ThreeWayDiff.diff(
                 icloud: record, google: google, base: baseline,
-                icloudNoteHash: scanned ? icloud.noteHashes[id] : baseline.icloudNoteHash,
+                icloudNoteHash: icloudNoteHash,
                 googleNoteHash: fresh.map(GooglePersonMapper.noteHash(of:)) ?? baseline.googleNoteHash,
                 googleEtag: etag, at: now
             )

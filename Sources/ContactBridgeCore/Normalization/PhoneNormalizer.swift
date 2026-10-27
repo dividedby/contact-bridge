@@ -39,6 +39,9 @@ public enum PhoneNormalizer {
     }
 
     private static func splitExtension(_ s: String) -> (body: String, ext: String?) {
+        // Every marker ("x", "ext", "extension", "," or ";") holds one of these; most numbers have none and skip the regex,
+        // which costs about 100 times the rest of normalizing.
+        guard s.contains(where: { $0 == "x" || $0 == "X" || $0 == "," || $0 == ";" }) else { return (s, nil) }
         // Regex isn't Sendable, so it can't live in a static under strict concurrency.
         let pattern = /^(.*?)\s*(?:extension|ext\.?|x|[,;]+)\s*(\d+)$/.ignoresCase()
         guard let match = s.wholeMatch(of: pattern) else { return (s, nil) }

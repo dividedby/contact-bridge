@@ -387,13 +387,14 @@ private struct Profile {
 
     init(_ record: ContactRecord) {
         var phones: [String: String] = [:]
-        for phone in record.normalizedPhones where phone.isNormalizable {
+        let normalizedPhones = record.normalizedPhones
+        for phone in normalizedPhones where phone.isNormalizable {
             let suffix = phone.extensionDigits.map { " x\($0)" } ?? ""
             phones[phone.value + suffix] = phone.value + suffix
         }
         self.phones = phones
         self.emails = Set(record.normalizedEmails)
-        self.shortCodes = Set(record.normalizedPhones.compactMap(\.shortCodeDigits))
+        self.shortCodes = Set(normalizedPhones.compactMap(\.shortCodeDigits))
         self.websites = Set(record.urls.compactMap { Profile.websiteKey($0.value) })
         self.organization = NameNormalizer.foldedKey(record.organization)
         self.name = PersonName(given: record.givenNameMatchKey, family: record.familyNameMatchKey)
