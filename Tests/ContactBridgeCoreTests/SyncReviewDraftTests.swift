@@ -171,6 +171,27 @@ struct SyncReviewDraftTests {
         #expect(try row(draft, containing: "0002").action == .keepInICloud)
     }
 
+    @Test("Any entry can be removed: one both sides have from both, one only iCloud has from iCloud, a changed one from both")
+    func removeAnyEntry() throws {
+        let (i, g, base) = phoneScenario()
+        var draft = SyncReviewDraft(icloud: i, google: g, base: base, reviewFields: [.phones])
+        #expect(try row(draft, containing: "0001").choices == [.keep, .removeFromBoth])
+        #expect(try row(draft, containing: "0007").choices == [.keep, .removeFromICloud])
+        #expect(try row(draft, containing: "0005").choices == [.useGoogle, .useICloud, .removeFromBoth])
+        #expect(try row(draft, containing: "0003").choices == [.keepInGoogleOnly, .addToICloud, .removeFromGoogle])
+        #expect(draft.lists[0].rows.filter(\.needsChoice).count == 6, "an extra way out is not a decision the pair needs")
+
+        for (number, action) in [("0001", SyncReviewDraft.EntryAction.removeFromBoth), ("0007", .removeFromICloud), ("0005", .removeFromBoth)] {
+            draft.setAction(action, forEntry: try row(draft, containing: number).id)
+        }
+        let resolved = draft.resolve()
+        for number in ["415-555-0001", "415-555-0007", "415-555-0005"] {
+            #expect(!resolved.icloud.phones.contains { $0.value == number }, "\(number) left iCloud")
+            #expect(!resolved.google.phones.contains { $0.value == number }, "\(number) is not in Google")
+        }
+        #expect(resolved.icloud.phones.contains { $0.value == "415-555-0006" } && resolved.google.phones.contains { $0.value == "415-555-0006" })
+    }
+
     @Test("Each Google-only choice lands where it says")
     func googleOnlyChoices() throws {
         let base = baseline(icloud(), google(emails: [("work", "leo@work.example")]))

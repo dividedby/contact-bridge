@@ -896,6 +896,8 @@ final class PhotoSettingsModel {
 enum ReviewConfirmation: String, Identifiable {
     case deleteFromICloud
     case keepDeleted
+    case deleteFromGoogle
+    case deleteFromBoth
 
     var id: Self { self }
 }
@@ -976,8 +978,8 @@ final class ReviewModel {
     /// Saving, Import, Delete, Put back and Restore read or write notes; Link, Keep separate, Ignore and Keep deleted never do.
     func needsNotes(_ action: ReviewAction) -> Bool {
         switch action {
-        case .save, .importContact, .deleteFromICloud, .putBack, .restore: true
-        case .ignore, .link, .keepSeparate, .keepDeleted, .photo: false
+        case .save, .importContact, .deleteFromICloud, .putBack, .restore, .deleteFromBoth: true
+        case .ignore, .link, .keepSeparate, .keepDeleted, .photo, .deleteFromGoogle: false
         }
     }
 
@@ -1045,6 +1047,8 @@ final class ReviewModel {
     func putBack() async { await decide(.putBack, done: "Put back in Google.") { try await $0.putBackInGoogle($1) } }
     func keepDeleted() async { await decide(.keepDeleted, done: "Deleted from Google too.") { try await $0.keepDeleted($1) } }
     func restore() async { await decide(.restore, done: "Restored to iCloud.") { try await $0.restoreToICloud($1) } }
+    func deleteFromGoogle() async { await decide(.deleteFromGoogle, done: "Deleted from Google.") { try await $0.deleteFromGoogle($1) } }
+    func deleteFromBoth() async { await decide(.deleteFromBoth, done: "Deleted from iCloud and Google.") { try await $0.deleteFromBoth($1) } }
     func link() async { await decide(.link, done: "Linked. The next sync compares the two and asks about anything that differs.") { try await $0.link($1) } }
 
     /// Deciding a photo question. A choice that removes a photo is confirmed first (`confirmingPhoto`).
@@ -1203,5 +1207,6 @@ final class ReviewModel {
 
 /// What the buttons on an open item do.
 enum ReviewAction {
-    case save, importContact, ignore, deleteFromICloud, putBack, keepDeleted, restore, link, keepSeparate, photo
+    case save, importContact, ignore, deleteFromICloud, putBack, keepDeleted, restore, link, keepSeparate, photo, deleteFromGoogle,
+         deleteFromBoth
 }

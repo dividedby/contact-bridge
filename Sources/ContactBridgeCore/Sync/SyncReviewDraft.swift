@@ -54,6 +54,8 @@ public struct SyncReviewDraft: Sendable, Hashable {
         case keepInICloud
         case useICloud
         case useGoogle
+        /// Drop the entry on both sides.
+        case removeFromBoth
     }
 
     /// One single-value group on screen.
@@ -91,6 +93,15 @@ public struct SyncReviewDraft: Sendable, Hashable {
         fileprivate var inGoogle: Bool
 
         public var needsChoice: Bool { actions.count > 1 }
+
+        /// `actions`, plus removing the entry where none of them does: any entry can be dropped while the pair is reviewed.
+        public var choices: [EntryAction] {
+            switch status {
+            case .both, .changedInGoogle, .changedInICloud, .changedInBoth: actions + [.removeFromBoth]
+            case .addedInICloud: actions + [.removeFromICloud]
+            case .addedInGoogle, .removedInGoogle, .removedInICloud, .googleOnly: actions
+            }
+        }
     }
 
     public struct ListGroup: Sendable, Hashable, Identifiable {
@@ -228,7 +239,7 @@ public struct SyncReviewDraft: Sendable, Hashable {
     /// Ignored unless `action` is one of the row's choices.
     public mutating func setAction(_ action: EntryAction, forEntry id: String) {
         for g in lists.indices {
-            guard let r = lists[g].rows.firstIndex(where: { $0.id == id }), lists[g].rows[r].actions.contains(action) else { continue }
+            guard let r = lists[g].rows.firstIndex(where: { $0.id == id }), lists[g].rows[r].choices.contains(action) else { continue }
             lists[g].rows[r].action = action
         }
     }
@@ -482,7 +493,7 @@ public struct SyncReviewDraft: Sendable, Hashable {
                 continue
             }
             switch chosen {
-            case .removeFromICloud: continue
+            case .removeFromICloud, .removeFromBoth: continue
             case .useGoogle:
                 if replaced.insert(k).inserted, let theirs = g.entries[k] { forICloud.append(theirs) }
             default: forICloud.append(entry)
@@ -500,7 +511,7 @@ public struct SyncReviewDraft: Sendable, Hashable {
                 continue
             }
             switch chosen {
-            case .removeFromGoogle: continue
+            case .removeFromGoogle, .removeFromBoth: continue
             case .useICloud:
                 if replaced.insert(k).inserted, let mine = i.entries[k] { forGoogle.append(mine) }
             default: forGoogle.append(entry)

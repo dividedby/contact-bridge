@@ -532,6 +532,80 @@ struct ReviewWorkflowTests {
         #expect(try rig.item(id).googleEtag == fresh.stamp.googleEtag)
     }
 
+    // MARK: deleting the contact
+
+    @Test("New in Google, delete it: Google backup first, the contact is logged and deleted, and the item goes")
+    func deleteNewFromGoogle() async throws {
+        let rig = try await ReviewRig.linked()
+        defer { rig.cleanUp() }
+        try await addPriya(rig)
+        try await rig.syncOnce()
+        let item = try #require(try rig.storedItems.first { $0.kind == .newInGoogle })
+        let resource = try #require(item.resourceName)
+        let detail = try await rig.workflows.loadDetail(item)
+        let before = try await rig.base.googlePerson(resource)
+
+        #expect(try await rig.workflows.deleteFromGoogle(detail) == .done(warnings: []))
+        await #expect(throws: GoogleAPIError.notFound) { try await rig.base.googlePerson(resource) }
+        #expect(rig.base.backupFolders() == 1 && rig.world.store.mutationLog.isEmpty)
+        let logged = try rig.base.history.entries().filter { $0.operation == .delete }
+        #expect(logged.count == 1 && logged.first?.resourceName == resource && logged.first?.before?.etag == before.etag)
+        #expect(try rig.storedItems.isEmpty)
+        try await rig.expectSettled()
+    }
+
+    @Test("New in Google, delete it: a Google edit since it was shown stops it")
+    func deleteNewFromGoogleStale() async throws {
+        let rig = try await ReviewRig.linked()
+        defer { rig.cleanUp() }
+        try await addPriya(rig)
+        try await rig.syncOnce()
+        let item = try #require(try rig.storedItems.first { $0.kind == .newInGoogle })
+        let resource = try #require(item.resourceName)
+        let detail = try await rig.workflows.loadDetail(item)
+        try await rig.world.editGoogle(resource, mask: "nicknames") { $0.nicknames = [GoogleNickname(value: "Pri")] }
+
+        guard case .changedSinceShown(let fresh?) = try await rig.workflows.deleteFromGoogle(detail) else { Issue.record("expected a refresh"); return }
+        #expect(try await rig.base.googlePerson(resource).nicknames?.first?.value == "Pri")
+        #expect(try await rig.workflows.deleteFromGoogle(fresh).isDone)
+        await #expect(throws: GoogleAPIError.notFound) { try await rig.base.googlePerson(resource) }
+    }
+
+    @Test("Edited in Google, delete from both: iCloud goes under a backup with notes, then Google through the executor, and the pair is forgotten")
+    func deleteLinkedFromBoth() async throws {
+        let rig = try await ReviewRig.linked()
+        defer { rig.cleanUp() }
+        try await setOrganization(rig, google: "Fischer Design")
+        try await rig.syncOnce()
+        let detail = try await rig.detail("googleEdited|I2|people/c2")
+
+        #expect(try await rig.workflows.deleteFromBoth(detail) == .done(warnings: []))
+        #expect(try await rig.world.store.fetchAll().contains { $0.sourceIdentifier == "I2" } == false)
+        let log = try #require(rig.world.store.mutationLog.last)
+        #expect(log.kind == .delete && log.ids == ["I2"])
+        let receipt = try #require(await rig.base.backups.latest)
+        #expect(log.receiptID == receipt.id && receipt.manifest.notesIncluded)
+        await #expect(throws: GoogleAPIError.notFound) { try await rig.base.googlePerson("people/c2") }
+        #expect(try rig.base.links["I2"] == nil && rig.state.baselines["I2"] == nil && rig.storedItems.isEmpty)
+        #expect(try rig.base.history.entries().filter { $0.operation == .delete }.map(\.confirmed) == [false, true])
+        try await rig.expectSettled()
+    }
+
+    @Test("Delete from both: an iCloud edit since it was shown stops it before anything is deleted")
+    func deleteLinkedStale() async throws {
+        let rig = try await ReviewRig.linked()
+        defer { rig.cleanUp() }
+        try await setOrganization(rig, google: "Fischer Design")
+        try await rig.syncOnce()
+        let detail = try await rig.detail("googleEdited|I2|people/c2")
+        try await rig.world.editICloud("I2") { $0.nickname = "Bee" }
+
+        guard case .changedSinceShown = try await rig.workflows.deleteFromBoth(detail) else { Issue.record("expected a refresh"); return }
+        #expect(try await rig.world.store.fetchAll().contains { $0.sourceIdentifier == "I2" })
+        #expect(try await rig.base.googlePerson("people/c2").resourceName == "people/c2")
+        #expect(rig.base.backupFolders() == 0)
+    }
+
     // MARK: possible match
 
     private func possibleWorld() throws -> ReviewRig {

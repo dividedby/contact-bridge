@@ -38,7 +38,7 @@ struct SyncReviewView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .confirmationDialog(
-                    model.confirming == .deleteFromICloud ? "Delete \(detail.name) from iCloud?" : "Delete \(detail.name) from Google too?",
+                    model.confirming.map { $0.question(detail.name) } ?? "",
                     isPresented: Binding(get: { model.confirming != nil }, set: { if !$0 { model.confirming = nil } }),
                     presenting: model.confirming
                 ) { confirmation in
@@ -47,6 +47,10 @@ struct SyncReviewView: View {
                         Button("Delete from iCloud", role: .destructive) { Task { await model.deleteFromICloud() } }
                     case .keepDeleted:
                         Button("Delete from Google", role: .destructive) { Task { await model.keepDeleted() } }
+                    case .deleteFromGoogle:
+                        Button("Delete from Google", role: .destructive) { Task { await model.deleteFromGoogle() } }
+                    case .deleteFromBoth:
+                        Button("Delete from both", role: .destructive) { Task { await model.deleteFromBoth() } }
                     }
                     Button("Cancel", role: .cancel) {}
                 } message: { confirmation in
@@ -55,6 +59,10 @@ struct SyncReviewView: View {
                         Text("\(detail.name) was deleted in Google. A backup with notes is taken first, then the contact is deleted here. You can get it back from that backup.")
                     case .keepDeleted:
                         Text("\(detail.name) was deleted here and edited in Google since. Deleting it from Google throws those edits away. A Google backup is taken first and the change is logged.")
+                    case .deleteFromGoogle:
+                        Text("\(detail.name) is only in Google. A Google backup is taken first and the change is logged, so you can get it back from that backup.")
+                    case .deleteFromBoth:
+                        Text("\(detail.name) is deleted from iCloud and from Google. A backup of both, with notes, is taken first, so you can get the contact back from it.")
                     }
                 }
             } else {
@@ -121,12 +129,18 @@ struct SyncReviewView: View {
     @ViewBuilder private func buttons(_ detail: ReviewDetail, disabled: Bool) -> some View {
         switch detail.item.kind {
         case .googleEdited, .bothEdited:
+            Button("Delete from both…", role: .destructive) { model.confirming = .deleteFromBoth }
+                .disabled(disabled || model.block(for: .deleteFromBoth) != nil)
+                .help("Delete this contact from iCloud and Google")
             Button("Save to iCloud and Google") { Task { await model.save() } }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
                 .disabled(disabled || model.block(for: .save) != nil || detail.draft == nil)
                 .help("Save the choices to iCloud, then copy the result to Google")
         case .newInGoogle:
+            Button("Delete from Google…", role: .destructive) { model.confirming = .deleteFromGoogle }
+                .disabled(disabled || model.block(for: .deleteFromGoogle) != nil)
+                .help("Delete this contact from Google")
             Button("Ignore") { Task { await model.ignore() } }
                 .disabled(disabled || model.blockReason != nil)
                 .help("Never offer this contact again. Show ignored brings it back.")
@@ -387,17 +401,11 @@ struct SyncReviewView: View {
     }
 
     @ViewBuilder private func entryChoice(_ row: SyncReviewDraft.EntryRow) -> some View {
-        if row.needsChoice {
-            Picker("Use", selection: Binding(get: { row.action }, set: { model.setAction($0, forEntry: row.id) })) {
-                ForEach(row.actions, id: \.self) { Text($0.title(for: row.status)).tag($0) }
-            }
-            .pickerStyle(.menu)
-            .labelsHidden()
-        } else if row.status == .addedInICloud {
-            Text("Goes to Google").font(.caption).foregroundStyle(.secondary)
-        } else {
-            Text("").font(.caption)
+        Picker("Use", selection: Binding(get: { row.action }, set: { model.setAction($0, forEntry: row.id) })) {
+            ForEach(row.choices, id: \.self) { Text($0.title(for: row.status)).tag($0) }
         }
+        .pickerStyle(.menu)
+        .labelsHidden()
     }
 }
 
@@ -436,6 +444,17 @@ private extension SyncReviewDraft.EntryStatus {
     }
 }
 
+private extension ReviewConfirmation {
+    func question(_ name: String) -> String {
+        switch self {
+        case .deleteFromICloud: "Delete \(name) from iCloud?"
+        case .keepDeleted: "Delete \(name) from Google too?"
+        case .deleteFromGoogle: "Delete \(name) from Google?"
+        case .deleteFromBoth: "Delete \(name) from iCloud and Google?"
+        }
+    }
+}
+
 private extension SyncReviewDraft.EntryAction {
     func title(for status: SyncReviewDraft.EntryStatus) -> String {
         switch self {
@@ -447,6 +466,7 @@ private extension SyncReviewDraft.EntryAction {
         case .keepInICloud: "Keep, and put back in Google"
         case .useICloud: "Use iCloud's"
         case .useGoogle: "Use Google's"
+        case .removeFromBoth: "Remove from both"
         }
     }
 }

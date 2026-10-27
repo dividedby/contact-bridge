@@ -378,6 +378,96 @@ public struct ReviewWorkflows: Sendable {
         }
     }
 
+    // MARK: deleting the contact
+
+    /// Deletes a Google contact that is not in iCloud (a new-in-Google item), as it was shown: Google backup first, and the
+    /// contact as it was is kept in the sync history.
+    @concurrent
+    public func deleteFromGoogle(_ detail: ReviewDetail) async throws -> ReviewOutcome {
+        guard detail.item.kind == .newInGoogle, let name = detail.item.resourceName else { throw ReviewWorkflowError.wrongKind(detail.item.kind) }
+        return try await exclusively {
+            let live = try await fetchLive(detail.item)
+            let fresh = makeDetail(detail.item, live, baseline: nil)
+            guard fresh.stamp == detail.stamp, let person = live.person,
+                  try links.load().links.values.allSatisfy({ $0.googleResourceName != name })
+            else {
+                try refresh(detail.item, with: fresh)
+                return .changedSinceShown(live.person == nil ? nil : fresh)
+            }
+            _ = try await backups.freshReceipt(requiring: BackupRequirement(containerID: containerID, needsGoogle: true))
+            // A backup can take a while: only the version that was shown is deleted.
+            guard try await google.getPerson(resourceName: name).etag == person.etag else {
+                let again = makeDetail(detail.item, try await fetchLive(detail.item), baseline: nil)
+                try refresh(detail.item, with: again)
+                return .changedSinceShown(again)
+            }
+            try history.append([SyncHistoryEntry(
+                at: now(), operation: .delete, icloudID: "", resourceName: name, before: person, after: nil, confirmed: false
+            )])
+            do {
+                try await google.deleteContact(resourceName: name)
+            } catch GoogleAPIError.notFound {
+                // Already gone: the end state is what was asked for.
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                throw ReviewWorkflowError.googleWriteFailed(reason: error.localizedDescription, icloudSaved: false)
+            }
+            try state.update { $0.ignoredGoogle.remove(name) }
+            try reviews.remove(ids: try reviews.items(concerning: nil, resourceName: name).map(\.id) + [detail.item.id])
+            return .done(warnings: [])
+        }
+    }
+
+    /// Deletes a linked contact from both sides, as it was shown. iCloud goes first (backup with notes and Google first): if
+    /// Google then fails, the link is still there and the next sync carries the deletion over, or asks if Google was edited.
+    @concurrent
+    public func deleteFromBoth(_ detail: ReviewDetail) async throws -> ReviewOutcome {
+        let item = detail.item
+        guard Self.iCloudSideKinds.contains(item.kind), let id = item.icloudID, let name = item.resourceName else {
+            throw ReviewWorkflowError.wrongKind(item.kind)
+        }
+        return try await exclusively {
+            guard notes != nil else { throw ReviewWorkflowError.notesUnavailable }
+            let baseline = try state.load().baselines[id]
+            let live = try await fetchLive(item)
+            let fresh = makeDetail(item, live, baseline: baseline)
+            guard fresh.stamp == detail.stamp, live.icloud != nil, let etag = live.person?.etag, let baseline,
+                  try links.load().links[id]?.googleResourceName == name
+            else {
+                try refresh(item, with: fresh)
+                return .changedSinceShown(live.icloud == nil || live.person == nil ? nil : fresh)
+            }
+            let receipt = try await backups.freshReceipt(requiring: BackupRequirement(containerID: containerID, needsNotes: true, needsGoogle: true))
+            let again = try await fetchLive(item)
+            guard stamp(of: again) == stamp(of: live) else {
+                let shown = makeDetail(item, again, baseline: baseline)
+                try refresh(item, with: shown)
+                return .changedSinceShown(shown)
+            }
+
+            let tokenBefore = try await store.changeToken()
+            try await store.delete(ids: [id], backup: receipt)
+
+            var plan = SyncPlan(isPreview: false)
+            plan.deletes = [PlannedDelete(icloudID: id, resourceName: name, baseline: baseline)]
+            let run = try await executor().execute(plan: plan, approvedDeletes: [id: etag])
+            // The other questions about this pair are moot; one the delete itself raised is not.
+            let moot = try reviews.items(concerning: id, resourceName: name).map(\.id).filter { !run.reviewsAdded.contains($0) }
+            try reviews.remove(ids: moot + [item.id])
+            if !run.reviewsAdded.isEmpty {
+                return .done(warnings: ["The contact was deleted from iCloud. Google's copy changed meanwhile, so it was kept; the review list asks about it."])
+            }
+            try Self.requireWritten(run, icloudSaved: true)
+            guard run.deleted + run.alreadyGone > 0 else {
+                throw ReviewWorkflowError.googleWriteFailed(reason: "the Google contact was not deleted.", icloudSaved: true)
+            }
+            // Only once both are gone: until then the next sync must see the iCloud deletion and carry it over.
+            try await advanceICloudToken(from: tokenBefore)
+            return .done(warnings: [])
+        }
+    }
+
     // MARK: deleted in Google
 
     /// Deletes the iCloud contact too (backup with notes first) and forgets the link.
