@@ -284,6 +284,26 @@ struct PhotoExecutorTests {
         #expect(after == before)
     }
 
+    @Test("A first look at many pairs records every baseline in one save, and a write saves the records pending with it")
+    func recordsSavedTogether() async throws {
+        let rig = try await PhotoRig.linked(count: 12)
+        defer { rig.cleanUp() }
+        let planned = try await ops(rig)
+        try #require(planned.count == 12 && planned.allSatisfy { $0.kind == .recordBaseline })
+        let counting = FlakyStateStore(rig.base.stateStore)
+
+        let report = try await rig.executor(state: counting).execute(planned)
+        #expect(report.recorded == 12 && report.isComplete && counting.writeCount == 1)
+        #expect(try (1...12).allSatisfy { try rig.photoBaseline("I\($0)") != nil })
+
+        try await rig.setICloudPhoto("I1", one)
+        let edited = try await ops(rig)
+        let uploads = FlakyStateStore(rig.base.stateStore)
+        let again = try await rig.executor(state: uploads).execute(edited)
+        #expect(again.copiedToGoogle == 1 && uploads.writeCount == 1)
+        #expect(try rig.photoBaseline("I1")?.google != nil)
+    }
+
     // MARK: crashes
 
     @Test("A crash between the Google write and the baseline update: the next run records the baseline, writes nothing twice, asks nothing")

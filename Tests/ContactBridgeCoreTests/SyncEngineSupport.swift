@@ -156,23 +156,28 @@ final class FlakyStateStore: SyncStateStoring, Sendable {
 
     private let inner: any SyncStateStoring
     private let failing = Mutex(false)
+    private let writes = Mutex(0)
 
     init(_ inner: any SyncStateStoring) {
         self.inner = inner
     }
 
     func failWrites(_ fail: Bool) { failing.withLock { $0 = fail } }
+    /// Saves and updates that reached the inner store.
+    var writeCount: Int { writes.withLock { $0 } }
 
     func load() throws -> SyncState { try inner.load() }
 
     func save(_ state: SyncState) throws {
         if failing.withLock({ $0 }) { throw WriteFailure() }
+        writes.withLock { $0 += 1 }
         try inner.save(state)
     }
 
     @discardableResult
     func update(_ change: (inout SyncState) throws -> Void) throws -> SyncState {
         if failing.withLock({ $0 }) { throw WriteFailure() }
+        writes.withLock { $0 += 1 }
         return try inner.update(change)
     }
 }

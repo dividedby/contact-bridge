@@ -113,6 +113,8 @@ public struct PhotoExecutor: Sendable {
     public static let minGoogleWriteInterval: TimeInterval = 1
     /// Size of the Google photo copied to iCloud, and of the old photo kept in the history.
     static let copySize = 1024
+    /// Recorded baselines saved per this many, so a cancelled run keeps most of its work.
+    static let baselineBatch = 500
 
     private let google: any GoogleContactsClient
     private let store: any ContactStoring
@@ -165,6 +167,10 @@ public struct PhotoExecutor: Sendable {
         var icloudTokenBefore: Data??
         var lastGoogleWrite: Date?
         var googleWritesMade = 0
+        /// Baselines recorded but not yet saved. The state file is rewritten whole on every save, so one save per op made a
+        /// first photo look over thousands of pairs take most of an hour. Losing them in a crash is harmless: the next run
+        /// plans the same records again.
+        var pendingBaselines: [String: PhotoBaseline] = [:]
 
         mutating func skip(_ op: PlannedPhotoOp, _ reason: PhotoRunReport.Skipped.Reason) {
             report.skipped.append(PhotoRunReport.Skipped(icloudID: op.icloudID, reason: reason))
@@ -174,16 +180,19 @@ public struct PhotoExecutor: Sendable {
     public func execute(_ ops: [PlannedPhotoOp]) async throws -> PhotoRunReport {
         guard !ops.isEmpty else { return PhotoRunReport() }
         let linked = try links.load().links
+        // Read once: inside the write gate only this run changes the baselines, and it never removes one.
+        let baselinedIDs = Set(try state.load().baselines.keys)
         var progress = RunProgress()
         for op in ops {
             try Task.checkCancellation()
-            guard linked[op.icloudID]?.googleResourceName == op.resourceName, try state.load().baselines[op.icloudID] != nil else {
+            guard linked[op.icloudID]?.googleResourceName == op.resourceName, baselinedIDs.contains(op.icloudID) else {
                 progress.skip(op, .notLinked)
                 continue
             }
             switch op.kind {
             case .recordBaseline:
-                try saveBaseline(op.baseline, for: op.icloudID)
+                progress.pendingBaselines[op.icloudID] = op.baseline
+                if progress.pendingBaselines.count >= Self.baselineBatch { try flushBaselines(&progress) }
                 progress.report.recorded += 1
                 progress.report.completed.append(op.icloudID)
             case .copyToGoogle, .deleteOnGoogle:
@@ -198,6 +207,7 @@ public struct PhotoExecutor: Sendable {
                 try await writeICloud(op, &progress)
             }
         }
+        try flushBaselines(&progress)
         // Our own iCloud writes moved the store's token; step the saved one past them so they are not read as edits.
         if let before = progress.icloudTokenBefore {
             try await ICloudTokenAdvance.advance(store: store, state: state, reviews: reviews, from: before)
@@ -211,9 +221,9 @@ public struct PhotoExecutor: Sendable {
         let message = error.localizedDescription
         // Reported by the engine, grouped by message and named (`PhotoRunReport.givenUp`, `PhotoNotice`).
         progress.skip(op, .permanent(message))
-        var marked = try state.load().baselines[op.icloudID]?.photo ?? PhotoBaseline(syncedAt: now())
+        var marked = try progress.pendingBaselines[op.icloudID] ?? state.load().baselines[op.icloudID]?.photo ?? PhotoBaseline(syncedAt: now())
         marked.failure = PhotoBaseline.Failure(stamp: op.failureStamp ?? "", message: message, at: now())
-        try saveBaseline(marked, for: op.icloudID)
+        try saveBaseline(marked, for: op.icloudID, &progress)
     }
 
     /// A failed step: permanent ones are given up on, the rest are noted and tried again next run.
@@ -226,8 +236,19 @@ public struct PhotoExecutor: Sendable {
         }
     }
 
-    private func saveBaseline(_ baseline: PhotoBaseline, for id: String) throws {
-        try state.update { $0.baselines[id]?.photo = baseline }
+    /// Saves `baseline` now (it follows a write to Google or iCloud), together with any recorded ones still pending.
+    private func saveBaseline(_ baseline: PhotoBaseline, for id: String, _ progress: inout RunProgress) throws {
+        progress.pendingBaselines[id] = baseline
+        try flushBaselines(&progress)
+    }
+
+    private func flushBaselines(_ progress: inout RunProgress) throws {
+        guard !progress.pendingBaselines.isEmpty else { return }
+        let pending = progress.pendingBaselines
+        try state.update { state in
+            for (id, baseline) in pending { state.baselines[id]?.photo = baseline }
+        }
+        progress.pendingBaselines = [:]
     }
 
     // MARK: Google
@@ -277,8 +298,9 @@ public struct PhotoExecutor: Sendable {
             return
         }
         if upload == nil, current == nil {
-            // Nothing there to delete: the intended end state is already true.
-            try saveBaseline(op.baseline, for: op.icloudID)
+            // Nothing there to delete: the intended end state is already true, and nothing was written, so it is recorded
+            // like any other.
+            progress.pendingBaselines[op.icloudID] = op.baseline
             progress.report.completed.append(op.icloudID)
             return
         }
@@ -347,7 +369,7 @@ public struct PhotoExecutor: Sendable {
 
         var baseline = op.baseline
         baseline.googleURLKey = GooglePersonMapper.photos(of: returned).contact?.key
-        try saveBaseline(baseline, for: op.icloudID)
+        try saveBaseline(baseline, for: op.icloudID, &progress)
         progress.report.completed.append(op.icloudID)
     }
 
@@ -428,7 +450,7 @@ public struct PhotoExecutor: Sendable {
             try failed(op, error, &progress, step: "the photo could not be copied to iCloud")
         }
         if let finished {
-            try saveBaseline(finished, for: op.icloudID)
+            try saveBaseline(finished, for: op.icloudID, &progress)
             progress.report.completed.append(op.icloudID)
         }
     }

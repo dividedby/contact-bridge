@@ -157,8 +157,7 @@ public struct ICloudScanner: Sendable {
                 added.append(id)
                 continue
             }
-            let noteMoved = hashes[id].flatMap { current in base.icloudNoteHash.map { $0 != current } } ?? false
-            if record != base.icloud || noteMoved { changed.append(id) }
+            if record != base.icloud || base.icloudNoteMoved(to: hashes[id]) { changed.append(id) }
         }
         let present = Set(records.map(\.sourceIdentifier))
         return ICloudScan(
