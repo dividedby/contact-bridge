@@ -52,6 +52,10 @@ struct SetupView: View {
                 googleContent(model.signIn)
             }
 
+            Section("Photos") {
+                photoContent()
+            }
+
             Section("Menu bar and notifications") {
                 backgroundContent()
             }
@@ -59,6 +63,7 @@ struct SetupView: View {
         .formStyle(.grouped)
         .navigationTitle("Setup")
         .task {
+            model.photoSettings.refresh()
             model.loginItem.refresh()
             await model.notifier.refresh()
             await setup.refresh()
@@ -68,6 +73,21 @@ struct SetupView: View {
             model.loginItem.refresh()
             Task { await model.notifier.refresh() }
         }
+    }
+
+    @ViewBuilder private func photoContent() -> some View {
+        let photos = model.photoSettings!
+        Toggle("Sync photos", isOn: Binding(get: { photos.settings.syncPhotos }, set: { photos.setSyncPhotos($0) }))
+        Text("Contact photos are copied both ways between iCloud and Google. Nothing is removed without asking. Turn this off and no photo is read, copied or asked about; questions already waiting are hidden, not deleted.")
+            .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+
+        Toggle(
+            "Use Google profile photos when a contact has no photo, and keep them updated",
+            isOn: Binding(get: { photos.settings.useGoogleProfilePhotos }, set: { photos.setUseGoogleProfilePhotos($0) })
+        )
+        .disabled(!photos.settings.canChooseProfilePhotos)
+        Text("A contact that has no photo in iCloud or Google gets the picture from the person's Google profile, and follows it when they change it. It is never sent to Google. When you remove such a photo you are asked whether to stop using it for that contact.")
+            .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
     }
 
     /// Contact Bridge keeps syncing from the menu bar after its window closes; these decide how it starts and what it says.

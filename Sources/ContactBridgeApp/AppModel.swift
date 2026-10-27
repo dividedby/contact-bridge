@@ -48,6 +48,7 @@ final class AppModel {
     @ObservationIgnored private(set) var cleanup: CleanupModel!
     @ObservationIgnored private(set) var sync: SyncModel!
     @ObservationIgnored private(set) var review: ReviewModel!
+    @ObservationIgnored private(set) var photoSettings: PhotoSettingsModel!
     @ObservationIgnored let loginItem: LoginItemSettings
     @ObservationIgnored let shell: ShellSettings
     @ObservationIgnored let notifier: SyncNotifier
@@ -70,6 +71,7 @@ final class AppModel {
         cleanup = CleanupModel(app: self)
         sync = SyncModel(app: self)
         review = ReviewModel(app: self)
+        photoSettings = PhotoSettingsModel(app: self)
         // A click on a notification: the review list and the confirmation both live on the Sync screen.
         notifier.onOpen = { [weak self] _ in self?.showWindow(.sync) }
     }
@@ -142,7 +144,7 @@ final class AppModel {
         return ReviewWorkflows(
             store: store, google: google, notes: notesAreAccessible ? deps.notes : nil, backups: backupCoordinator, links: deps.links,
             state: deps.syncState, reviews: deps.reviews, journal: deps.syncJournal, history: deps.syncHistory, gate: deps.writeGate,
-            containerID: setup.selectedContainer?.id
+            containerID: setup.selectedContainer?.id, photos: deps.photoSupport
         )
     }
 
@@ -160,7 +162,10 @@ final class AppModel {
 
     private func makeBackupSetup() throws -> BackupSetup {
         guard let store else { throw ContactStoreError.accessDenied }
-        let writer = BackupWriter(store: store, google: googleClient, notes: notesAreAccessible ? deps.notes : nil, baseDirectory: deps.backupDirectory)
+        let writer = BackupWriter(
+            store: store, google: googleClient, notes: notesAreAccessible ? deps.notes : nil, photoFetcher: deps.photoSupport?.fetcher,
+            baseDirectory: deps.backupDirectory
+        )
         return BackupSetup(writer: writer, containerID: setup.selectedContainer?.id)
     }
 
@@ -744,7 +749,7 @@ final class SyncModel {
             environment: { [weak app] in await app?.syncEnvironment() ?? .notReady("Contact Bridge is closing.") },
             links: deps.links, state: deps.syncState, reviews: deps.reviews, journal: deps.syncJournal, history: deps.syncHistory,
             backups: app.backupCoordinator, gate: deps.writeGate, contactsAppRunning: deps.contactsAppRunning,
-            acquireLock: deps.acquireSyncLock
+            acquireLock: deps.acquireSyncLock, photos: deps.photoSupport
         )
     }
 
@@ -838,14 +843,71 @@ final class SyncModel {
     func keepPaused() async { await engine.keepPaused() }
 }
 
+// MARK: - photo settings
+
+/// The two photo switches in Setup. They live in the sync state, so the engine and the review screen see them at once.
+@MainActor
+@Observable
+final class PhotoSettingsModel {
+    private(set) var settings = PhotoSettings(syncPhotos: true, useGoogleProfilePhotos: false)
+
+    @ObservationIgnored private unowned let app: AppModel
+
+    init(app: AppModel) {
+        self.app = app
+    }
+
+    func refresh() {
+        do {
+            settings = try PhotoSettings.read(app.deps.syncState)
+        } catch {
+            app.present(error, title: "Could not read the photo settings")
+        }
+    }
+
+    /// Off: no photo is read, written or asked about, and stored questions are hidden (not deleted). The sync screen's list is
+    /// republished right away.
+    func setSyncPhotos(_ on: Bool) {
+        change(runNow: true) { try PhotoSettings.setSyncPhotos(on, in: $0) }
+    }
+
+    /// On: the next run lists Google in full to find profile photos.
+    func setUseGoogleProfilePhotos(_ on: Bool) {
+        change(runNow: false) { try PhotoSettings.setUseGoogleProfilePhotos(on, in: $0) }
+    }
+
+    private func change(runNow: Bool, _ apply: (any SyncStateStoring) throws -> Void) {
+        do {
+            try apply(app.deps.syncState)
+        } catch {
+            app.present(error, title: "Could not change the photo setting")
+        }
+        refresh()
+        guard app.sync.snapshot.firstSyncApproved else { return }
+        Task { [sync = app.sync] in
+            if runNow { await sync.syncNow() } else { await sync.engine.trigger(.settingsChanged) }
+        }
+    }
+}
+
 // MARK: - sync review
 
 /// What the user is asked to confirm before it happens.
 enum ReviewConfirmation: String, Identifiable {
     case deleteFromICloud
     case keepDeleted
+    case deleteFromGoogle
+    case deleteFromBoth
 
     var id: Self { self }
+}
+
+/// Which side the bulk photo action keeps.
+enum PhotoBulkSide: String, Identifiable {
+    case icloud, google
+
+    var id: Self { self }
+    var name: String { self == .icloud ? "iCloud" : "Google" }
 }
 
 /// The review list's open item and the decisions on it. Every decision goes through `ReviewWorkflows` (inside the write gate),
@@ -869,6 +931,13 @@ final class ReviewModel {
     private(set) var isBulkWorking = false
     private(set) var bulkReport: BulkKeepReport?
 
+    /// A photo choice that removes a photo, waiting for the user's OK.
+    var confirmingPhoto: PhotoReviewDraft.Option?
+    /// The bulk photo sheet: which side it keeps, while it is open.
+    var photoBulkSide: PhotoBulkSide?
+    private(set) var isPhotoBulkWorking = false
+    private(set) var photoBulkReport: BulkPhotoReport?
+
     var showingIgnored = false
     private(set) var ignored: [IgnoredContact] = []
     private(set) var isLoadingIgnored = false
@@ -888,6 +957,8 @@ final class ReviewModel {
 
     /// The engine's list without what was just decided.
     var items: [SyncReviewSummary] { app.sync.snapshot.reviewItems.filter { !hidden.contains($0.id) } }
+    /// The photo questions (the engine leaves them out while photo sync is off).
+    var photoItems: [SyncReviewSummary] { items.filter { $0.kind == .photoConflict } }
     /// First-link conflicts, which "Keep iCloud for all" settles together.
     var firstLinkItems: [SyncReviewSummary] { items.filter { $0.kind == .bothEdited && $0.isFirstLink } }
 
@@ -907,8 +978,8 @@ final class ReviewModel {
     /// Saving, Import, Delete, Put back and Restore read or write notes; Link, Keep separate, Ignore and Keep deleted never do.
     func needsNotes(_ action: ReviewAction) -> Bool {
         switch action {
-        case .save, .importContact, .deleteFromICloud, .putBack, .restore: true
-        case .ignore, .link, .keepSeparate, .keepDeleted: false
+        case .save, .importContact, .deleteFromICloud, .putBack, .restore, .deleteFromBoth: true
+        case .ignore, .link, .keepSeparate, .keepDeleted, .photo, .deleteFromGoogle: false
         }
     }
 
@@ -976,7 +1047,19 @@ final class ReviewModel {
     func putBack() async { await decide(.putBack, done: "Put back in Google.") { try await $0.putBackInGoogle($1) } }
     func keepDeleted() async { await decide(.keepDeleted, done: "Deleted from Google too.") { try await $0.keepDeleted($1) } }
     func restore() async { await decide(.restore, done: "Restored to iCloud.") { try await $0.restoreToICloud($1) } }
+    func deleteFromGoogle() async { await decide(.deleteFromGoogle, done: "Deleted from Google.") { try await $0.deleteFromGoogle($1) } }
+    func deleteFromBoth() async { await decide(.deleteFromBoth, done: "Deleted from iCloud and Google.") { try await $0.deleteFromBoth($1) } }
     func link() async { await decide(.link, done: "Linked. The next sync compares the two and asks about anything that differs.") { try await $0.link($1) } }
+
+    /// Deciding a photo question. A choice that removes a photo is confirmed first (`confirmingPhoto`).
+    func choosePhoto(_ option: PhotoReviewDraft.Option) {
+        if option.isDestructive { confirmingPhoto = option } else { Task { await applyPhoto(option) } }
+    }
+
+    func applyPhoto(_ option: PhotoReviewDraft.Option) async {
+        confirmingPhoto = nil
+        await decide(.photo, done: "Photo decided.") { try await $0.applyPhoto($1, choice: option.choice) }
+    }
 
     func ignore() async {
         await decide(.ignore, done: "Ignored. Use Show ignored to bring it back.") { workflows, detail in
@@ -1006,7 +1089,7 @@ final class ReviewModel {
                 notice = nil
                 resultMessage = message
                 if !warnings.isEmpty { app.alert = AlertInfo(title: "Done, with a note", message: warnings.joined(separator: "\n")) }
-                await settle()
+                settle(revealing: [current.id])
             case .changedSinceShown(let fresh):
                 notice = "This changed since you looked, so nothing was done. Check it again."
                 if let fresh {
@@ -1014,7 +1097,7 @@ final class ReviewModel {
                 } else {
                     detail = nil
                     resultMessage = "That item changed and was refreshed. Nothing was done."
-                    await settle()
+                    settle()
                 }
             }
         } catch {
@@ -1024,13 +1107,16 @@ final class ReviewModel {
     }
 
     /// After a change to contacts: other screens' lists are stale, and the engine settles baselines and the review list.
-    private func settle() async {
-        await app.backup.refresh()
+    /// The sync runs in the background, so the next item can be opened while it does; `decided` stay hidden until it ends.
+    private func settle(revealing decided: Set<String> = []) {
         app.importing.reset()
         app.dedupe.reset()
         app.cleanup.reset()
-        await app.sync.syncNow()
-        hidden = []
+        Task {
+            await app.backup.refresh()
+            await app.sync.syncNow()
+            hidden.subtract(decided)
+        }
     }
 
     // MARK: keep iCloud for all
@@ -1050,10 +1136,39 @@ final class ReviewModel {
             let report = try await app.makeReviewWorkflows().keepICloudForAll(items)
             bulkReport = report
             hidden.formUnion(report.applied)
-            await settle()
+            settle(revealing: Set(report.applied))
         } catch {
             showingBulk = false
             app.present(error, title: "Could not keep iCloud for all")
+        }
+    }
+
+    // MARK: photos for all
+
+    func startPhotoBulk(_ side: PhotoBulkSide) {
+        photoBulkReport = nil
+        photoBulkSide = side
+    }
+
+    /// "Keep iCloud/Google photos for all". A change bigger than the photo limits comes back as a question first
+    /// (`photoBulkReport.needsConfirmation`); `confirmed` goes ahead with it.
+    func runPhotoBulk(confirmed: Bool) async {
+        guard !isPhotoBulkWorking, let side = photoBulkSide, block(for: .photo) == nil else { return }
+        let ids = Set(photoItems.map(\.id))
+        isPhotoBulkWorking = true
+        defer { isPhotoBulkWorking = false }
+        do {
+            let items = try app.deps.reviews.load().filter { ids.contains($0.id) }
+            let workflows = try app.makeReviewWorkflows()
+            let report = side == .icloud
+                ? try await workflows.keepICloudPhotosForAll(items, confirmed: confirmed)
+                : try await workflows.keepGooglePhotosForAll(items, confirmed: confirmed)
+            photoBulkReport = report
+            hidden.formUnion(report.applied)
+            if report.needsConfirmation == nil { settle(revealing: Set(report.applied)) }
+        } catch {
+            photoBulkSide = nil
+            app.present(error, title: "Could not keep \(side.name) photos for all")
         }
     }
 
@@ -1083,7 +1198,7 @@ final class ReviewModel {
             try await app.makeReviewWorkflows().unignore([contact.resourceName])
             ignored.removeAll { $0.id == contact.id }
             resultMessage = "\(contact.name) will be offered again on the next sync."
-            await settle()
+            settle()
         } catch {
             app.present(error, title: "Could not show that contact again")
         }
@@ -1092,5 +1207,6 @@ final class ReviewModel {
 
 /// What the buttons on an open item do.
 enum ReviewAction {
-    case save, importContact, ignore, deleteFromICloud, putBack, keepDeleted, restore, link, keepSeparate
+    case save, importContact, ignore, deleteFromICloud, putBack, keepDeleted, restore, link, keepSeparate, photo, deleteFromGoogle,
+         deleteFromBoth
 }

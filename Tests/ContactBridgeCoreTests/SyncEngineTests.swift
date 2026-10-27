@@ -336,6 +336,53 @@ struct SyncEngineTests {
 
     // MARK: pause and resume
 
+    @Test("Saved review items are listed at launch, even when sync stays paused and no run completes")
+    func savedReviewsListedAtLaunchWhilePaused() async throws {
+        let rig = try await EngineRig.linked()
+        defer { rig.cleanUp() }
+        try rig.base.reviews.add(
+            [ReviewCandidate(kind: .googleEdited, icloudID: "I1", resourceName: "people/c1", googleEtag: "e1", fields: [.nickname])], at: Date()
+        )
+        try rig.base.stateStore.update { $0.pause = .user }
+        await rig.start()
+        let shown = await firstSnapshot(of: rig) { !$0.reviewItems.isEmpty }
+        #expect(shown?.reviewItems.map(\.kind) == [.googleEdited])
+        #expect(shown?.reviewItems.first?.name != "Unknown contact")
+        #expect(rig.google.listings == 0)
+        await rig.engine.stop()
+    }
+
+    @Test("A run that stops for confirmation lists the saved review items and leaves them stored")
+    func savedReviewsListedWhenConfirmationPauses() async throws {
+        var limits = SyncPlanner.Limits()
+        limits.minDeletes = 1
+        let rig = try await EngineRig.linked(planner: SyncPlanner(limits: limits))
+        defer { rig.cleanUp() }
+        try rig.base.reviews.add(
+            [ReviewCandidate(kind: .googleEdited, icloudID: "I4", resourceName: "people/c4", googleEtag: "e4", fields: [.nickname])], at: Date()
+        )
+        for id in ["I1", "I2", "I3"] { try await rig.base.world.store.delete(ids: [id], backup: .forTesting()) }
+        await rig.start()
+        await rig.engine.waitForRuns(1)
+        let snapshot = await rig.snapshot
+        #expect(snapshot.confirmationSummary != nil)
+        #expect(snapshot.reviewItems.map(\.kind) == [.googleEdited])
+        #expect(try rig.base.reviews.load().count == 1)
+        await rig.engine.stop()
+    }
+
+    private func firstSnapshot(of rig: EngineRig, where condition: @escaping @Sendable (SyncSnapshot) -> Bool) async -> SyncSnapshot? {
+        let stream = await rig.engine.snapshots()
+        return await withTaskGroup(of: SyncSnapshot?.self) { group in
+            group.addTask { for await snapshot in stream where condition(snapshot) { return snapshot }; return nil }
+            group.addTask { try? await Task.sleep(for: .seconds(5)); return nil }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first
+        }
+    }
+
+
     @Test("Pause is the kill switch: saved, no trigger or Sync now reaches Google, and it holds in a new engine")
     func pauseStopsRuns() async throws {
         let rig = try await EngineRig.linked()

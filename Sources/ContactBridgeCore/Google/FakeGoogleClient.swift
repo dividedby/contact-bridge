@@ -10,6 +10,13 @@ public actor FakeGoogleClient: GoogleContactsClient {
         case createContact, updateContact, deleteContact
         case batchCreate, batchUpdate, batchDelete
         case ensureGroup, addMembers
+        case updateContactPhoto, deleteContactPhoto
+    }
+
+    /// One call to `updateContactPhoto` (bytes) or `deleteContactPhoto` (nil) that took effect.
+    public struct PhotoWrite: Sendable, Hashable {
+        public var resourceName: String
+        public var bytes: Data?
     }
 
     public enum Failure: Sendable {
@@ -45,6 +52,11 @@ public actor FakeGoogleClient: GoogleContactsClient {
     private var nextGroupID = 1
     private var injections: [Injection] = []
     private var batchSizes: [Operation: [Int]] = [:]
+    /// Image bytes by photo URL key (the URL without its size suffix).
+    private var photoStore: [String: Data] = [:]
+    private var nextPhotoID = 1
+    /// Every photo write that took effect, in order.
+    public private(set) var photoWrites: [PhotoWrite] = []
     private var snapshots: [Int: Snapshot] = [:]
     private var nextSnapshotID = 1
     private let pageSize: Int
@@ -55,7 +67,13 @@ public actor FakeGoogleClient: GoogleContactsClient {
         var version: Int
     }
 
-    public init(people seeded: [GooglePerson] = [], otherContacts: [GooglePerson] = [], pageSize: Int = 100) {
+    /// - Parameters:
+    ///   - contactPhotos: the contact's own photo, by resource name, for people who start with one.
+    ///   - profilePhotos: the Google profile photo, by resource name.
+    public init(
+        people seeded: [GooglePerson] = [], otherContacts: [GooglePerson] = [], pageSize: Int = 100, contactPhotos: [String: Data] = [:],
+        profilePhotos: [String: Data] = [:]
+    ) {
         self.pageSize = max(pageSize, 1)
         self.others = otherContacts.enumerated().map { index, person in
             var person = person
@@ -77,6 +95,27 @@ public actor FakeGoogleClient: GoogleContactsClient {
             if seededPeople[name] == nil { seededOrder.append(name) }
             seededPeople[name] = person
         }
+        // Starting photos are part of the starting state too: the same entries `applyPhoto` makes, without a version bump.
+        var seededPhotos: [String: Data] = [:]
+        var photoID = 1
+        for (source, photos) in [("CONTACT", contactPhotos), ("PROFILE", profilePhotos)] {
+            for (name, bytes) in photos.sorted(by: { $0.key < $1.key }) {
+                guard var person = seededPeople[name] else { continue }
+                let key = "https://lh3.googleusercontent.com/fake/\(source.lowercased())/\(photoID)"
+                photoID += 1
+                seededPhotos[key] = bytes
+                var entries: [JSONValue] = []
+                if case .array(let existing)? = person.extras["photos"] { entries = existing }
+                entries.append(.object([
+                    "url": .string(key + "=s100"),
+                    "metadata": .object(["primary": .bool(true), "source": .object(["type": .string(source), "id": .string(name)])]),
+                ]))
+                person.extras["photos"] = .array(entries)
+                seededPeople[name] = person
+            }
+        }
+        self.photoStore = seededPhotos
+        self.nextPhotoID = photoID
         self.people = seededPeople
         self.order = seededOrder
         self.nextID = counter
@@ -162,6 +201,72 @@ public actor FakeGoogleClient: GoogleContactsClient {
     public func deleteContact(resourceName: String) async throws {
         try fail(.deleteContact)
         try remove(resourceName)
+    }
+
+    // MARK: photos
+
+    public func updateContactPhoto(resourceName: String, photoBytes: Data) async throws -> GooglePerson {
+        try fail(.updateContactPhoto)
+        guard PhotoImage.isDecodable(photoBytes) else { throw GoogleAPIError.other(status: 400, message: "The photo is not a valid image") }
+        let person = try applyPhoto(photoBytes, source: "CONTACT", to: resourceName)
+        photoWrites.append(PhotoWrite(resourceName: resourceName, bytes: photoBytes))
+        return person
+    }
+
+    public func deleteContactPhoto(resourceName: String) async throws -> GooglePerson {
+        try fail(.deleteContactPhoto)
+        let person = try applyPhoto(nil, source: "CONTACT", to: resourceName)
+        photoWrites.append(PhotoWrite(resourceName: resourceName, bytes: nil))
+        return person
+    }
+
+    /// Test control: the contact's own photo is changed (nil removes it) the way another Google client would, so the etag
+    /// moves and the change shows in the next incremental listing. Not counted in `photoWrites`.
+    @discardableResult
+    public func setContactPhoto(_ bytes: Data?, for resourceName: String) throws -> GooglePerson {
+        try applyPhoto(bytes, source: "CONTACT", to: resourceName)
+    }
+
+    /// Test control: the person's Google profile photo (nil removes it). Read-only through the API, like the real one.
+    @discardableResult
+    public func setProfilePhoto(_ bytes: Data?, for resourceName: String) throws -> GooglePerson {
+        try applyPhoto(bytes, source: "PROFILE", to: resourceName)
+    }
+
+    /// The image behind a photo URL of this fake, at any size suffix.
+    public func photoBytes(forURL url: URL) -> Data? {
+        photoStore[GooglePersonMapper.photoKey(ofURL: url.absoluteString)]
+    }
+
+    /// The bytes of the contact's own photo, if it has one.
+    public func contactPhotoBytes(for resourceName: String) -> Data? {
+        people[resourceName].flatMap { GooglePersonMapper.photos(of: $0).contact }.flatMap { photoStore[$0.key] }
+    }
+
+    /// Replaces the `source` entry in the person's `photos` (adds one for `bytes`; none for nil) and commits.
+    private func applyPhoto(_ bytes: Data?, source: String, to resourceName: String) throws -> GooglePerson {
+        guard var stored = people[resourceName] else { throw GoogleAPIError.notFound }
+        var entries: [JSONValue] = []
+        if case .array(let existing)? = stored.extras["photos"] {
+            entries = existing.filter { entry in
+                guard case .object(let fields) = entry, case .object(let metadata)? = fields["metadata"],
+                      case .object(let origin)? = metadata["source"], case .string(let type)? = origin["type"]
+                else { return true }
+                return type != source
+            }
+        }
+        if let bytes {
+            let key = "https://lh3.googleusercontent.com/fake/\(source.lowercased())/\(nextPhotoID)"
+            nextPhotoID += 1
+            photoStore[key] = bytes
+            entries.append(.object([
+                "url": .string(key + "=s100"),
+                "metadata": .object(["primary": .bool(true), "source": .object(["type": .string(source), "id": .string(resourceName)])]),
+            ]))
+        }
+        stored.extras["photos"] = entries.isEmpty ? nil : .array(entries)
+        commit(stored, deleted: false)
+        return people[resourceName] ?? stored
     }
 
     // MARK: batches

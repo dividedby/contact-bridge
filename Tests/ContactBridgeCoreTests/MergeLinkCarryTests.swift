@@ -168,6 +168,27 @@ struct MergeLinkCarryTests {
         #expect(diff.needsPush && diff.pushFields == [.emails] && !diff.needsReview)
     }
 
+    @Test("Sync on: the baseline's photo half and the loser's profile-photo opt-out move to the survivor with it")
+    func movesPhotoBaselineAndOptOut() async throws {
+        var rich = person("a1")
+        rich.emails = [Labeled(label: "home", value: "ann@example.com")]
+        let rig = try Rig(records: [rich, person("a2")])
+        defer { rig.cleanUp() }
+        let draft = try #require(try await rig.drafts().first)
+        try #require(draft.survivor.sourceIdentifier == "a1")
+        var synced = baseline(for: person("a2"))
+        synced.photo = PhotoModelTests.photoBaseline(3)
+        var state = approved(["a2": synced])
+        state.profilePhotoOptOut = ["a2", "someone-else"]
+        try rig.state.inner.save(state)
+        try rig.links.inner.add([ImportedLink(icloudID: "a2", googleResourceName: "people/c1", origin: .matched)], at: t0)
+
+        _ = try await rig.workflows.runMerge(draft)
+        let after = try rig.state.inner.load()
+        #expect(after.baselines["a1"]?.photo == synced.photo, "the survivor keeps the inherited photo baseline, then compares as usual")
+        #expect(after.profilePhotoOptOut == ["a1", "someone-else"])
+    }
+
     @Test("A loser's link with no baseline yet moves too; the survivor is adopted like any earlier import")
     func movesUnbaselinedLinkSyncOn() async throws {
         let rig = try Rig(records: [person("a1"), person("a2")], state: approved())

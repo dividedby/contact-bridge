@@ -159,6 +159,10 @@ public struct SyncRunSummary: Sendable, Hashable {
     /// Deletes where Google no longer had the contact.
     public var alreadyGone = 0
     public var recoveredWrites = 0
+    /// Photos copied each way, and photos removed (only ever after the user chose it).
+    public var photosToGoogle = 0
+    public var photosToICloud = 0
+    public var photosRemoved = 0
     public var reviewsAdded = 0
     public var conflictsFound = 0
     /// Work that waits for the next run.
@@ -176,15 +180,22 @@ public struct SyncRunSummary: Sendable, Hashable {
         deleted = report.deleted
         alreadyGone = report.alreadyGone
         recoveredWrites = report.recovery.applied
+        photosToGoogle = report.photo.copiedToGoogle
+        photosToICloud = report.photo.copiedToICloud
+        photosRemoved = report.photo.removedFromGoogle + report.photo.removedFromICloud
         reviewsAdded = report.reviewsAdded.count
         conflictsFound = report.conflictsFound.count
-        leftForNextRun = report.leftForNextRun.count
+        leftForNextRun = report.leftForNextRun.count + report.photo.leftForNextRun
         blockedByReview = report.blockedByReview.count
         halted = report.halted
         warnings = report.warnings
     }
 
-    public var didAnything: Bool { linksAdded + created + updated + deleted + alreadyGone + recoveredWrites > 0 }
+    public var didAnything: Bool {
+        linksAdded + created + updated + deleted + alreadyGone + recoveredWrites + photosToGoogle + photosToICloud + photosRemoved > 0
+    }
+
+    private static func photos(_ count: Int) -> String { "\(count) photo\(count == 1 ? "" : "s")" }
 
     /// "Linked 3, created 2, updated 1." or "Nothing needed changing."
     public var text: String {
@@ -195,6 +206,14 @@ public struct SyncRunSummary: Sendable, Hashable {
         if deleted > 0 { parts.append("deleted \(deleted)") }
         if alreadyGone > 0 { parts.append("\(alreadyGone) already gone from Google") }
         if recoveredWrites > 0 { parts.append("confirmed \(recoveredWrites) from an earlier run") }
+        if photosToGoogle > 0 && photosToICloud > 0 {
+            parts.append("copied \(Self.photos(photosToGoogle)) to Google, \(photosToICloud) to iCloud")
+        } else if photosToGoogle > 0 {
+            parts.append("copied \(Self.photos(photosToGoogle)) to Google")
+        } else if photosToICloud > 0 {
+            parts.append("copied \(Self.photos(photosToICloud)) to iCloud")
+        }
+        if photosRemoved > 0 { parts.append("removed \(photosRemoved) photo\(photosRemoved == 1 ? "" : "s")") }
         guard !parts.isEmpty else { return "Nothing needed changing." }
         let sentence = parts.joined(separator: ", ")
         return sentence.prefix(1).uppercased() + sentence.dropFirst() + "."
@@ -209,6 +228,8 @@ public struct SyncReviewSummary: Sendable, Hashable, Identifiable {
     /// For a possible link, the Google contact it might be.
     public var detail: String?
     public var fields: [SyncField]
+    /// For a photo question: what kind it is.
+    public var photoReason: PhotoConflictReason?
     /// A conflict found when the two contacts were first linked ("Keep iCloud for all" applies to these).
     public var isFirstLink = false
 }
@@ -227,6 +248,8 @@ public struct SyncPreview: Sendable, Hashable {
         public var update = 0
         public var delete = 0
         public var review = 0
+        /// Photos to copy or remove (not baseline records).
+        public var photo = 0
     }
 
     /// Pairs found on both sides that will be tied together without changing either.
@@ -237,6 +260,8 @@ public struct SyncPreview: Sendable, Hashable {
     public var updates: [Item]
     /// Google contacts that will be deleted because the iCloud contact is gone.
     public var deletes: [Item]
+    /// Contact photos that will be copied (or removed) between the two sides.
+    public var photos: [Item] = []
     public var reviews: [SyncReviewSummary]
     /// Links that will be forgotten because their contact is gone from iCloud (and perhaps from Google too). Links whose
     /// Google contact survives are re-matched instead and are not listed.
@@ -251,11 +276,11 @@ public struct SyncPreview: Sendable, Hashable {
     public var generatedAt: Date
 
     public var counts: Counts {
-        Counts(link: links.count, create: creates.count, update: updates.count, delete: deletes.count, review: reviews.count)
+        Counts(link: links.count, create: creates.count, update: updates.count, delete: deletes.count, review: reviews.count, photo: photos.count)
     }
 
     /// Nothing would be linked, created, changed or deleted.
-    public var isEmpty: Bool { links.isEmpty && creates.isEmpty && updates.isEmpty && deletes.isEmpty }
+    public var isEmpty: Bool { links.isEmpty && creates.isEmpty && updates.isEmpty && deletes.isEmpty && photos.isEmpty }
 }
 
 /// The engine's whole published state. Every change is sent to `SyncEngine.snapshots()`.

@@ -7,6 +7,8 @@ public struct StoreMutation: Sendable, Hashable {
         case update
         case delete
         case merge
+        /// A photo set or removed (`ids` holds the one contact).
+        case photo
     }
 
     public var kind: Kind
@@ -19,12 +21,18 @@ public struct StoreMutation: Sendable, Hashable {
 public final class InMemoryContactStore: ContactStoring {
     private struct State {
         var records: [ContactRecord]
+        /// Photo bytes by contact identifier.
+        var photos: [String: Data]
         var authorization: ContactAuthorization
         var nextID = 1
         /// Bumped by every mutation; the change token.
         var version = 0
         var containerID: String?
         var log: [StoreMutation] = []
+        var signatureReads = 0
+        var dataReads = 0
+        /// Photo saves report success but leave no photo, like a save iCloud did not keep.
+        var dropsPhotoWrites = false
         var subscribers: [UUID: AsyncStream<Void>.Continuation] = [:]
     }
 
@@ -33,19 +41,26 @@ public final class InMemoryContactStore: ContactStoring {
 
     public init(
         records: [ContactRecord] = [],
+        photos: [String: Data] = [:],
         authorization: ContactAuthorization = .authorized,
         grantsAccess: Bool = true,
         containerID: String? = "mem-container"
     ) {
-        state = Mutex(State(records: records, authorization: authorization, containerID: containerID))
+        state = Mutex(State(records: records, photos: photos, authorization: authorization, containerID: containerID))
         self.grantsAccess = grantsAccess
     }
 
     /// Every create/update/delete so far, with the receipt that authorized it.
     public var mutationLog: [StoreMutation] { state.withLock { $0.log } }
 
+    /// How many `photoSignatures` calls and `photoData` calls have been made: the reads a scan that found nothing new avoids.
+    public var photoReads: (signatures: Int, data: Int) { state.withLock { ($0.signatureReads, $0.dataReads) } }
+
     /// Simulates the user switching to another account's container.
     public func setContainerID(_ id: String?) { state.withLock { $0.containerID = id } }
+
+    /// Simulates photo saves that report success but do not stay.
+    public func setDropsPhotoWrites(_ drops: Bool) { state.withLock { $0.dropsPhotoWrites = drops } }
 
     public func authorizationStatus() async -> ContactAuthorization {
         state.withLock { $0.authorization }
@@ -107,6 +122,7 @@ public final class InMemoryContactStore: ContactStoring {
             guard missing.isEmpty else { throw ContactStoreError.notFound(missing) }
             let doomed = Set(ids)
             state.records.removeAll { doomed.contains($0.sourceIdentifier) }
+            for id in ids { state.photos[id] = nil }
             state.version += 1
             state.log.append(StoreMutation(kind: .delete, ids: ids, receiptID: backup.id))
         }
@@ -132,19 +148,63 @@ public final class InMemoryContactStore: ContactStoring {
             state.records[index] = stored
             let gone = Set(doomed)
             state.records.removeAll { gone.contains($0.sourceIdentifier) }
+            // Like the real merge: the survivor keeps its own photo, else takes the first duplicate's.
+            if state.photos[survivor.sourceIdentifier] == nil {
+                for id in doomed {
+                    if let photo = state.photos[id] {
+                        state.photos[survivor.sourceIdentifier] = photo
+                        break
+                    }
+                }
+            }
+            for id in doomed { state.photos[id] = nil }
             state.version += 1
             state.log.append(StoreMutation(kind: .merge, ids: [stored.sourceIdentifier] + doomed, receiptID: backup.id))
         }
         notify()
     }
 
+    public func photoSignatures(ids: [String]) async throws -> [String: PhotoSignature] {
+        try state.withLock { state in
+            try Self.requireAccess(state)
+            state.signatureReads += 1
+            let existing = Set(state.records.map(\.sourceIdentifier))
+            var signatures: [String: PhotoSignature] = [:]
+            for id in ids where existing.contains(id) {
+                let photo = state.photos[id]
+                signatures[id] = PhotoSignature(hasPhoto: photo != nil, thumbnailHash: photo.map(PhotoHash.sha256Hex))
+            }
+            return signatures
+        }
+    }
+
+    public func photoData(id: String) async throws -> Data? {
+        try state.withLock { state in
+            try Self.requireAccess(state)
+            guard state.records.contains(where: { $0.sourceIdentifier == id }) else { throw ContactStoreError.notFound([id]) }
+            state.dataReads += 1
+            return state.photos[id]
+        }
+    }
+
+    public func setPhoto(id: String, data: Data?, backup: BackupReceipt) async throws {
+        try state.withLock { state in
+            try Self.requireAccess(state)
+            guard state.records.contains(where: { $0.sourceIdentifier == id }) else { throw ContactStoreError.notFound([id]) }
+            state.photos[id] = state.dropsPhotoWrites ? nil : data
+            state.version += 1
+            state.log.append(StoreMutation(kind: .photo, ids: [id], receiptID: backup.id))
+        }
+        notify()
+    }
+
     public func exportVCard(ids: [String]) async throws -> Data {
-        let chosen: [ContactRecord] = try state.withLock { state in
+        let chosen: [(ContactRecord, Data?)] = try state.withLock { state in
             try Self.requireAccess(state)
             let byID = Dictionary(state.records.map { ($0.sourceIdentifier, $0) }, uniquingKeysWith: { first, _ in first })
             let missing = ids.filter { byID[$0] == nil }
             guard missing.isEmpty else { throw ContactStoreError.notFound(missing) }
-            return ids.compactMap { byID[$0] }
+            return ids.compactMap { id in byID[id].map { ($0, state.photos[id]) } }
         }
         return Data(chosen.map(Self.vCard).joined().utf8)
     }
@@ -185,7 +245,7 @@ public final class InMemoryContactStore: ContactStoring {
     }
 
     /// Minimal vCard 3.0, enough for previews and tests; the real adapter uses CNContactVCardSerialization.
-    private static func vCard(_ record: ContactRecord) -> String {
+    private static func vCard(_ record: ContactRecord, photo: Data?) -> String {
         func escape(_ text: String) -> String {
             text.replacing("\\", with: "\\\\").replacing(";", with: "\\;").replacing(",", with: "\\,")
                 .replacing("\r\n", with: "\\n").replacing("\n", with: "\\n")
@@ -214,6 +274,7 @@ public final class InMemoryContactStore: ContactStoring {
             let year = birthday.year.map { String(format: "%04d", $0) } ?? "-"
             lines.append("BDAY:\(year)-\(String(format: "%02d-%02d", month, day))")
         }
+        if let photo { lines.append("PHOTO;ENCODING=b;TYPE=\(VCardWriter.imageType(photo)):\(photo.base64EncodedString())") }
         lines.append("END:VCARD")
         return lines.joined(separator: "\r\n") + "\r\n"
     }

@@ -13,7 +13,7 @@ struct StaticTokenProvider: GoogleAccessTokenProviding {
 }
 
 let base = "https://people.googleapis.com/v1/"
-let personFields = "names,nicknames,organizations,phoneNumbers,emailAddresses,addresses,urls,birthdays,biographies,metadata,clientData,memberships"
+let personFields = "names,nicknames,organizations,phoneNumbers,emailAddresses,addresses,urls,birthdays,biographies,metadata,clientData,memberships,photos"
 
 struct URLSessionGoogleContactsClientTests {
     private func makeClient(
@@ -32,7 +32,7 @@ struct URLSessionGoogleContactsClientTests {
 
     // MARK: reads
 
-    @Test("The first connections page asks for every modeled field plus metadata, clientData and memberships, with a sync token")
+    @Test("The first connections page asks for every modeled field plus metadata, clientData, memberships and photos, with a sync token")
     func listConnectionsFirstPage() async throws {
         let transport = FakeHTTPTransport()
         await transport.route("GET", "people/me/connections", [try .fixture(200, "connections_page1")])

@@ -111,11 +111,15 @@ public final class CNContactStoreAdapter: ContactStoring, @unchecked Sendable {
         return try await onQueue {
             let container = try self.resolveContainer()
             try self.requireInContainer(try self.fetchContacts(ids: ids, keys: [CNContactIdentifierKey as NSString]), container)
+            let photoKeys = [CNContactImageDataKey, CNContactImageDataAvailableKey, CNContactThumbnailImageDataKey].map { $0 as NSString }
             do {
-                let contacts = try self.fetchContacts(ids: ids, keys: [CNContactVCardSerialization.descriptorForRequiredKeys()])
-                return try CNContactVCardSerialization.data(with: contacts)
+                let contacts = try self.fetchContacts(ids: ids, keys: [CNContactVCardSerialization.descriptorForRequiredKeys()] + photoKeys)
+                // Apple's export leaves photos out, whatever is fetched: they are added card by card.
+                return VCardWriter.addingPhotos(
+                    contacts.map { ICloudPhotoRead.withPictureForExport($0).imageData }, to: try CNContactVCardSerialization.data(with: contacts)
+                )
             } catch where CNContactMapper.isUnauthorizedKeys(error) {
-                return VCardWriter.data(for: try self.fetchContacts(ids: ids, keys: CNContactMapper.mergeKeys))
+                return VCardWriter.data(for: try self.fetchContacts(ids: ids, keys: CNContactMapper.mergeKeys + photoKeys).map(ICloudPhotoRead.withPictureForExport))
             }
         }
     }
@@ -197,6 +201,69 @@ public final class CNContactStoreAdapter: ContactStoring, @unchecked Sendable {
         }
     }
 
+    // MARK: photos
+
+    /// Identifiers per predicate: the Contacts framework slows down on very long `withIdentifiers` lists.
+    private static let photoPredicateChunk = 100
+
+    private static var photoSignatureKeys: [CNKeyDescriptor] {
+        [CNContactIdentifierKey, CNContactImageDataAvailableKey, CNContactThumbnailImageDataKey].map { $0 as NSString }
+    }
+
+    /// Reads only the availability flag and the small thumbnail, in chunks. Contacts outside the container are left out, as
+    /// are ids that no longer exist.
+    public func photoSignatures(ids: [String]) async throws -> [String: PhotoSignature] {
+        try await requireAccess()
+        return try await onQueue {
+            let container = try self.resolveContainer()
+            let inContainer = Set(
+                try self.fetch(predicate: CNContact.predicateForContactsInContainer(withIdentifier: container.id), keys: [CNContactIdentifierKey as NSString])
+                    .map(\.identifier)
+            )
+            let wanted = Array(Set(ids)).filter(inContainer.contains).sorted()
+            var signatures: [String: PhotoSignature] = [:]
+            for chunk in wanted.chunked(into: Self.photoPredicateChunk) {
+                for contact in try self.fetch(predicate: CNContact.predicateForContacts(withIdentifiers: chunk), keys: Self.photoSignatureKeys) {
+                    signatures[contact.identifier] = ICloudPhotoRead.signature(
+                        imageDataAvailable: contact.imageDataAvailable, thumbnail: contact.thumbnailImageData
+                    )
+                }
+            }
+            return signatures
+        }
+    }
+
+    public func photoData(id: String) async throws -> Data? {
+        try await requireAccess()
+        return try await onQueue {
+            let container = try self.resolveContainer()
+            let keys = [CNContactIdentifierKey, CNContactImageDataAvailableKey, CNContactImageDataKey, CNContactThumbnailImageDataKey]
+            let contacts = try self.fetchContacts(ids: [id], keys: keys.map { $0 as NSString })
+            try self.requireInContainer(contacts, container)
+            return ICloudPhotoRead.picture(
+                imageDataAvailable: contacts[0].imageDataAvailable, image: contacts[0].imageData, thumbnail: contacts[0].thumbnailImageData
+            )
+        }
+    }
+
+    public func setPhoto(id: String, data: Data?, backup: BackupReceipt) async throws {
+        try await requireAccess()
+        try await onQueue {
+            let container = try self.resolveContainer()
+            let contacts = try self.fetchContacts(ids: [id], keys: [CNContactIdentifierKey, CNContactImageDataKey].map { $0 as NSString })
+            try self.requireInContainer(contacts, container)
+            guard let working = contacts[0].mutableCopy() as? CNMutableContact else { throw ContactStoreError.notFound([id]) }
+            working.imageData = data
+            let request = CNSaveRequest()
+            request.update(working)
+            do {
+                try self.store.execute(request)
+            } catch let error as NSError where error.domain == NSCocoaErrorDomain && error.code == ICloudPhotoRead.lostPictureFileCode {
+                throw ContactStoreError.photoNotSaved
+            }
+        }
+    }
+
     // MARK: change detection
 
     /// `CNContactStore.currentHistoryToken`: moves on any change to the store, including other containers and this
@@ -263,5 +330,35 @@ public final class CNContactStoreAdapter: ContactStoring, @unchecked Sendable {
             if owners.first?.identifier != container.id { outside.append(contact.identifier) }
         }
         guard outside.isEmpty else { throw ContactStoreError.outsideSelectedContainer(outside) }
+    }
+}
+
+/// How a contact's photo reads through the Contacts framework. Once iCloud has synced a photo, macOS reports
+/// `imageDataAvailable` false and hands back only a centre-square `thumbnailImageData` (seen on macOS 27): that thumbnail
+/// is the photo as far as anything here is concerned.
+enum ICloudPhotoRead {
+    /// The undocumented Core Data error a save fails with when the contacts database lost the contact's old picture file.
+    static let lostPictureFileCode = 134092
+
+    static func signature(imageDataAvailable: Bool, thumbnail: Data?) -> PhotoSignature {
+        PhotoSignature(hasPhoto: imageDataAvailable || thumbnail != nil, thumbnailHash: thumbnail.map(PhotoHash.sha256Hex))
+    }
+
+    /// The full picture when there is one, otherwise the thumbnail.
+    static func picture(imageDataAvailable: Bool, image: Data?, thumbnail: Data?) -> Data? {
+        (imageDataAvailable ? image : nil) ?? thumbnail
+    }
+
+    /// `contact` with `picture` as its image, so a vCard export carries the photo even when macOS only has a thumbnail. An
+    /// in-memory copy for exporting; it is never saved. Needs the image, availability and thumbnail keys fetched.
+    static func withPictureForExport(_ contact: CNContact) -> CNContact {
+        let image = contact.isKeyAvailable(CNContactImageDataKey) ? contact.imageData : nil
+        let available = contact.isKeyAvailable(CNContactImageDataAvailableKey) && contact.imageDataAvailable
+        let thumbnail = contact.isKeyAvailable(CNContactThumbnailImageDataKey) ? contact.thumbnailImageData : nil
+        guard let best = picture(imageDataAvailable: available, image: image, thumbnail: thumbnail), best != image,
+              let copy = contact.mutableCopy() as? CNMutableContact
+        else { return contact }
+        copy.imageData = best
+        return copy
     }
 }

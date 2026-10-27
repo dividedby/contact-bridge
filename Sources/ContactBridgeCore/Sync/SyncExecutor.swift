@@ -85,7 +85,11 @@ public struct SyncRunReport: Sendable {
     /// Housekeeping that failed without affecting the run (history, pruning).
     public var warnings: [String] = []
 
-    public var googleWrites: Int { updated + created + deleted }
+    /// What photo sync did after the field writes; set by the engine.
+    public var photo = PhotoRunReport()
+
+    /// Google writes of the run, photos included: a run that made any is followed by another for what was carried over.
+    public var googleWrites: Int { updated + created + deleted + photo.googleWrites }
     /// Everything the plan asked for was done or deliberately held for review.
     public var isComplete: Bool { leftForNextRun.isEmpty && halted == nil }
 }
@@ -205,7 +209,7 @@ public struct SyncExecutor: Sendable {
         guard !plan.links.isEmpty || !plan.baselineRefreshes.isEmpty || !plan.droppedLinks.isEmpty else { return }
         try state.update { state in
             for link in plan.links { state.baselines[link.icloudID] = link.baseline }
-            for (id, baseline) in plan.baselineRefreshes { state.baselines[id] = baseline }
+            for (id, baseline) in plan.baselineRefreshes { state.store(baseline, for: id) }
             for id in plan.droppedLinks { state.baselines[id] = nil }
         }
         report.linksAdded = plan.links.count
@@ -289,8 +293,9 @@ public struct SyncExecutor: Sendable {
                 let confirmedAt = now()
                 try state.update { state in
                     for (item, person) in confirmed {
-                        state.baselines[item.update.icloudID] = item.update.baseline.afterUpdate(
-                            fields: item.update.fields, returned: person, at: confirmedAt
+                        state.store(
+                            item.update.baseline.afterUpdate(fields: item.update.fields, returned: person, at: confirmedAt),
+                            for: item.update.icloudID
                         )
                     }
                 }
@@ -695,7 +700,7 @@ public struct SyncExecutor: Sendable {
     }
 
     /// Errors after which every later call would fail the same way.
-    private static func haltReason(for error: GoogleAPIError) -> String? {
+    static func haltReason(for error: GoogleAPIError) -> String? {
         switch error {
         case .rateLimited, .unauthorized: error.localizedDescription
         case .other(403, _): error.localizedDescription

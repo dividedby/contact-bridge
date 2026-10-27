@@ -14,10 +14,13 @@ public struct SyncBaseline: Sendable, Hashable, Codable {
     public var icloudNoteHash: String?
     public var googleNoteHash: String?
     public var syncedAt: Date
+    /// What the pair's photos looked like at the last sync. Nil until the pair's photos are first looked at, and in files
+    /// written before photo sync. Whole-baseline rewrites leave it alone: only photo sync moves it (`SyncState.store`).
+    public var photo: PhotoBaseline?
 
     public init(
         icloud: ContactRecord, google: ContactRecord, googleEtag: String,
-        icloudNoteHash: String? = nil, googleNoteHash: String? = nil, syncedAt: Date
+        icloudNoteHash: String? = nil, googleNoteHash: String? = nil, syncedAt: Date, photo: PhotoBaseline? = nil
     ) {
         self.icloud = icloud
         self.google = google
@@ -25,6 +28,7 @@ public struct SyncBaseline: Sendable, Hashable, Codable {
         self.icloudNoteHash = icloudNoteHash
         self.googleNoteHash = googleNoteHash
         self.syncedAt = syncedAt
+        self.photo = photo
     }
 }
 
@@ -66,12 +70,24 @@ public struct SyncState: Sendable, Hashable, Codable {
     public var keepSeparate: Set<String>
     public var firstSyncApproved: Bool
     public var pause: PauseReason?
+    /// The master switch for photo sync. When off, no photo is read, written or reviewed.
+    public var syncPhotos: Bool
+    /// Copy a Google contact's profile photo to iCloud when neither side has a photo of its own, and keep it up to date.
+    public var useGoogleProfilePhotos: Bool
+    /// iCloud ids of contacts whose Google profile photo is never used (the user chose "stop using it").
+    public var profilePhotoOptOut: Set<String>
+    /// When Google was last listed in full for its photos; with profile photos on, a full listing is forced once a day.
+    public var lastPhotoFullListingAt: Date?
+    /// The last `PhotoRepair` this state went through. Missing in older files, read as 0.
+    public var photoRepairVersion: Int
 
     public init(
         version: Int = SyncState.currentVersion, baselines: [String: SyncBaseline] = [:], googleSyncToken: String? = nil,
         fieldsVersion: String? = nil, icloudChangeToken: Data? = nil, icloudContainerID: String? = nil,
         lastNotesReadAt: Date? = nil, googleAccount: String? = nil, ignoredGoogle: Set<String> = [],
-        keepSeparate: Set<String> = [], firstSyncApproved: Bool = false, pause: PauseReason? = nil
+        keepSeparate: Set<String> = [], firstSyncApproved: Bool = false, pause: PauseReason? = nil, syncPhotos: Bool = true,
+        useGoogleProfilePhotos: Bool = false, profilePhotoOptOut: Set<String> = [], lastPhotoFullListingAt: Date? = nil,
+        photoRepairVersion: Int = PhotoRepair.currentVersion
     ) {
         self.version = version
         self.baselines = baselines
@@ -85,9 +101,15 @@ public struct SyncState: Sendable, Hashable, Codable {
         self.keepSeparate = keepSeparate
         self.firstSyncApproved = firstSyncApproved
         self.pause = pause
+        self.syncPhotos = syncPhotos
+        self.useGoogleProfilePhotos = useGoogleProfilePhotos
+        self.profilePhotoOptOut = profilePhotoOptOut
+        self.lastPhotoFullListingAt = lastPhotoFullListingAt
+        self.photoRepairVersion = photoRepairVersion
     }
 
-    // Adding `keepSeparate` needs no version bump: a file without it decodes as before, with none kept apart.
+    // Adding `keepSeparate` and the photo settings needs no version bump: a file without them decodes as before, with none
+    // kept apart, photo sync on and profile photos off.
     public init(from decoder: any Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         version = try values.decode(Int.self, forKey: .version)
@@ -102,6 +124,20 @@ public struct SyncState: Sendable, Hashable, Codable {
         keepSeparate = try values.decodeIfPresent(Set<String>.self, forKey: .keepSeparate) ?? []
         firstSyncApproved = try values.decode(Bool.self, forKey: .firstSyncApproved)
         pause = try values.decodeIfPresent(PauseReason.self, forKey: .pause)
+        syncPhotos = try values.decodeIfPresent(Bool.self, forKey: .syncPhotos) ?? true
+        useGoogleProfilePhotos = try values.decodeIfPresent(Bool.self, forKey: .useGoogleProfilePhotos) ?? false
+        profilePhotoOptOut = try values.decodeIfPresent(Set<String>.self, forKey: .profilePhotoOptOut) ?? []
+        lastPhotoFullListingAt = try values.decodeIfPresent(Date.self, forKey: .lastPhotoFullListingAt)
+        photoRepairVersion = try values.decodeIfPresent(Int.self, forKey: .photoRepairVersion) ?? 0
+    }
+
+    /// Writes a whole baseline for `id` the way every field-sync rewrite does: the photo half of an existing baseline is
+    /// kept, because only photo sync moves it. A rewrite built from an older copy therefore cannot undo a photo update.
+    /// A baseline for an id with none yet is stored as given.
+    public mutating func store(_ baseline: SyncBaseline, for id: String) {
+        var baseline = baseline
+        if let existing = baselines[id] { baseline.photo = existing.photo }
+        baselines[id] = baseline
     }
 }
 

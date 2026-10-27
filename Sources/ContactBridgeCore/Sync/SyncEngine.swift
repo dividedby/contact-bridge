@@ -46,6 +46,8 @@ public actor SyncEngine {
         var hasDeferred: Bool
         var reviews: [SyncReviewSummary]
         var unconfirmedCreates: Int
+        /// Pairs linked or created this run: their photos are looked at for the first time by the next one.
+        var newPairs: Int
     }
 
     private enum RunResult: Sendable {
@@ -72,6 +74,7 @@ public actor SyncEngine {
     private let planner: SyncPlanner
     private let contactsAppRunning: @Sendable () -> Bool
     private let acquireLock: (@Sendable () throws -> any SyncLockHolding)?
+    private let photos: SyncPhotoSupport?
 
     private var snapshot = SyncSnapshot()
     private var observers: [UUID: AsyncStream<SyncSnapshot>.Continuation] = [:]
@@ -109,13 +112,15 @@ public actor SyncEngine {
     ///   - contactsAppRunning: whether the Contacts app is running, so a background run may read notes without launching it.
     ///   - acquireLock: the second-instance guard (`SyncProcessLock.acquire`), taken by `start()`. Nil means no guard (demo
     ///     mode, tests). If it throws, syncing stays off for this process.
+    ///   - photos: what photo sync needs. Nil means runs read and write no photos at all.
     public init(
         environment: @escaping @Sendable () async -> SyncEnvironmentState, links: any LinkStoring, state: any SyncStateStoring,
         reviews: any ReviewStoring, journal: any SyncJournalStoring, history: any SyncHistoryStoring, backups: BackupCoordinator,
         gate: WriteGate = WriteGate(), clock: any SyncClock = SystemSyncClock(), schedule: SyncSchedule = SyncSchedule(),
         planner: SyncPlanner = SyncPlanner(), contactsAppRunning: @escaping @Sendable () -> Bool = { false },
-        acquireLock: (@Sendable () throws -> any SyncLockHolding)? = nil
+        acquireLock: (@Sendable () throws -> any SyncLockHolding)? = nil, photos: SyncPhotoSupport? = nil
     ) {
+        self.photos = photos
         self.environment = environment
         linkStore = links
         stateStore = state
@@ -229,6 +234,19 @@ public actor SyncEngine {
         }
         startTimer()
         if canRunAutomatically { request(delay: 0) }
+        // The list is otherwise filled only when a run completes, and a launch that stays paused never gets there.
+        Task { await publishStoredReviewsAtLaunch() }
+    }
+
+    private func publishStoredReviewsAtLaunch() async {
+        guard case .ready(let env) = await environment(), snapshot.lastRunAt == nil else { return }
+        try? await publishStoredReviews(google: env.google)
+    }
+
+    private func publishStoredReviews(google: any GoogleContactsClient) async throws {
+        let state = try stateStore.load()
+        let reviews = await summaries(of: try reviewStore.load(), baselines: state.baselines, showPhotos: state.syncPhotos, google: google)
+        publish { $0.reviewItems = reviews }
     }
 
     /// Stops the timer and any run, and lets go of the instance lock.
@@ -469,6 +487,10 @@ public actor SyncEngine {
         if case .approve = options.mode { approvingNow = true } else { approvingNow = false }
         // `userPaused` too: a pause that could not be saved is not in `state`, but it still holds.
         if state.pause == .user || userPaused, state.firstSyncApproved || approvingNow { return .userPaused }
+        if photos != nil, state.syncPhotos, state.photoRepairVersion < PhotoRepair.currentVersion {
+            try await PhotoRepair.run(store: env.store, state: stateStore, reviews: reviewStore)
+            state = try stateStore.load()
+        }
         if approvingNow, env.accountEmail == nil {
             return .notReady("Couldn't confirm which Google account is signed in. Sign out in Setup, then sign in again and allow access to your email address, then start syncing.")
         }
@@ -489,7 +511,10 @@ public actor SyncEngine {
             .scan(state: state, links: table, trigger: options.trigger)
 
         setPhase(.readingGoogle)
+        // Profile photos change without touching the contact, so they are only seen in a full listing: once a day.
+        let photosOn = photos != nil && state.syncPhotos
         let full = SyncPlanner.requiresFullGoogleListing(icloud: scan, links: table, state: state)
+            || (photosOn && state.firstSyncApproved && PhotoReconciler.fullListingDue(state: state, now: clock.now()))
         let feed = try await GoogleChangeFeed(client: env.google)
             .fetch(state: state, accountEmail: env.accountEmail, requireFullListing: full)
 
@@ -502,13 +527,19 @@ public actor SyncEngine {
             shown = counts
         }
         let at = clock.now()
+        var observed = PhotoObservations.none
+        if let photos, planState.syncPhotos {
+            let questioned = Set(try reviewStore.load().filter { $0.kind == .photoConflict }.compactMap(\.icloudID))
+            observed = try await PhotoReconciler(store: env.store, google: env.google, fetcher: photos.fetcher, fingerprinter: photos.fingerprinter)
+                .observe(icloud: scan, feed: feed, state: planState, links: table, keepSeparate: planState.keepSeparate, questioned: questioned)
+        }
         // Pinned first-link conflicts are never derived again; the planner drops those whose live sides agree.
         let open = planState.firstSyncApproved && scan.status == .changed ? try reviewStore.load() : []
         let pinnedPeople = try await readPinnedPeople(open, feed: feed, google: env.google)
         var plan = planner.plan(
             icloud: scan, google: feed, state: planState, links: table, keepSeparate: planState.keepSeparate,
             allowMassGoogleDeletions: options.confirmedSummaries.contains { $0.hasPrefix(SyncPlanner.googleMissingSummaryPrefix) },
-            openReviews: open, googleExtra: pinnedPeople, now: at
+            openReviews: open, googleExtra: pinnedPeople, photos: observed, now: at
         )
         if case .needsConfirmation(let summary)? = plan.pause, options.confirmedSummaries.contains(summary) {
             plan.pause = nil
@@ -528,19 +559,69 @@ public actor SyncEngine {
             approved = true
             publish { $0.firstSyncApproved = true }
         }
-        if let pause = plan.pause { return .paused(pause, details: Self.forgottenItems(plan.guardedForgottenLinks)) }
+        if let pause = plan.pause {
+            try await publishStoredReviews(google: env.google)
+            return .paused(pause, details: Self.forgottenItems(plan.guardedForgottenLinks))
+        }
 
         try reviewStore.reconcile(with: plan, ignoredGoogle: state.ignoredGoogle, at: at)
         setPhase(.applying)
-        let report = try await executor.execute(plan: plan)
+        var report = try await executor.execute(plan: plan)
+        if let photos, observed.wasObserved {
+            report.photo = try await runPhotos(plan, report: report, support: photos, env: env, tokensBefore: state, at: at)
+            // A rate limit or sign-in problem in the photo phase stops the run like one in the field phase: back-off, the
+            // "stopped" notice, and no follow-up run straight into it.
+            report.halted = report.halted ?? report.photo.halted
+            report.warnings += report.photo.warnings + (try leftAlonePhotos(given: report.photo, observed: observed)) + report.photo.putOffReasons
+            if feed.isFullListing, planState.useGoogleProfilePhotos {
+                try stateStore.update { $0.lastPhotoFullListingAt = at }
+            }
+        }
 
         let baselines = try stateStore.load().baselines
-        let reviews = await summaries(of: try reviewStore.load(), baselines: baselines, google: env.google)
+        let reviews = await summaries(
+            of: try reviewStore.load(), baselines: baselines, showPhotos: try stateStore.load().syncPhotos, google: env.google
+        )
         let unconfirmed = try journalStore.load().entries.filter { $0.kind == .create }.count
         return .completed(Completion(
             report: report, waitingForNotes: plan.waitingForNotes, unlinkedWaitingForFullListing: plan.unlinkedWaitingForFullListing,
-            notesUnavailable: plan.notesUnavailable, hasDeferred: !plan.deferred.isEmpty, reviews: reviews, unconfirmedCreates: unconfirmed
+            notesUnavailable: plan.notesUnavailable, hasDeferred: !plan.deferred.isEmpty, reviews: reviews, unconfirmedCreates: unconfirmed,
+            newPairs: photos != nil && planState.syncPhotos ? report.linksAdded + report.created : 0
         ))
+    }
+
+    /// Every pair whose photo is left alone until it changes, from the stored failure marks plus this run's, grouped by
+    /// reason and named: shown after every run, so the contacts stay listed until a photo changes, not only when they fail.
+    private func leftAlonePhotos(given report: PhotoRunReport, observed: PhotoObservations) throws -> [String] {
+        let baselines = try stateStore.load().baselines
+        var messages = baselines.compactMapValues { $0.photo?.failure?.message }
+        for failure in report.givenUp { messages[failure.icloudID] = failure.message }
+        for (id, failure) in observed.failures { messages[id] = failure.message }
+        return PhotoNotice.lines(
+            messages.map { (name(icloudID: $0.key, resourceName: nil, baselines: baselines), $0.value) }, couldNotBe: "synced"
+        )
+    }
+
+    /// Carries out the plan's photo ops after the field writes (the run still holds the write gate). If something is left
+    /// undone, the checkpoint the field run just stored is taken back, so the next run reads the same changes again.
+    private func runPhotos(
+        _ plan: SyncPlan, report: SyncRunReport, support: SyncPhotoSupport, env: SyncEnvironment, tokensBefore: SyncState, at: Date
+    ) async throws -> PhotoRunReport {
+        guard !plan.photoOps.isEmpty, report.halted == nil else { return PhotoRunReport() }
+        let nowFn: @Sendable () -> Date = { [clock] in clock.now() }
+        let photoReport = try await PhotoExecutor(
+            google: env.google, store: env.store, links: linkStore, state: stateStore, reviews: reviewStore, history: support.history,
+            backups: backups, fetcher: support.fetcher, containerID: env.containerID, needsNotes: env.notes != nil, now: nowFn,
+            sleep: support.sleep
+        ).execute(plan.photoOps)
+        if report.checkpointCommitted, !photoReport.isComplete {
+            try stateStore.update {
+                $0.icloudChangeToken = tokensBefore.icloudChangeToken
+                $0.googleSyncToken = tokensBefore.googleSyncToken
+                $0.fieldsVersion = tokensBefore.fieldsVersion
+            }
+        }
+        return photoReport
     }
 
     /// The Google contacts of pinned conflicts that an incremental feed did not list (it lists only what changed). One that
@@ -637,7 +718,8 @@ public actor SyncEngine {
                 $0.notesUnavailable = done.notesUnavailable
             }
             // Work the mutation cap carried over is picked up soon, as long as the runs keep making progress.
-            if done.hasDeferred, done.report.halted == nil, done.report.googleWrites > 0, followUps < schedule.maxFollowUps {
+            let carriedOver = done.hasDeferred && done.report.googleWrites > 0
+            if carriedOver || done.newPairs > 0, done.report.halted == nil, followUps < schedule.maxFollowUps {
                 followUps += 1
                 request(delay: schedule.debounce)
             } else {
@@ -672,18 +754,22 @@ public actor SyncEngine {
 
     private func summary(
         id: String, kind: ReviewKind, icloudID: String?, resourceName: String?, fields: [SyncField], pinned: Bool = false,
-        baselines: [String: SyncBaseline]
+        photoReason: PhotoConflictReason? = nil, baselines: [String: SyncBaseline]
     ) -> SyncReviewSummary {
         let mayBe = kind == .possibleLink ? resourceName.flatMap { googleNames[$0] } : nil
         return SyncReviewSummary(
             id: id, kind: kind, name: name(icloudID: icloudID, resourceName: resourceName, baselines: baselines), detail: mayBe,
-            fields: fields, isFirstLink: pinned
+            fields: fields, photoReason: photoReason, isFirstLink: pinned
         )
     }
 
     /// Stored review items as the screen lists them. Google contacts this run did not list are looked up by name, a few
     /// at a time.
-    private func summaries(of items: [ReviewItem], baselines: [String: SyncBaseline], google: any GoogleContactsClient) async -> [SyncReviewSummary] {
+    /// Photo questions are left out while photo sync is off: they stay stored, and come back when it is switched on.
+    private func summaries(
+        of stored: [ReviewItem], baselines: [String: SyncBaseline], showPhotos: Bool, google: any GoogleContactsClient
+    ) async -> [SyncReviewSummary] {
+        let items = showPhotos ? stored : stored.filter { $0.kind != .photoConflict }
         var lookups = 25
         for item in items {
             guard let resourceName = item.resourceName, googleNames[resourceName] == nil,
@@ -698,7 +784,7 @@ public actor SyncEngine {
         return items.map {
             summary(
                 id: $0.id, kind: $0.kind, icloudID: $0.icloudID, resourceName: $0.resourceName, fields: $0.fields, pinned: $0.pinned,
-                baselines: baselines
+                photoReason: $0.photoReason, baselines: baselines
             )
         }
     }
@@ -730,8 +816,14 @@ public actor SyncEngine {
                 )
             },
             deletes: plan.deletes.map { SyncPreview.Item(id: $0.icloudID, name: $0.baseline.icloud.displayName, detail: nil) },
+            photos: plan.photoOps.filter { $0.kind != .recordBaseline }.map {
+                SyncPreview.Item(id: $0.icloudID, name: name(icloudID: $0.icloudID, resourceName: $0.resourceName, baselines: baselines), detail: $0.kind.text)
+            },
             reviews: plan.review.map {
-                summary(id: $0.id, kind: $0.kind, icloudID: $0.icloudID, resourceName: $0.resourceName, fields: $0.fields, baselines: baselines)
+                summary(
+                    id: $0.id, kind: $0.kind, icloudID: $0.icloudID, resourceName: $0.resourceName, fields: $0.fields,
+                    photoReason: $0.photoReason, baselines: baselines
+                )
             },
             forgottenLinks: Self.forgottenItems(plan.forgottenLinkInfo), waitingForNotes: plan.waitingForNotes,
             unlinkedWaitingForFullListing: plan.unlinkedWaitingForFullListing, notesUnavailable: plan.notesUnavailable,

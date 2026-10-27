@@ -26,6 +26,7 @@ public struct BackupWriter: Sendable {
     private let store: any ContactStoring
     private let google: (any GoogleContactsClient)?
     private let notes: (any NotesProvider)?
+    private let photoFetcher: (any GooglePhotoFetching)?
     private let baseDirectory: URL
     private let appVersion: String
     private let retention: Int
@@ -40,12 +41,14 @@ public struct BackupWriter: Sendable {
     var beforeMove: (@Sendable (URL) throws -> Void)?
 
     /// - Parameters:
+    ///   - photoFetcher: downloads the Google contacts' own photos into `google-photos/`; nil leaves them out.
     ///   - retention: how many backups to keep (at least 1; the one just made is always kept).
     ///   - timeZone: used only for the folder name.
     public init(
         store: any ContactStoring,
         google: (any GoogleContactsClient)? = nil,
         notes: (any NotesProvider)? = nil,
+        photoFetcher: (any GooglePhotoFetching)? = nil,
         baseDirectory: URL = BackupWriter.defaultDirectory,
         appVersion: String = BackupWriter.bundleVersion,
         retention: Int = 20,
@@ -55,6 +58,7 @@ public struct BackupWriter: Sendable {
         self.store = store
         self.google = google
         self.notes = notes
+        self.photoFetcher = photoFetcher
         self.baseDirectory = baseDirectory
         self.appVersion = appVersion
         self.retention = max(retention, 1)
@@ -78,6 +82,7 @@ public struct BackupWriter: Sendable {
             connections = try await Self.allPages("google-connections") { try await google.listConnections(syncToken: nil, pageToken: $0) }
             others = try await Self.allPages("google-other") { try await google.listOtherContacts(pageToken: $0) }
         }
+        let googlePhotos = if let connections, let photoFetcher { await Self.downloadPhotos(of: connections, with: photoFetcher) } else { nil as [GooglePhotoDownload]? }
         // Contacts without a note come back as "": the file lists only real notes.
         let noteMap = try await notes?.fetchNotes(ids: identifiers).filter { !$0.value.isEmpty }
         let createdAt = Date(timeIntervalSince1970: now().timeIntervalSince1970.rounded(.down))
@@ -89,7 +94,8 @@ public struct BackupWriter: Sendable {
         let final: URL
         do {
             try fm.createDirectory(at: temp, withIntermediateDirectories: false)
-            var files = [try await writeVCard(identifiers, into: temp)]
+            let vcard = try await writeVCard(identifiers, into: temp)
+            var files = [vcard.file]
             files.append(try writeFile("icloud.json", Self.encode(records), recordCount: records.count, into: temp))
             if let connections {
                 files.append(try writeFile("google-connections.json", Self.encode(connections), recordCount: connections.count, into: temp))
@@ -100,11 +106,24 @@ public struct BackupWriter: Sendable {
             if let noteMap {
                 files.append(try writeFile("icloud-notes.json", Self.encode(noteMap), recordCount: noteMap.count, into: temp))
             }
+            if let googlePhotos {
+                try fm.createDirectory(at: temp.appendingPathComponent(Self.googlePhotoFolder), withIntermediateDirectories: false)
+                for download in googlePhotos {
+                    if let file = download.entry.file, let data = download.data {
+                        files.append(try writeFile(file, data, recordCount: nil, into: temp))
+                    }
+                }
+                let index = googlePhotos.map(\.entry)
+                files.append(try writeFile("google-photos.json", Self.encode(index), recordCount: index.count, into: temp))
+            }
             manifest = BackupManifest(
                 appVersion: appVersion,
                 createdAt: createdAt,
                 sources: ["icloud"] + (google == nil ? [] : ["google", "googleOther"]),
-                counts: BackupManifest.Counts(icloud: records.count, googleConnections: connections?.count, googleOther: others?.count),
+                counts: BackupManifest.Counts(
+                    icloud: records.count, googleConnections: connections?.count, googleOther: others?.count, icloudPhotos: vcard.photos,
+                    googlePhotos: googlePhotos?.filter { $0.data != nil }.count
+                ),
                 files: files,
                 notesIncluded: noteMap != nil
             )
@@ -146,10 +165,82 @@ public struct BackupWriter: Sendable {
         }
     }
 
+    // MARK: Google photos
+
+    static let googlePhotoFolder = "google-photos"
+    /// Downloads at once.
+    private static let photoDownloadWidth = 4
+
+    /// `google-photos.json`: one entry per Google contact with a photo of its own, with the file it was saved to, or why it
+    /// could not be downloaded. A failed download does not fail the backup: the photo is still on Google.
+    struct GooglePhotoEntry: Sendable, Hashable, Codable {
+        var resourceName: String
+        /// The photo's address without a size; `=s0` downloads it at full size.
+        var url: String
+        var file: String?
+        var error: String?
+    }
+
+    struct GooglePhotoDownload: Sendable {
+        var entry: GooglePhotoEntry
+        var data: Data?
+    }
+
+    /// Each contact's own photo (not a profile photo or a letter avatar) at full size, a few at a time, in contact order.
+    private static func downloadPhotos(of people: [GooglePerson], with fetcher: any GooglePhotoFetching) async -> [GooglePhotoDownload] {
+        let wanted = people.compactMap { person -> (String, GooglePhotoRef)? in
+            guard let resourceName = person.resourceName, let photo = GooglePersonMapper.photos(of: person).contact else { return nil }
+            return (resourceName, photo)
+        }
+        var results = [GooglePhotoDownload?](repeating: nil, count: wanted.count)
+        await withTaskGroup(of: (Int, GooglePhotoDownload).self) { group in
+            var next = 0
+            func start() {
+                guard next < wanted.count else { return }
+                let index = next, (resourceName, photo) = wanted[index]
+                next += 1
+                group.addTask {
+                    var entry = GooglePhotoEntry(resourceName: resourceName, url: photo.key)
+                    do {
+                        guard let url = photo.sizedURL(0) else { throw GooglePhotoError.notAllowed("the photo has no usable address") }
+                        let data = try await fetcher.fetch(url)
+                        entry.file = "\(googlePhotoFolder)/\(fileStem(resourceName)).\(fileExtension(data))"
+                        return (index, GooglePhotoDownload(entry: entry, data: data))
+                    } catch {
+                        entry.error = error.localizedDescription
+                        return (index, GooglePhotoDownload(entry: entry, data: nil))
+                    }
+                }
+            }
+            for _ in 0..<photoDownloadWidth { start() }
+            for await (index, download) in group {
+                results[index] = download
+                start()
+            }
+        }
+        return results.compactMap { $0 }
+    }
+
+    private static func fileExtension(_ data: Data) -> String {
+        switch VCardWriter.imageType(data) {
+        case "PNG": "png"
+        case "GIF": "gif"
+        default: "jpg"
+        }
+    }
+
+    /// `people/c123` -> `c123`, with anything but letters, digits, `-` and `_` replaced.
+    private static func fileStem(_ resourceName: String) -> String {
+        let id = resourceName.split(separator: "/").last.map(String.init) ?? resourceName
+        return String(id.map { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" ? $0 : "_" })
+    }
+
     // MARK: files
 
     private static let tempPrefix = ".tmp-"
     private static let vcardMarker = Data("BEGIN:VCARD".utf8)
+    /// A photo property at the start of a line; a card never starts with one, so the newline is always there.
+    private static let photoMarker = Data("\nPHOTO".utf8)
     private static let exportChunkSize = 200
 
     /// Appends to a file while hashing what was written, so nothing is held (or read back) whole just to hash it.
@@ -195,20 +286,22 @@ public struct BackupWriter: Sendable {
         }
     }
 
-    /// Exports the vCard `exportChunkSize` ids at a time, appending each chunk, and counts the cards written.
-    private func writeVCard(_ identifiers: [String], into folder: URL) async throws -> BackupManifest.File {
+    /// Exports the vCard `exportChunkSize` ids at a time, appending each chunk, and counts the cards and photos written.
+    private func writeVCard(_ identifiers: [String], into folder: URL) async throws -> (file: BackupManifest.File, photos: Int) {
         let url = folder.appendingPathComponent("icloud.vcf")
         let sink = try FileSink(url: url)
         do {
             var cards = 0
+            var photos = 0
             for chunk in identifiers.chunked(into: Self.exportChunkSize) {
                 let data = try await store.exportVCard(ids: chunk)
                 try sink.append(data)
                 cards += Self.occurrences(of: Self.vcardMarker, in: data)
+                photos += Self.occurrences(of: Self.photoMarker, in: data)
             }
             let sha = try sink.finish()
             onSync?(url)
-            return BackupManifest.File(name: "icloud.vcf", sha256: sha, bytes: sink.bytes, recordCount: cards)
+            return (BackupManifest.File(name: "icloud.vcf", sha256: sha, bytes: sink.bytes, recordCount: cards), photos)
         } catch {
             sink.abort()
             throw error

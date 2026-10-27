@@ -26,10 +26,19 @@ struct SyncReviewView: View {
                     }
                     Divider()
                     footer(detail)
+                        .confirmationDialog(
+                            model.confirmingPhoto?.title ?? "", isPresented: Binding(get: { model.confirmingPhoto != nil }, set: { if !$0 { model.confirmingPhoto = nil } }),
+                            presenting: model.confirmingPhoto
+                        ) { option in
+                            Button(option.title, role: .destructive) { Task { await model.applyPhoto(option) } }
+                            Button("Cancel", role: .cancel) {}
+                        } message: { option in
+                            Text("\(option.detail) This is for \(detail.name) only.")
+                        }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .confirmationDialog(
-                    model.confirming == .deleteFromICloud ? "Delete \(detail.name) from iCloud?" : "Delete \(detail.name) from Google too?",
+                    model.confirming.map { $0.question(detail.name) } ?? "",
                     isPresented: Binding(get: { model.confirming != nil }, set: { if !$0 { model.confirming = nil } }),
                     presenting: model.confirming
                 ) { confirmation in
@@ -38,6 +47,10 @@ struct SyncReviewView: View {
                         Button("Delete from iCloud", role: .destructive) { Task { await model.deleteFromICloud() } }
                     case .keepDeleted:
                         Button("Delete from Google", role: .destructive) { Task { await model.keepDeleted() } }
+                    case .deleteFromGoogle:
+                        Button("Delete from Google", role: .destructive) { Task { await model.deleteFromGoogle() } }
+                    case .deleteFromBoth:
+                        Button("Delete from both", role: .destructive) { Task { await model.deleteFromBoth() } }
                     }
                     Button("Cancel", role: .cancel) {}
                 } message: { confirmation in
@@ -46,6 +59,10 @@ struct SyncReviewView: View {
                         Text("\(detail.name) was deleted in Google. A backup with notes is taken first, then the contact is deleted here. You can get it back from that backup.")
                     case .keepDeleted:
                         Text("\(detail.name) was deleted here and edited in Google since. Deleting it from Google throws those edits away. A Google backup is taken first and the change is logged.")
+                    case .deleteFromGoogle:
+                        Text("\(detail.name) is only in Google. A Google backup is taken first and the change is logged, so you can get it back from that backup.")
+                    case .deleteFromBoth:
+                        Text("\(detail.name) is deleted from iCloud and from Google. A backup of both, with notes, is taken first, so you can get the contact back from it.")
                     }
                 }
             } else {
@@ -65,7 +82,7 @@ struct SyncReviewView: View {
             Button { model.close() } label: { Label("Back", systemImage: "chevron.left") }
                 .disabled(model.isWorking)
             Text(detail.name).font(.title2).lineLimit(1)
-            Text(detail.item.kind.title)
+            Text(detail.item.kind.title(photoReason: detail.item.photoReason))
                 .font(.caption.weight(.medium))
                 .padding(.horizontal, 8).padding(.vertical, 2)
                 .background(Color.orange.opacity(0.2), in: Capsule())
@@ -105,18 +122,25 @@ struct SyncReviewView: View {
         case .deletedInGoogle: model.block(for: .deleteFromICloud)
         case .deletedInICloudEditedInGoogle: model.block(for: .restore)
         case .possibleLink: model.block(for: .link)
+        case .photoConflict: model.block(for: .photo)
         }
     }
 
     @ViewBuilder private func buttons(_ detail: ReviewDetail, disabled: Bool) -> some View {
         switch detail.item.kind {
         case .googleEdited, .bothEdited:
+            Button("Delete from both…", role: .destructive) { model.confirming = .deleteFromBoth }
+                .disabled(disabled || model.block(for: .deleteFromBoth) != nil)
+                .help("Delete this contact from iCloud and Google")
             Button("Save to iCloud and Google") { Task { await model.save() } }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
                 .disabled(disabled || model.block(for: .save) != nil || detail.draft == nil)
                 .help("Save the choices to iCloud, then copy the result to Google")
         case .newInGoogle:
+            Button("Delete from Google…", role: .destructive) { model.confirming = .deleteFromGoogle }
+                .disabled(disabled || model.block(for: .deleteFromGoogle) != nil)
+                .help("Delete this contact from Google")
             Button("Ignore") { Task { await model.ignore() } }
                 .disabled(disabled || model.blockReason != nil)
                 .help("Never offer this contact again. Show ignored brings it back.")
@@ -148,6 +172,9 @@ struct SyncReviewView: View {
                 .controlSize(.large)
                 .disabled(disabled || model.block(for: .link) != nil)
                 .help("They are the same person")
+        case .photoConflict:
+            // The choices are in the body, each with its own explanation.
+            EmptyView()
         }
     }
 
@@ -161,6 +188,8 @@ struct SyncReviewView: View {
             "Keep deleted takes a Google backup (a day old at most) and logs the change. Restore takes a backup with notes first."
         case .possibleLink:
             "Linking and keeping separate change nothing in your contacts."
+        case .photoConflict:
+            "Changing an iCloud photo takes a backup first. A Google photo that is replaced or removed is saved to the photo history first (30 days)."
         }
     }
 
@@ -195,6 +224,66 @@ struct SyncReviewView: View {
             RecordComparison(
                 left: detail.icloud, right: detail.google, leftTitle: "iCloud", rightTitle: "Google", leftNote: detail.icloudNote, rightNote: detail.googleNote
             )
+        case .photoConflict:
+            photoContent(detail)
+        }
+    }
+
+    // MARK: photos
+
+    @ViewBuilder private func photoContent(_ detail: ReviewDetail) -> some View {
+        if let photos = detail.photos {
+            Text(photos.draft.explanation).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            HStack(alignment: .top, spacing: 24) {
+                photoColumn(title: "iCloud", data: photos.icloud, empty: "No photo", caption: nil)
+                if photos.draft.isAboutProfilePhoto {
+                    photoColumn(title: "Their Google profile photo", data: photos.profile, empty: "No profile photo", caption: nil)
+                } else {
+                    photoColumn(
+                        title: "Google", data: photos.google, empty: "No photo",
+                        caption: photos.googleContactUpdatedAt.map {
+                            "This Google contact was last edited \($0.formatted(date: .abbreviated, time: .shortened)). Google does not date photos, so that is not when the photo changed. iCloud has no dates."
+                        }
+                    )
+                }
+            }
+            VStack(alignment: .leading, spacing: 12) {
+                ForEach(photos.draft.options) { option in
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        Button(option.title, role: option.isDestructive ? .destructive : nil) { model.choosePhoto(option) }
+                            .buttonStyle(.bordered)
+                            .controlSize(.large)
+                            .disabled(model.isWorking || model.isLoading || model.block(for: .photo) != nil)
+                        Text(option.detail).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+        } else {
+            Label("One of the two contacts is not there any more. Go back and run Sync now.", systemImage: "questionmark.circle")
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func photoColumn(title: String, data: Data?, empty: String, caption: String?) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.headline)
+            if let data, let image = NSImage(data: data) {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 200, height: 200)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(.quaternary))
+            } else {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(.quaternary.opacity(0.4))
+                    .frame(width: 200, height: 200)
+                    .overlay(Text(empty).foregroundStyle(.secondary))
+            }
+            if let caption {
+                Text(caption).font(.caption).foregroundStyle(.secondary).frame(width: 200, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
@@ -312,17 +401,11 @@ struct SyncReviewView: View {
     }
 
     @ViewBuilder private func entryChoice(_ row: SyncReviewDraft.EntryRow) -> some View {
-        if row.needsChoice {
-            Picker("Use", selection: Binding(get: { row.action }, set: { model.setAction($0, forEntry: row.id) })) {
-                ForEach(row.actions, id: \.self) { Text($0.title(for: row.status)).tag($0) }
-            }
-            .pickerStyle(.menu)
-            .labelsHidden()
-        } else if row.status == .addedInICloud {
-            Text("Goes to Google").font(.caption).foregroundStyle(.secondary)
-        } else {
-            Text("").font(.caption)
+        Picker("Use", selection: Binding(get: { row.action }, set: { model.setAction($0, forEntry: row.id) })) {
+            ForEach(row.choices, id: \.self) { Text($0.title(for: row.status)).tag($0) }
         }
+        .pickerStyle(.menu)
+        .labelsHidden()
     }
 }
 
@@ -361,6 +444,17 @@ private extension SyncReviewDraft.EntryStatus {
     }
 }
 
+private extension ReviewConfirmation {
+    func question(_ name: String) -> String {
+        switch self {
+        case .deleteFromICloud: "Delete \(name) from iCloud?"
+        case .keepDeleted: "Delete \(name) from Google too?"
+        case .deleteFromGoogle: "Delete \(name) from Google?"
+        case .deleteFromBoth: "Delete \(name) from iCloud and Google?"
+        }
+    }
+}
+
 private extension SyncReviewDraft.EntryAction {
     func title(for status: SyncReviewDraft.EntryStatus) -> String {
         switch self {
@@ -372,6 +466,7 @@ private extension SyncReviewDraft.EntryAction {
         case .keepInICloud: "Keep, and put back in Google"
         case .useICloud: "Use iCloud's"
         case .useGoogle: "Use Google's"
+        case .removeFromBoth: "Remove from both"
         }
     }
 }
@@ -524,6 +619,97 @@ struct KeepICloudSheet: View {
             HStack {
                 Spacer()
                 Button("Done") { model.showingBulk = false }.keyboardShortcut(.defaultAction)
+            }
+        }
+    }
+}
+
+// MARK: - photos for all
+
+/// One confirmation stating how many photo questions a bulk action settles and what it does, then what happened.
+struct PhotoBulkSheet: View {
+    @Bindable var model: ReviewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if model.isPhotoBulkWorking {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Settling photos…")
+                }
+            } else if let report = model.photoBulkReport, report.needsConfirmation == nil {
+                summary(report)
+            } else if let question = model.photoBulkReport?.needsConfirmation {
+                limit(question)
+            } else {
+                confirmation
+            }
+        }
+        .padding(20)
+        .frame(width: 560)
+    }
+
+    private var side: PhotoBulkSide { model.photoBulkSide ?? .icloud }
+
+    private var confirmation: some View {
+        let count = model.photoItems.count
+        return VStack(alignment: .leading, spacing: 12) {
+            Text("Keep \(side.name) photos for \(ContactText.count(count, "contact"))?").font(.title2)
+            Text(side == .icloud
+                ? "For every contact with a photo question, iCloud's photo is kept and copied to Google. Where iCloud has no photo, Google's photo is removed too. Where an iCloud photo from their Google profile was removed, their profile photo stops being used for that contact."
+                : "For every contact with a photo question, Google's photo is kept and copied to iCloud. Where Google has no photo, iCloud's photo is removed too.")
+                .fixedSize(horizontal: false, vertical: true)
+            Text(side == .icloud
+                ? "A Google photo that is replaced or removed is saved to the photo history first (30 days). Google takes at most 60 photo changes at a time; the rest stay in the list."
+                : "A backup is taken before iCloud's photos change. Google takes no change from this.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Spacer()
+                Button("Cancel", role: .cancel) { model.photoBulkSide = nil }
+                Button("Keep \(side.name) photos for all \(count)") { Task { await model.runPhotoBulk(confirmed: false) } }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(model.block(for: .photo) != nil || count == 0)
+            }
+        }
+    }
+
+    private func limit(_ question: String) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("That is a lot of photos").font(.title2)
+            Label("\(question). Nothing has been changed yet.", systemImage: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Spacer()
+                Button("Cancel", role: .cancel) { model.photoBulkSide = nil }
+                Button("Go ahead") { Task { await model.runPhotoBulk(confirmed: true) } }
+                    .buttonStyle(.borderedProminent)
+            }
+        }
+    }
+
+    private func summary(_ report: BulkPhotoReport) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Done").font(.title2)
+            Label("Kept \(side.name)'s photo state for \(ContactText.count(report.applied.count, "contact")).", systemImage: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+            if !report.carried.isEmpty {
+                Label("\(ContactText.count(report.carried.count, "contact")) left in the list: Google takes at most 60 photo changes at a time. Run this again for the rest.", systemImage: "hourglass")
+                    .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            if !report.changedSinceShown.isEmpty || !report.skipped.isEmpty {
+                Label("\(ContactText.count(report.changedSinceShown.count + report.skipped.count, "item")) left in the list: they changed since you looked, or are gone. Look at them one by one.", systemImage: "exclamationmark.circle")
+                    .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            ForEach(report.failed, id: \.itemID) { failure in
+                Label("\(failure.name): \(failure.reason)", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            ForEach(report.warnings, id: \.self) { warning in
+                Label(warning, systemImage: "exclamationmark.circle").foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            HStack {
+                Spacer()
+                Button("Done") { model.photoBulkSide = nil }.keyboardShortcut(.defaultAction)
             }
         }
     }

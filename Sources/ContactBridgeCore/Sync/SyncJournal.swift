@@ -487,7 +487,7 @@ struct SyncJournalRecovery: Sendable {
         try links.add(newLinks, at: at)
         try links.remove(icloudIDs: droppedIDs)
         try state.update { state in
-            for (id, baseline) in baselines { state.baselines[id] = baseline }
+            for (id, baseline) in baselines { state.store(baseline, for: id) }
             for id in droppedIDs { state.baselines[id] = nil }
         }
         // The history line is a convenience: the write is already recorded, so a failure here does not undo it.

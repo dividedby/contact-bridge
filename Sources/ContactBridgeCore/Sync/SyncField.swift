@@ -1,7 +1,7 @@
 /// The field groups Phase 2 sync keeps equal between an iCloud contact and its Google counterpart, each paired with the
 /// People API field it travels in. A group is the unit of change detection, review and `updatePersonFields` masks.
 ///
-/// Never synced: photos, relations, instant messaging, social profiles, prefix/suffix and group memberships.
+/// Not field groups: photos (synced on their own, see `PhotoBaseline`). Never synced: relations, instant messaging, social profiles, prefix/suffix and group memberships.
 public enum SyncField: String, Sendable, Hashable, Codable, CaseIterable {
     /// Given, middle and family name.
     case name

@@ -153,7 +153,35 @@ enum VCardWriter {
         return "\(name):\(String(format: "%04d", year))-\(monthDay)"
     }
 
-    private static func imageType(_ data: Data) -> String {
+    /// `vcards` with a PHOTO line added to the n-th card for each non-nil `photos[n]`, before its END:VCARD. Cards that
+    /// already have a photo are left as they are.
+    static func addingPhotos(_ photos: [Data?], to vcards: Data) -> Data {
+        guard photos.contains(where: { $0 != nil }) else { return vcards }
+        let text = String(decoding: vcards, as: UTF8.self)
+        let newline = text.contains("\r\n") ? "\r\n" : "\n"
+        var cards = text.components(separatedBy: "END:VCARD")
+        for (index, photo) in photos.enumerated() where index < cards.count - 1 {
+            guard let photo, !cards[index].contains("\(newline)PHOTO") else { continue }
+            cards[index] += photoLine(photo, newline: newline) + newline
+        }
+        return Data(cards.joined(separator: "END:VCARD").utf8)
+    }
+
+    /// A vCard 3.0 PHOTO property, folded at 75 octets with a leading space on each continuation line.
+    static func photoLine(_ photo: Data, newline: String = "\r\n") -> String {
+        let line = "PHOTO;ENCODING=b;TYPE=\(imageType(photo)):\(photo.base64EncodedString())"
+        var folded: [Substring] = []
+        var rest = Substring(line)
+        folded.append(rest.prefix(75))
+        rest = rest.dropFirst(75)
+        while !rest.isEmpty {
+            folded.append(rest.prefix(74))
+            rest = rest.dropFirst(74)
+        }
+        return folded.joined(separator: newline + " ")
+    }
+
+    static func imageType(_ data: Data) -> String {
         if data.starts(with: [0x89, 0x50, 0x4E, 0x47]) { return "PNG" }
         if data.starts(with: [0x47, 0x49, 0x46]) { return "GIF" }
         return "JPEG"

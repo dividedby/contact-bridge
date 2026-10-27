@@ -142,6 +142,10 @@ final class CountingGoogle: GoogleContactsClient, Sendable {
     func addMembers(groupResourceName: String, memberResourceNames: [String]) async throws {
         try await inner.addMembers(groupResourceName: groupResourceName, memberResourceNames: memberResourceNames)
     }
+    func updateContactPhoto(resourceName: String, photoBytes: Data) async throws -> GooglePerson {
+        try await inner.updateContactPhoto(resourceName: resourceName, photoBytes: photoBytes)
+    }
+    func deleteContactPhoto(resourceName: String) async throws -> GooglePerson { try await inner.deleteContactPhoto(resourceName: resourceName) }
 }
 
 /// Forwards to another state store and can make every write fail, to test what the engine does when saving does not work.
@@ -192,7 +196,7 @@ final class EngineRig: @unchecked Sendable {
 
     init(
         _ base: ExecutorRig, planner: SyncPlanner = SyncPlanner(), schedule: SyncSchedule = SyncSchedule(),
-        acquireLock: (@Sendable () throws -> any SyncLockHolding)? = nil
+        acquireLock: (@Sendable () throws -> any SyncLockHolding)? = nil, photos: SyncPhotoSupport? = nil
     ) {
         self.base = base
         flakyState = FlakyStateStore(base.stateStore)
@@ -211,7 +215,7 @@ final class EngineRig: @unchecked Sendable {
                 return .ready(SyncEnvironment(store: store, notes: notes, google: google, accountEmail: accountEmail.value.withLock { $0 }))
             },
             links: base.linkStore, state: flakyState, reviews: base.reviews, journal: base.journal, history: base.history,
-            backups: base.backups, gate: gate, clock: clock, schedule: schedule, planner: planner, acquireLock: acquireLock
+            backups: base.backups, gate: gate, clock: clock, schedule: schedule, planner: planner, acquireLock: acquireLock, photos: photos
         )
     }
 

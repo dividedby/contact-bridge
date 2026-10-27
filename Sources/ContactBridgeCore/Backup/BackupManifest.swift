@@ -6,11 +6,19 @@ public struct BackupManifest: Sendable, Hashable, Codable {
         public var icloud: Int?
         public var googleConnections: Int?
         public var googleOther: Int?
+        /// iCloud contacts whose photo is in `icloud.vcf`. Nil in backups made before photos were included.
+        public var icloudPhotos: Int?
+        /// Google contact photos saved under `google-photos/`. Nil when none were downloaded (no Google, or older backups).
+        public var googlePhotos: Int?
 
-        public init(icloud: Int? = nil, googleConnections: Int? = nil, googleOther: Int? = nil) {
+        public init(
+            icloud: Int? = nil, googleConnections: Int? = nil, googleOther: Int? = nil, icloudPhotos: Int? = nil, googlePhotos: Int? = nil
+        ) {
             self.icloud = icloud
             self.googleConnections = googleConnections
             self.googleOther = googleOther
+            self.icloudPhotos = icloudPhotos
+            self.googlePhotos = googlePhotos
         }
     }
 
