@@ -124,6 +124,25 @@ public struct ContactsAppPhotoWriter: ContactsAppPhotoWriting {
             throw ContactsAppUnavailable(reason: "it is not running and could not be opened (\(error.localizedDescription))")
         }
         openedContacts.value.withLock { $0 = true }
+        try await waitUntilAnswering()
+    }
+
+    /// Times `retryDelay` that a just-opened Contacts is given to answer.
+    static let launchPolls = 60
+
+    /// Contacts answers scripts only some time after it opens (16 to 33 seconds seen); until then they fail with -600.
+    private func waitUntilAnswering() async throws {
+        for _ in 0..<Self.launchPolls {
+            do {
+                _ = try await runner.run(source: ContactsAppScript.wakeScript)
+                return
+            } catch let error as AppleScriptError where error.number == AppleScriptError.appNotRunning {
+                try await Task.sleep(for: retryDelay)
+            } catch let error as AppleScriptError where Self.unreachable.keys.contains(error.number) {
+                throw ContactsAppUnavailable(reason: Self.unreachable[error.number] ?? error.message)
+            }
+        }
+        throw ContactsAppUnavailable(reason: "it was opened but did not answer")
     }
 
     /// AppleScript errors that mean Contacts was not reached, rather than that it refused the photo.

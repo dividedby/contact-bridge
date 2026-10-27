@@ -199,12 +199,15 @@ struct PhotoContactsAppFallbackTests {
     @Test("Contacts is opened hidden only when it is not running, and quit afterwards only if the writer opened it")
     func writerOpensAndQuits() async throws {
         let closed = FakeLauncher(running: false)
-        let writer = ContactsAppPhotoWriter(runner: FakeAppleScriptRunner(responses: [awake, done, awake, done]), launcher: closed, retryDelay: .zero)
+        let notYet: Result<NSAppleEventDescriptor, AppleScriptError> = .failure(AppleScriptError(number: AppleScriptError.appNotRunning, message: ""))
+        // Opened, then not answering twice before it does; then the two writes.
+        let runner = FakeAppleScriptRunner(responses: [notYet, notYet, awake, awake, done, awake, done])
+        let writer = ContactsAppPhotoWriter(runner: runner, launcher: closed, retryDelay: .zero)
         try await writer.setPhoto(one, forID: "ABC-1:ABPerson")
         try await writer.setPhoto(nil, forID: "ABC-1:ABPerson")
         await writer.finish()
         await writer.finish()
-        #expect(closed.calls == ["open", "quit"])
+        #expect(closed.calls == ["open", "quit"] && runner.calls.count == 7)
 
         let open = FakeLauncher(running: true)
         let user = ContactsAppPhotoWriter(runner: FakeAppleScriptRunner(responses: [awake, done]), launcher: open, retryDelay: .zero)
@@ -221,6 +224,12 @@ struct PhotoContactsAppFallbackTests {
                 .setPhoto(one, forID: "ABC-1:ABPerson")
         }
         #expect(idle.calls.isEmpty)
+
+        let neverAnswers = FakeAppleScriptRunner(responses: Array(repeating: .failure(AppleScriptError(number: -600, message: "")), count: 60))
+        await #expect(throws: ContactsAppUnavailable(reason: "it was opened but did not answer")) {
+            try await ContactsAppPhotoWriter(runner: neverAnswers, launcher: FakeLauncher(running: false), retryDelay: .zero)
+                .setPhoto(one, forID: "ABC-1:ABPerson")
+        }
 
         let notRunning = AppleScriptError(number: AppleScriptError.appNotRunning, message: "")
         let silent = FakeAppleScriptRunner(responses: [.failure(notRunning), .failure(notRunning)])
