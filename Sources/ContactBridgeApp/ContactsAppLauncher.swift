@@ -5,8 +5,14 @@ import ContactBridgeCore
 struct ContactsAppLauncher: ContactsAppLaunching {
     private static let bundleID = "com.apple.AddressBook"
 
+    /// The running Contacts processes. Launch Services can keep listing one that is gone (pid -1, not terminated, seen
+    /// after Contacts was killed); it does not count.
+    static func running() -> [NSRunningApplication] {
+        NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).filter { $0.processIdentifier > 0 && !$0.isTerminated }
+    }
+
     func isRunning() async -> Bool {
-        await MainActor.run { !NSRunningApplication.runningApplications(withBundleIdentifier: Self.bundleID).isEmpty }
+        await MainActor.run { !Self.running().isEmpty }
     }
 
     func openHidden() async throws {
@@ -22,7 +28,7 @@ struct ContactsAppLauncher: ContactsAppLaunching {
 
     func quitIfStillHidden() async {
         await MainActor.run {
-            for app in NSRunningApplication.runningApplications(withBundleIdentifier: Self.bundleID) where app.isHidden {
+            for app in Self.running() where app.isHidden {
                 app.terminate()
             }
         }

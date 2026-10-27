@@ -78,7 +78,7 @@ struct AppDependencies {
             ),
             writeGate: WriteGate(),
             acquireSyncLock: { try SyncProcessLock.acquire() },
-            contactsAppRunning: { !NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.AddressBook").isEmpty },
+            contactsAppRunning: { !ContactsAppLauncher.running().isEmpty },
             backupDirectory: BackupWriter.defaultDirectory,
             defaults: .standard,
             loginItem: SMAppServiceLoginItem(),
