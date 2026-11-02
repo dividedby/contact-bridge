@@ -1,9 +1,11 @@
 import Testing
+
 @testable import ContactBridgeCore
 
 struct ContainerSelectionTests {
     private func container(
-        _ id: String, _ name: String, _ kind: ContactContainer.Kind = .cardDAV, isDefault: Bool = false
+        _ id: String, _ name: String, _ kind: ContactContainer.Kind = .cardDAV,
+        isDefault: Bool = false
     ) -> ContactContainer {
         ContactContainer(id: id, name: name, kind: kind, isDefault: isDefault)
     }
@@ -11,12 +13,17 @@ struct ContainerSelectionTests {
     @Test("A single iCloud CardDAV container is selected")
     func single() {
         let icloud = container("1", "iCloud")
-        #expect(ContainerSelection.choose(from: [icloud, container("2", "On My Mac", .local)]) == .selected(icloud))
+        #expect(
+            ContainerSelection.choose(from: [icloud, container("2", "On My Mac", .local)])
+                == .selected(icloud))
     }
 
     @Test("Exchange, local and unassigned containers are never candidates")
     func nonCardDAV() {
-        #expect(ContainerSelection.choose(from: [container("1", "Work", .exchange), container("2", "Mac", .local)]) == .none)
+        #expect(
+            ContainerSelection.choose(from: [
+                container("1", "Work", .exchange), container("2", "Mac", .local),
+            ]) == .none)
         #expect(ContainerSelection.choose(from: []) == .none)
     }
 
@@ -26,7 +33,9 @@ struct ContainerSelectionTests {
         #expect(ContainerSelection.choose(from: [gmail]) == .needsUserChoice([gmail]))
     }
 
-    @Test("A container that is not named iCloud is never auto-selected, even alone", arguments: ["Personal", "Fastmail", "Work"])
+    @Test(
+        "A container that is not named iCloud is never auto-selected, even alone",
+        arguments: ["Personal", "Fastmail", "Work"])
     func loneNonICloud(name: String) {
         let only = container("1", name, isDefault: true)
         #expect(ContainerSelection.choose(from: [only]) == .needsUserChoice([only]))
@@ -59,8 +68,9 @@ struct ContainerSelectionTests {
         let first = container("1", "iCloud")
         let second = container("2", "iCloud", isDefault: true)
         #expect(ContainerSelection.choose(from: [first, second]) == .selected(second))
-        #expect(ContainerSelection.choose(from: [first, container("3", "iCloud")]) ==
-            .needsUserChoice([first, container("3", "iCloud")]))
+        #expect(
+            ContainerSelection.choose(from: [first, container("3", "iCloud")])
+                == .needsUserChoice([first, container("3", "iCloud")]))
     }
 
     @Test("Without iCloud the user chooses among CardDAV containers, Google last-resort only")
@@ -69,12 +79,18 @@ struct ContainerSelectionTests {
         let work = container("3", "Work CardDAV", isDefault: true)
         let gmail = container("4", "Gmail")
         let local = container("5", "On My Mac", .local)
-        #expect(ContainerSelection.choose(from: [gmail, fastmail, local, work]) == .needsUserChoice([fastmail, work]))
+        #expect(
+            ContainerSelection.choose(from: [gmail, fastmail, local, work])
+                == .needsUserChoice([fastmail, work]))
     }
 
     @Test("Google detection ignores case")
     func googleCase() {
-        #expect(ContactContainer(id: "1", name: "My GMAIL account", kind: .cardDAV, isDefault: false).looksLikeGoogle)
-        #expect(!ContactContainer(id: "1", name: "iCloud", kind: .cardDAV, isDefault: false).looksLikeGoogle)
+        #expect(
+            ContactContainer(id: "1", name: "My GMAIL account", kind: .cardDAV, isDefault: false)
+                .looksLikeGoogle)
+        #expect(
+            !ContactContainer(id: "1", name: "iCloud", kind: .cardDAV, isDefault: false)
+                .looksLikeGoogle)
     }
 }

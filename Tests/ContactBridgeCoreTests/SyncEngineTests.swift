@@ -1,13 +1,17 @@
 import Foundation
 import Synchronization
 import Testing
+
 @testable import ContactBridgeCore
 
 struct SyncEngineTests {
     /// Ann matches in Google; Bob exists only in iCloud. Not approved: a first-sync preview of one link and one create.
     private func firstSyncRig(schedule: SyncSchedule = SyncSchedule()) throws -> EngineRig {
         let world = SyncWorld(
-            icloud: [SyncFixtures.icloud("I1", "Ann", "Lee", phones: ["415-555-2671"]), SyncFixtures.icloud("I2", "Bob", "Stone", phones: ["415-555-0002"])],
+            icloud: [
+                SyncFixtures.icloud("I1", "Ann", "Lee", phones: ["415-555-2671"]),
+                SyncFixtures.icloud("I2", "Bob", "Stone", phones: ["415-555-0002"]),
+            ],
             google: [SyncFixtures.person("Ann", "Lee", phones: ["415-555-2671"])]
         )
         return EngineRig(try ExecutorRig(world), schedule: schedule)
@@ -20,12 +24,16 @@ struct SyncEngineTests {
 
     // MARK: first sync
 
-    @Test("Before the first sync is approved nothing runs by itself, and the preview writes nothing anywhere")
+    @Test(
+        "Before the first sync is approved nothing runs by itself, and the preview writes nothing anywhere"
+    )
     func previewOnly() async throws {
         let rig = try firstSyncRig()
         defer { rig.cleanUp() }
         await rig.start()
-        for event in [SyncEvent.storeChanged, .timer, .wake, .networkBack, .settingsChanged] { await rig.engine.trigger(event) }
+        for event in [SyncEvent.storeChanged, .timer, .wake, .networkBack, .settingsChanged] {
+            await rig.engine.trigger(event)
+        }
         await rig.advance(3600)
         let before = await rig.snapshot
         #expect(rig.google.listings == 0 && before.preview == nil)
@@ -34,37 +42,51 @@ struct SyncEngineTests {
         let snapshot = await rig.snapshot
         let preview = try #require(snapshot.preview)
         #expect(snapshot.status == .idle && !snapshot.firstSyncApproved)
-        #expect(preview.links.map(\.name) == ["Ann Lee"] && preview.creates.map(\.name) == ["Bob Stone"] && preview.counts.review == 0)
+        #expect(
+            preview.links.map(\.name) == ["Ann Lee"] && preview.creates.map(\.name) == ["Bob Stone"]
+                && preview.counts.review == 0)
         #expect(preview.backups.first?.contains("backup") == true)
 
         let people = await rig.base.world.google.allPeople.count
         #expect(people == 1 && rig.base.backupFolders() == 0)
-        #expect(try rig.base.links.isEmpty && rig.base.reviews.load().isEmpty && rig.base.journal.load().entries.isEmpty)
+        #expect(
+            try rig.base.links.isEmpty && rig.base.reviews.load().isEmpty
+                && rig.base.journal.load().entries.isEmpty)
         let state = try rig.state
         #expect(!state.firstSyncApproved && state.baselines.isEmpty && state.googleSyncToken == nil)
         await rig.engine.stop()
     }
 
-    @Test("The preview names the contacts whose old links will be forgotten, and leaves out links that are re-matched instead")
+    @Test(
+        "The preview names the contacts whose old links will be forgotten, and leaves out links that are re-matched instead"
+    )
     func previewNamesForgottenLinks() async throws {
         let world = SyncWorld(
             icloud: [SyncFixtures.icloud("S", "Ann", "Lee", phones: ["415-555-2671"])],
             google: [SyncFixtures.person("Ann", "Lee", phones: ["415-555-2671"])]
         )
-        world.links.links["GONE1"] = LinkEntry(googleResourceName: "people/c1", linkedAt: world.clock, displayName: "Ann Lee (merged)")
-        world.links.links["GONE2"] = LinkEntry(googleResourceName: "people/c99", linkedAt: world.clock, displayName: "Zed Quinn")
+        world.links.links["GONE1"] = LinkEntry(
+            googleResourceName: "people/c1", linkedAt: world.clock, displayName: "Ann Lee (merged)")
+        world.links.links["GONE2"] = LinkEntry(
+            googleResourceName: "people/c99", linkedAt: world.clock, displayName: "Zed Quinn")
         let rig = EngineRig(try ExecutorRig(world))
         defer { rig.cleanUp() }
         await rig.start()
         await rig.engine.refreshPreview()
 
         let preview = try #require(await rig.snapshot.preview)
-        #expect(preview.forgottenLinks.map(\.name) == ["Zed Quinn"] && preview.forgottenLinks.first?.id == "GONE2")
-        #expect(preview.links.map(\.name) == ["Ann Lee"] && preview.creates.isEmpty, "the survivor takes over Ann's Google contact")
+        #expect(
+            preview.forgottenLinks.map(\.name) == ["Zed Quinn"]
+                && preview.forgottenLinks.first?.id == "GONE2")
+        #expect(
+            preview.links.map(\.name) == ["Ann Lee"] && preview.creates.isEmpty,
+            "the survivor takes over Ann's Google contact")
         await rig.engine.stop()
     }
 
-    @Test("Approving runs the previewed plan once: the link is made, Bob is created, a second approval does nothing")
+    @Test(
+        "Approving runs the previewed plan once: the link is made, Bob is created, a second approval does nothing"
+    )
     func approveRunsOnce() async throws {
         let rig = try firstSyncRig()
         defer { rig.cleanUp() }
@@ -75,7 +97,9 @@ struct SyncEngineTests {
         #expect(await rig.engine.approveFirstSync() == .started)
         let snapshot = await rig.snapshot
         #expect(snapshot.firstSyncApproved && snapshot.preview == nil && snapshot.status == .idle)
-        #expect(snapshot.lastRun?.linksAdded == 1 && snapshot.lastRun?.created == 1 && snapshot.lastRun?.text == "Linked 1, created 1.")
+        #expect(
+            snapshot.lastRun?.linksAdded == 1 && snapshot.lastRun?.created == 1
+                && snapshot.lastRun?.text == "Linked 1, created 1.")
         let people = await rig.base.world.google.allPeople
         #expect(people.count == 2 && people.filter { $0.contactBridgeSourceID == "I2" }.count == 1)
         #expect(try rig.state.firstSyncApproved && rig.base.links.keys.sorted() == ["I1", "I2"])
@@ -125,7 +149,8 @@ struct SyncEngineTests {
         await rig.engine.stop()
     }
 
-    @Test("If the plan changed since the preview, approving shows the new preview instead of running")
+    @Test(
+        "If the plan changed since the preview, approving shows the new preview instead of running")
     func approveAfterPreviewChanged() async throws {
         let rig = try firstSyncRig()
         defer { rig.cleanUp() }
@@ -147,7 +172,9 @@ struct SyncEngineTests {
 
     // MARK: scheduling
 
-    @Test("An approved engine runs at start, and triggers are debounced into one run ten seconds after the last")
+    @Test(
+        "An approved engine runs at start, and triggers are debounced into one run ten seconds after the last"
+    )
     func debounce() async throws {
         let rig = try await EngineRig.linked()
         defer { rig.cleanUp() }
@@ -195,7 +222,7 @@ struct SyncEngineTests {
         await rig.advance(899)
         #expect(rig.google.listings == first)
         await rig.advance(1)
-        await rig.clock.waitForSleepers(2) // the timer again, and the debounce it asked for
+        await rig.clock.waitForSleepers(2)  // the timer again, and the debounce it asked for
         #expect(rig.google.listings == first)
         await rig.advance(10)
         #expect(rig.google.listings == first + 1)
@@ -246,7 +273,9 @@ struct SyncEngineTests {
 
     // MARK: back-off
 
-    @Test("A run that Google stopped (rate limit) is not retried by triggers until a minute has passed")
+    @Test(
+        "A run that Google stopped (rate limit) is not retried by triggers until a minute has passed"
+    )
     func backoffAfterHalt() async throws {
         let rig = try await EngineRig.linked()
         defer { rig.cleanUp() }
@@ -268,7 +297,9 @@ struct SyncEngineTests {
         await rig.advance(11)
         #expect(rig.google.listings == after + 1)
         snapshot = await rig.snapshot
-        #expect(snapshot.lastRun?.halted == nil && snapshot.lastRun?.updated == 1 && snapshot.nextAttemptAt == nil)
+        #expect(
+            snapshot.lastRun?.halted == nil && snapshot.lastRun?.updated == 1
+                && snapshot.nextAttemptAt == nil)
         await rig.engine.stop()
     }
 
@@ -300,11 +331,14 @@ struct SyncEngineTests {
         rig.google.failListings(with: nil)
         await rig.engine.syncNow()
         snapshot = await rig.snapshot
-        #expect(snapshot.status == .idle && snapshot.nextAttemptAt == nil && snapshot.lastRunAt != nil)
+        #expect(
+            snapshot.status == .idle && snapshot.nextAttemptAt == nil && snapshot.lastRunAt != nil)
         await rig.engine.stop()
     }
 
-    @Test("Once an account is saved, a run that cannot tell which account is signed in fails and retries; it is not an account change")
+    @Test(
+        "Once an account is saved, a run that cannot tell which account is signed in fails and retries; it is not an account change"
+    )
     func unknownEmailFailsTheRun() async throws {
         let rig = try await EngineRig.linked()
         defer { rig.cleanUp() }
@@ -336,12 +370,17 @@ struct SyncEngineTests {
 
     // MARK: pause and resume
 
-    @Test("Saved review items are listed at launch, even when sync stays paused and no run completes")
+    @Test(
+        "Saved review items are listed at launch, even when sync stays paused and no run completes")
     func savedReviewsListedAtLaunchWhilePaused() async throws {
         let rig = try await EngineRig.linked()
         defer { rig.cleanUp() }
         try rig.base.reviews.add(
-            [ReviewCandidate(kind: .googleEdited, icloudID: "I1", resourceName: "people/c1", googleEtag: "e1", fields: [.nickname])], at: Date()
+            [
+                ReviewCandidate(
+                    kind: .googleEdited, icloudID: "I1", resourceName: "people/c1",
+                    googleEtag: "e1", fields: [.nickname])
+            ], at: Date()
         )
         try rig.base.stateStore.update { $0.pause = .user }
         await rig.start()
@@ -359,9 +398,15 @@ struct SyncEngineTests {
         let rig = try await EngineRig.linked(planner: SyncPlanner(limits: limits))
         defer { rig.cleanUp() }
         try rig.base.reviews.add(
-            [ReviewCandidate(kind: .googleEdited, icloudID: "I4", resourceName: "people/c4", googleEtag: "e4", fields: [.nickname])], at: Date()
+            [
+                ReviewCandidate(
+                    kind: .googleEdited, icloudID: "I4", resourceName: "people/c4",
+                    googleEtag: "e4", fields: [.nickname])
+            ], at: Date()
         )
-        for id in ["I1", "I2", "I3"] { try await rig.base.world.store.delete(ids: [id], backup: .forTesting()) }
+        for id in ["I1", "I2", "I3"] {
+            try await rig.base.world.store.delete(ids: [id], backup: .forTesting())
+        }
         await rig.start()
         await rig.engine.waitForRuns(1)
         let snapshot = await rig.snapshot
@@ -371,19 +416,28 @@ struct SyncEngineTests {
         await rig.engine.stop()
     }
 
-    private func firstSnapshot(of rig: EngineRig, where condition: @escaping @Sendable (SyncSnapshot) -> Bool) async -> SyncSnapshot? {
+    private func firstSnapshot(
+        of rig: EngineRig, where condition: @escaping @Sendable (SyncSnapshot) -> Bool
+    ) async -> SyncSnapshot? {
         let stream = await rig.engine.snapshots()
         return await withTaskGroup(of: SyncSnapshot?.self) { group in
-            group.addTask { for await snapshot in stream where condition(snapshot) { return snapshot }; return nil }
-            group.addTask { try? await Task.sleep(for: .seconds(5)); return nil }
+            group.addTask {
+                for await snapshot in stream where condition(snapshot) { return snapshot }
+                return nil
+            }
+            group.addTask {
+                try? await Task.sleep(for: .seconds(5))
+                return nil
+            }
             let first = await group.next() ?? nil
             group.cancelAll()
             return first
         }
     }
 
-
-    @Test("Pause is the kill switch: saved, no trigger or Sync now reaches Google, and it holds in a new engine")
+    @Test(
+        "Pause is the kill switch: saved, no trigger or Sync now reaches Google, and it holds in a new engine"
+    )
     func pauseStopsRuns() async throws {
         let rig = try await EngineRig.linked()
         defer { rig.cleanUp() }
@@ -409,7 +463,9 @@ struct SyncEngineTests {
         await next.engine.stop()
     }
 
-    @Test("If the pause cannot be saved it still holds, Sync now included, and the screen is told it will not survive a relaunch")
+    @Test(
+        "If the pause cannot be saved it still holds, Sync now included, and the screen is told it will not survive a relaunch"
+    )
     func pauseSaveFailure() async throws {
         let rig = try await EngineRig.linked()
         defer { rig.cleanUp() }
@@ -438,7 +494,9 @@ struct SyncEngineTests {
         await rig.engine.stop()
     }
 
-    @Test("A pause that saves clears an earlier warning; a resume that cannot be saved stays paused and says so")
+    @Test(
+        "A pause that saves clears an earlier warning; a resume that cannot be saved stays paused and says so"
+    )
     func resumeSaveFailure() async throws {
         let rig = try await EngineRig.linked()
         defer { rig.cleanUp() }
@@ -458,7 +516,9 @@ struct SyncEngineTests {
         rig.flakyState.failWrites(false)
         await rig.engine.resume()
         let after = await rig.snapshot
-        #expect(try after.pauseSaveWarning == nil && rig.state.pause == nil && rig.google.listings == first + 1)
+        #expect(
+            try after.pauseSaveWarning == nil && rig.state.pause == nil
+                && rig.google.listings == first + 1)
         await rig.engine.stop()
     }
 
@@ -472,11 +532,18 @@ struct SyncEngineTests {
         // The run is parked at the write gate, so it is "in flight" without touching Google.
         let (release, hold) = AsyncStream<Void>.makeStream()
         let (entered, enteredSignal) = AsyncStream<Void>.makeStream()
-        let holder = Task { try await rig.gate.withLock { enteredSignal.yield(); for await _ in release { break } } }
+        let holder = Task {
+            try await rig.gate.withLock {
+                enteredSignal.yield()
+                for await _ in release { break }
+            }
+        }
         for await _ in entered { break }
         let updates = await rig.engine.snapshots()
         let running = Task { await rig.engine.syncNow() }
-        for await update in updates where update.status == .running(.waitingForOtherChanges) { break }
+        for await update in updates where update.status == .running(.waitingForOtherChanges) {
+            break
+        }
 
         await rig.engine.pause()
         await running.value
@@ -497,13 +564,17 @@ struct SyncEngineTests {
 
     // MARK: confirmation
 
-    @Test("A run that wants to delete too much waits for the user; Confirm lets it through, and nothing else does")
+    @Test(
+        "A run that wants to delete too much waits for the user; Confirm lets it through, and nothing else does"
+    )
     func confirmPath() async throws {
         var limits = SyncPlanner.Limits()
         limits.minDeletes = 1
         let rig = try await EngineRig.linked(planner: SyncPlanner(limits: limits))
         defer { rig.cleanUp() }
-        for id in ["I1", "I2", "I3"] { try await rig.base.world.store.delete(ids: [id], backup: .forTesting()) }
+        for id in ["I1", "I2", "I3"] {
+            try await rig.base.world.store.delete(ids: [id], backup: .forTesting())
+        }
 
         await rig.start()
         await rig.engine.waitForRuns(1)
@@ -518,12 +589,16 @@ struct SyncEngineTests {
 
         await rig.engine.confirmAndContinue()
         let snapshot = await rig.snapshot
-        #expect(snapshot.status == .idle && snapshot.confirmationSummary == nil && snapshot.lastRun?.deleted == 3)
+        #expect(
+            snapshot.status == .idle && snapshot.confirmationSummary == nil
+                && snapshot.lastRun?.deleted == 3)
         #expect(await rig.base.world.google.allPeople.count == 3)
         await rig.engine.stop()
     }
 
-    @Test("A pause about forgetting links carries the contacts' names beside the unchanged, name-free summary; Confirm and Keep paused clear them")
+    @Test(
+        "A pause about forgetting links carries the contacts' names beside the unchanged, name-free summary; Confirm and Keep paused clear them"
+    )
     func forgetLinksPauseCarriesNames() async throws {
         var limits = SyncPlanner.Limits()
         limits.minDeletes = 1
@@ -538,9 +613,14 @@ struct SyncEngineTests {
         await rig.engine.waitForRuns(1)
         var snapshot = await rig.snapshot
         let summary = try #require(snapshot.confirmationSummary)
-        #expect(summary.contains("forget 3 of 6 links to contacts gone from both sides") && !summary.contains("First1"))
-        #expect(snapshot.pauseDetails.map(\.name) == ["First1 Last1", "First2 Last2", "First3 Last3"])
-        #expect(snapshot.pauseDetails.map(\.id) == ["I1", "I2", "I3"] && snapshot.pauseDetails.allSatisfy { $0.detail == "gone from iCloud and Google" })
+        #expect(
+            summary.contains("forget 3 of 6 links to contacts gone from both sides")
+                && !summary.contains("First1"))
+        #expect(
+            snapshot.pauseDetails.map(\.name) == ["First1 Last1", "First2 Last2", "First3 Last3"])
+        #expect(
+            snapshot.pauseDetails.map(\.id) == ["I1", "I2", "I3"]
+                && snapshot.pauseDetails.allSatisfy { $0.detail == "gone from iCloud and Google" })
         #expect(try rig.base.links.count == 6, "nothing is forgotten before the user confirms")
 
         await rig.engine.keepPaused()
@@ -551,7 +631,9 @@ struct SyncEngineTests {
 
         await rig.engine.confirmAndContinue()
         snapshot = await rig.snapshot
-        #expect(snapshot.status == .idle && snapshot.confirmationSummary == nil && snapshot.pauseDetails.isEmpty)
+        #expect(
+            snapshot.status == .idle && snapshot.confirmationSummary == nil
+                && snapshot.pauseDetails.isEmpty)
         #expect(try rig.base.links.keys.sorted() == ["I4", "I5", "I6"])
         await rig.engine.stop()
     }
@@ -570,7 +652,9 @@ struct SyncEngineTests {
         return rig
     }
 
-    @Test("Two guards in a row: confirming the first and then the second lets the run through, with no third question")
+    @Test(
+        "Two guards in a row: confirming the first and then the second lets the run through, with no third question"
+    )
     func stackedConfirmations() async throws {
         let rig = try await stackedGuardsRig()
         defer { rig.cleanUp() }
@@ -585,7 +669,9 @@ struct SyncEngineTests {
 
         await rig.engine.confirmAndContinue()
         let snapshot = await rig.snapshot
-        #expect(snapshot.status == .idle && snapshot.confirmationSummary == nil && snapshot.pauseDetails.isEmpty)
+        #expect(
+            snapshot.status == .idle && snapshot.confirmationSummary == nil
+                && snapshot.pauseDetails.isEmpty)
         #expect(try rig.base.links.keys.sorted() == ["I4", "I5", "I6"])
         await rig.engine.stop()
     }
@@ -600,7 +686,9 @@ struct SyncEngineTests {
 
         await rig.engine.keepPaused()
         await rig.engine.resume()
-        #expect(await rig.snapshot.confirmationSummary?.hasPrefix(SyncPlanner.googleMissingSummaryPrefix) == true)
+        #expect(
+            await rig.snapshot.confirmationSummary?.hasPrefix(
+                SyncPlanner.googleMissingSummaryPrefix) == true)
         #expect(try rig.base.links.count == 6)
         await rig.engine.stop()
     }
@@ -623,7 +711,9 @@ struct SyncEngineTests {
         await rig.engine.syncNow()
         let again = try #require(await rig.snapshot.confirmationSummary)
         #expect(again.hasPrefix(SyncPlanner.googleMissingSummaryPrefix) && again.contains("2 of 3"))
-        #expect(try rig.base.links.keys.sorted() == ["I4", "I5", "I6"], "nothing was forgotten without a new OK")
+        #expect(
+            try rig.base.links.keys.sorted() == ["I4", "I5", "I6"],
+            "nothing was forgotten without a new OK")
         await rig.engine.stop()
     }
 
@@ -633,7 +723,9 @@ struct SyncEngineTests {
         limits.minDeletes = 1
         let rig = try await EngineRig.linked(planner: SyncPlanner(limits: limits))
         defer { rig.cleanUp() }
-        for id in ["I1", "I2", "I3"] { try await rig.base.world.store.delete(ids: [id], backup: .forTesting()) }
+        for id in ["I1", "I2", "I3"] {
+            try await rig.base.world.store.delete(ids: [id], backup: .forTesting())
+        }
         await rig.start()
         await rig.engine.waitForRuns(1)
 
@@ -645,14 +737,18 @@ struct SyncEngineTests {
         await rig.engine.stop()
     }
 
-    @Test("When Google stops listing many linked contacts, Confirm re-plans with the deletions allowed: reviews, never deletes")
+    @Test(
+        "When Google stops listing many linked contacts, Confirm re-plans with the deletions allowed: reviews, never deletes"
+    )
     func confirmMassMissing() async throws {
         var limits = SyncPlanner.Limits()
         limits.minDeletes = 1
         let rig = try await EngineRig.linked(planner: SyncPlanner(limits: limits))
         defer { rig.cleanUp() }
         _ = await started(rig)
-        for name in ["people/c1", "people/c2", "people/c3"] { try await rig.base.world.google.deleteContact(resourceName: name) }
+        for name in ["people/c1", "people/c2", "people/c3"] {
+            try await rig.base.world.google.deleteContact(resourceName: name)
+        }
         await rig.base.world.google.expireSyncTokens()
 
         await rig.engine.syncNow()
@@ -663,7 +759,9 @@ struct SyncEngineTests {
         await rig.engine.confirmAndContinue()
         let snapshot = await rig.snapshot
         #expect(snapshot.status == .idle && snapshot.pendingReviews == 3)
-        #expect(snapshot.reviewItems.allSatisfy { $0.kind == .deletedInGoogle } && snapshot.reviewItems.map(\.name).contains("First1 Last1"))
+        #expect(
+            snapshot.reviewItems.allSatisfy { $0.kind == .deletedInGoogle }
+                && snapshot.reviewItems.map(\.name).contains("First1 Last1"))
         let kept = try await rig.base.world.store.fetchAll().count
         #expect(kept == 6, "nothing is deleted from iCloud")
         await rig.engine.stop()
@@ -671,7 +769,9 @@ struct SyncEngineTests {
 
     // MARK: recovery and the published counts
 
-    @Test("An interrupted run is settled before the next plan, so the contact it created is linked, not created twice")
+    @Test(
+        "An interrupted run is settled before the next plan, so the contact it created is linked, not created twice"
+    )
     func recoveryBeforePlan() async throws {
         let rig = try await EngineRig.linked(count: 2)
         defer { rig.cleanUp() }
@@ -684,16 +784,22 @@ struct SyncEngineTests {
             Issue.record("the crashed run should show as failed")
             return
         }
-        #expect(try rig.base.journal.load().entries.count == 1 && rig.base.links[carol.sourceIdentifier] == nil)
+        #expect(
+            try rig.base.journal.load().entries.count == 1
+                && rig.base.links[carol.sourceIdentifier] == nil)
 
         await rig.engine.syncNow()
         #expect(await rig.base.taggedPeople(carol.sourceIdentifier).count == 1)
-        #expect(try rig.base.journal.load().entries.isEmpty && rig.base.links[carol.sourceIdentifier]?.origin == .createdInGoogle)
+        #expect(
+            try rig.base.journal.load().entries.isEmpty
+                && rig.base.links[carol.sourceIdentifier]?.origin == .createdInGoogle)
         #expect(await rig.snapshot.status == .idle)
         await rig.engine.stop()
     }
 
-    @Test("Creates Google may or may not have applied are counted as waiting to confirm until a listing settles them")
+    @Test(
+        "Creates Google may or may not have applied are counted as waiting to confirm until a listing settles them"
+    )
     func unconfirmedCreates() async throws {
         let rig = try await EngineRig.linked(count: 2)
         defer { rig.cleanUp() }
@@ -717,7 +823,9 @@ struct SyncEngineTests {
         await rig.engine.stop()
     }
 
-    @Test("Unreadable notes show as waiting contacts and a notes warning; the new contact is not created without its note")
+    @Test(
+        "Unreadable notes show as waiting contacts and a notes warning; the new contact is not created without its note"
+    )
     func notesUnavailable() async throws {
         let rig = try await EngineRig.linked()
         defer { rig.cleanUp() }
@@ -728,7 +836,8 @@ struct SyncEngineTests {
 
         await rig.engine.syncNow()
         let snapshot = await rig.snapshot
-        #expect(snapshot.notesUnavailable && snapshot.waitingForNotes == 1 && snapshot.status == .idle)
+        #expect(
+            snapshot.notesUnavailable && snapshot.waitingForNotes == 1 && snapshot.status == .idle)
         #expect(await rig.base.world.google.allPeople.count == 6)
         await rig.engine.stop()
     }
@@ -745,11 +854,14 @@ struct SyncEngineTests {
         let snapshot = await rig.snapshot
         #expect(snapshot.pendingReviews == 1)
         let item = try #require(snapshot.reviewItems.first)
-        #expect(item.kind == .googleEdited && item.name == "First2 Last2" && item.fields == [.phones])
+        #expect(
+            item.kind == .googleEdited && item.name == "First2 Last2" && item.fields == [.phones])
         await rig.engine.stop()
     }
 
-    @Test("A preview refresh that fails keeps the old preview and reports the failure, so the screen can show both")
+    @Test(
+        "A preview refresh that fails keeps the old preview and reports the failure, so the screen can show both"
+    )
     func failedPreviewRefresh() async throws {
         let rig = try firstSyncRig()
         defer { rig.cleanUp() }
@@ -760,16 +872,22 @@ struct SyncEngineTests {
         rig.google.failListings(with: .other(status: 503, message: "Backend unavailable"))
         await rig.engine.refreshPreview()
         let snapshot = await rig.snapshot
-        guard case .failed(let message) = snapshot.status else { Issue.record("expected a failure, got \(snapshot.status)"); return }
+        guard case .failed(let message) = snapshot.status else {
+            Issue.record("expected a failure, got \(snapshot.status)")
+            return
+        }
         #expect(message.contains("503") || message.contains("Backend unavailable"))
         #expect(snapshot.preview == shown)
         await rig.engine.stop()
     }
 
-    @Test("Pairs the user chose to keep separate are handed to the planner: the iCloud contact is created, not offered as a match")
+    @Test(
+        "Pairs the user chose to keep separate are handed to the planner: the iCloud contact is created, not offered as a match"
+    )
     func keepSeparateHonoured() async throws {
         let world = SyncWorld(
-            icloud: [SyncFixtures.icloud("I1", "Ann", "Lee", phones: ["415-555-2671"])], google: [SyncFixtures.person("Ann", "Lee")]
+            icloud: [SyncFixtures.icloud("I1", "Ann", "Lee", phones: ["415-555-2671"])],
+            google: [SyncFixtures.person("Ann", "Lee")]
         )
         world.state.keepSeparate = ["I1|people/c1"]
         let rig = EngineRig(try ExecutorRig(world))
@@ -777,13 +895,17 @@ struct SyncEngineTests {
         await rig.start()
         await rig.engine.refreshPreview()
         let preview = try #require(await rig.snapshot.preview)
-        #expect(preview.creates.map(\.name) == ["Ann Lee"] && preview.reviews.map(\.kind) == [.newInGoogle])
+        #expect(
+            preview.creates.map(\.name) == ["Ann Lee"]
+                && preview.reviews.map(\.kind) == [.newInGoogle])
         await rig.engine.stop()
     }
 
     // MARK: not ready, lock
 
-    @Test("Without a usable environment the run says what is missing and touches nothing; fixing it lets the next trigger run")
+    @Test(
+        "Without a usable environment the run says what is missing and touches nothing; fixing it lets the next trigger run"
+    )
     func notReady() async throws {
         let rig = try await EngineRig.linked()
         defer { rig.cleanUp() }
@@ -791,7 +913,9 @@ struct SyncEngineTests {
         await rig.start()
         await rig.engine.waitForRuns(1)
         let waiting = await rig.snapshot
-        #expect(waiting.status == .notReady("Sign in with Google in Setup first.") && rig.google.listings == 0)
+        #expect(
+            waiting.status == .notReady("Sign in with Google in Setup first.")
+                && rig.google.listings == 0)
 
         rig.setNotReady(nil)
         await rig.engine.trigger(.settingsChanged)
@@ -801,9 +925,13 @@ struct SyncEngineTests {
         await rig.engine.stop()
     }
 
-    @Test("If another copy holds the lock, syncing is off in this one: no run, no preview, no approval")
+    @Test(
+        "If another copy holds the lock, syncing is off in this one: no run, no preview, no approval"
+    )
     func lockHeldElsewhere() async throws {
-        let rig = try await EngineRig.linked(acquireLock: { throw SyncLockError.heldByAnotherInstance })
+        let rig = try await EngineRig.linked(acquireLock: {
+            throw SyncLockError.heldByAnotherInstance
+        })
         defer { rig.cleanUp() }
         await rig.engine.start()
         guard case .disabled(let message) = await rig.snapshot.status else {
@@ -838,7 +966,9 @@ struct SyncEngineTests {
 
     // MARK: edge cases
 
-    @Test("A trigger that arrives during a run that then fails waits out the back-off instead of retrying at once")
+    @Test(
+        "A trigger that arrives during a run that then fails waits out the back-off instead of retrying at once"
+    )
     func triggerDuringFailingRun() async throws {
         let rig = try await EngineRig.linked()
         defer { rig.cleanUp() }
@@ -848,7 +978,7 @@ struct SyncEngineTests {
         let running = Task { await rig.engine.syncNow() }
         for await _ in held.entered { break }
 
-        await rig.engine.trigger(.storeChanged) // due ten seconds from now, before the back-off the failure will start
+        await rig.engine.trigger(.storeChanged)  // due ten seconds from now, before the back-off the failure will start
         await rig.clock.waitForSleepers(2)
         held.release.yield(())
         await running.value
@@ -859,9 +989,10 @@ struct SyncEngineTests {
         let failed = rig.google.listings
 
         await rig.advance(10)
-        #expect(rig.google.listings == failed, "the waiter fired inside the back-off and must not run")
+        #expect(
+            rig.google.listings == failed, "the waiter fired inside the back-off and must not run")
         guard rig.google.listings == failed else { return }
-        await rig.clock.waitForSleepers(2) // re-armed for the end of the back-off
+        await rig.clock.waitForSleepers(2)  // re-armed for the end of the back-off
         rig.google.failListings(with: nil)
         await rig.advance(49)
         #expect(rig.google.listings == failed)
@@ -909,25 +1040,33 @@ struct SyncEngineTests {
         await rig.engine.stop()
     }
 
-    @Test("Confirming a delete guard does not wave through a different, mass-missing pause that appeared since")
+    @Test(
+        "Confirming a delete guard does not wave through a different, mass-missing pause that appeared since"
+    )
     func confirmOnlyWhatWasShown() async throws {
         var limits = SyncPlanner.Limits()
         limits.minDeletes = 1
         let rig = try await EngineRig.linked(planner: SyncPlanner(limits: limits))
         defer { rig.cleanUp() }
-        for id in ["I1", "I2", "I3"] { try await rig.base.world.store.delete(ids: [id], backup: .forTesting()) }
+        for id in ["I1", "I2", "I3"] {
+            try await rig.base.world.store.delete(ids: [id], backup: .forTesting())
+        }
         await rig.start()
         await rig.engine.waitForRuns(1)
         let shown = try #require(await rig.snapshot.confirmationSummary)
         #expect(shown.contains("delete 3 of 6"))
 
-        for name in ["people/c4", "people/c5", "people/c6"] { try await rig.base.world.google.deleteContact(resourceName: name) }
+        for name in ["people/c4", "people/c5", "people/c6"] {
+            try await rig.base.world.google.deleteContact(resourceName: name)
+        }
         await rig.base.world.google.expireSyncTokens()
         await rig.engine.confirmAndContinue()
 
         let summary = try #require(await rig.snapshot.confirmationSummary)
         #expect(summary.hasPrefix(SyncPlanner.googleMissingSummaryPrefix) && summary != shown)
-        #expect(await rig.base.world.google.allPeople.count == 3, "nothing was deleted on the strength of the old confirmation")
+        #expect(
+            await rig.base.world.google.allPeople.count == 3,
+            "nothing was deleted on the strength of the old confirmation")
         await rig.engine.stop()
     }
 
@@ -938,11 +1077,18 @@ struct SyncEngineTests {
         let before = await started(rig)
         let (release, hold) = AsyncStream<Void>.makeStream()
         let (entered, enteredSignal) = AsyncStream<Void>.makeStream()
-        let holder = Task { try await rig.gate.withLock { enteredSignal.yield(); for await _ in release { break } } }
+        let holder = Task {
+            try await rig.gate.withLock {
+                enteredSignal.yield()
+                for await _ in release { break }
+            }
+        }
         for await _ in entered { break }
         let updates = await rig.engine.snapshots()
         let first = Task { await rig.engine.syncNow() }
-        for await update in updates where update.status == .running(.waitingForOtherChanges) { break }
+        for await update in updates where update.status == .running(.waitingForOtherChanges) {
+            break
+        }
         let second = Task { await rig.engine.syncNow() }
 
         await rig.engine.stop()
@@ -956,31 +1102,44 @@ struct SyncEngineTests {
     // MARK: stale first-link conflicts
 
     /// A first-link conflict as Phase 2 stored it: pinned, because the baseline already holds both sides.
-    private func pinFirstLinkConflict(_ rig: EngineRig, _ id: String, _ resourceName: String) throws -> String {
+    private func pinFirstLinkConflict(_ rig: EngineRig, _ id: String, _ resourceName: String) throws
+        -> String
+    {
         let baseline = try #require(try rig.state.baselines[id])
-        let candidate = ReviewCandidate(kind: .bothEdited, icloudID: id, resourceName: resourceName, googleEtag: baseline.googleEtag, fields: [.phones])
+        let candidate = ReviewCandidate(
+            kind: .bothEdited, icloudID: id, resourceName: resourceName,
+            googleEtag: baseline.googleEtag, fields: [.phones])
         var plan = SyncPlan(isPreview: false)
         plan.review = [candidate]
-        plan.links = [PlannedLink(icloudID: id, resourceName: resourceName, origin: .matched, isNewLink: true, baseline: baseline, reasons: [])]
+        plan.links = [
+            PlannedLink(
+                icloudID: id, resourceName: resourceName, origin: .matched, isNewLink: true,
+                baseline: baseline, reasons: [])
+        ]
         try rig.base.reviews.reconcile(with: plan, at: SyncFixtures.t0)
         return candidate.id
     }
 
-    @Test("A pinned first-link conflict whose sides agree is cleared by the next full read, and nothing is written")
+    @Test(
+        "A pinned first-link conflict whose sides agree is cleared by the next full read, and nothing is written"
+    )
     func clearsSettledPinnedConflict() async throws {
         let rig = try await EngineRig.linked(count: 2)
         defer { rig.cleanUp() }
         let stale = try pinFirstLinkConflict(rig, "I1", "people/c1")
         let real = try pinFirstLinkConflict(rig, "I2", "people/c2")
         try await rig.base.world.editGoogle("people/c2", mask: "phoneNumbers") {
-            $0.phoneNumbers = ($0.phoneNumbers ?? []) + [GooglePhoneNumber(value: "415-555-0099", type: "home")]
+            $0.phoneNumbers =
+                ($0.phoneNumbers ?? []) + [GooglePhoneNumber(value: "415-555-0099", type: "home")]
         }
         let people = await rig.base.world.google.allPeople
         let contacts = try await rig.base.world.store.fetchAll()
 
         await rig.start()
         await rig.engine.waitForRuns(1)
-        #expect(try rig.base.reviews.load().map(\.id).contains(stale), "iCloud was not read in the first run: nothing is known about the pair")
+        #expect(
+            try rig.base.reviews.load().map(\.id).contains(stale),
+            "iCloud was not read in the first run: nothing is known about the pair")
 
         await rig.engine.syncNow()
         let left = try rig.base.reviews.load().map(\.id)

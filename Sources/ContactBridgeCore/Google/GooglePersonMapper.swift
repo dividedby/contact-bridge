@@ -41,7 +41,8 @@ extension GooglePerson {
 /// invalidates (canonical forms, formatted values), and entries of a changed label (a relabelled address is a new entry).
 public enum GooglePersonMapper {
     static let modeledFields = [
-        "names", "nicknames", "organizations", "phoneNumbers", "emailAddresses", "addresses", "urls", "birthdays",
+        "names", "nicknames", "organizations", "phoneNumbers", "emailAddresses", "addresses",
+        "urls", "birthdays",
     ]
 
     public static func updatePersonFields(includingOwnershipTag: Bool) -> String {
@@ -63,7 +64,9 @@ public enum GooglePersonMapper {
     // MARK: Person -> ContactRecord
 
     /// Nil for deleted-person sync stubs and people without a resource name.
-    public static func record(from person: GooglePerson, source: ContactSource = .google) -> ContactRecord? {
+    public static func record(from person: GooglePerson, source: ContactSource = .google)
+        -> ContactRecord?
+    {
         guard let resourceName = person.resourceName, !person.isDeleted else { return nil }
         let name = primary(contactSourced(person.names))
         let organization = primary(contactSourced(person.organizations))
@@ -90,9 +93,13 @@ public enum GooglePersonMapper {
     public static func note(of person: GooglePerson) -> String {
         guard case .array(let entries)? = person.extras["biographies"] else { return "" }
         return entries.compactMap { entry -> String? in
-            guard case .object(let fields) = entry, case .string(let value)? = fields["value"], !value.isBlank else { return nil }
-            if case .object(let metadata)? = fields["metadata"], case .object(let source)? = metadata["source"],
-               case .string(let type)? = source["type"], type != "CONTACT", type != "OTHER_CONTACT" {
+            guard case .object(let fields) = entry, case .string(let value)? = fields["value"],
+                !value.isBlank
+            else { return nil }
+            if case .object(let metadata)? = fields["metadata"],
+                case .object(let source)? = metadata["source"],
+                case .string(let type)? = source["type"], type != "CONTACT", type != "OTHER_CONTACT"
+            {
                 return nil
             }
             return value
@@ -100,7 +107,9 @@ public enum GooglePersonMapper {
     }
 
     /// `NoteHash.hash` of `note(of:)`. A person without biographies is a known empty note, never unknown.
-    public static func noteHash(of person: GooglePerson) -> String { NoteHash.hash(note(of: person)) }
+    public static func noteHash(of person: GooglePerson) -> String {
+        NoteHash.hash(note(of: person))
+    }
 
     private static func primary<T: GoogleMetadataCarrying>(_ items: [T]) -> T? {
         items.first { $0.metadata?.primary == true } ?? items.first
@@ -120,7 +129,9 @@ public enum GooglePersonMapper {
 
     private static func labeledAddress(_ address: GoogleAddress) -> Labeled<PostalAddress>? {
         let mapped = PostalAddress(
-            street: [address.streetAddress, address.extendedAddress].compactMap { $0 }.filter { !$0.isBlank }.joined(separator: "\n"),
+            street: [address.streetAddress, address.extendedAddress].compactMap { $0 }.filter {
+                !$0.isBlank
+            }.joined(separator: "\n"),
             city: address.city ?? "",
             state: address.region ?? "",
             postalCode: address.postalCode ?? "",
@@ -135,7 +146,9 @@ public enum GooglePersonMapper {
     }
 
     private static func birthday(_ birthdays: [GoogleBirthday]) -> DateComponents? {
-        guard let date = primary(datedBirthdays(birthdays))?.date, let month = date.month, let day = date.day else { return nil }
+        guard let date = primary(datedBirthdays(birthdays))?.date, let month = date.month,
+            let day = date.day
+        else { return nil }
         let year = date.year.flatMap { $0 > 0 ? $0 : nil }
         return DateComponents(year: year, month: month, day: day)
     }
@@ -143,14 +156,19 @@ public enum GooglePersonMapper {
     // MARK: ContactRecord -> Person
 
     /// A new contact: modeled fields only, no identity, etag or metadata.
-    public static func createPayload(for record: ContactRecord, ownershipSourceID: String? = nil) -> GooglePerson {
+    public static func createPayload(for record: ContactRecord, ownershipSourceID: String? = nil)
+        -> GooglePerson
+    {
         var person = GooglePerson()
         if hasName(record) { person.names = [applyName(record, to: GoogleName())] }
         if !record.nickname.isBlank { person.nicknames = [GoogleNickname(value: record.nickname)] }
-        if hasOrganization(record) { person.organizations = [applyOrganization(record, to: GoogleOrganization())] }
+        if hasOrganization(record) {
+            person.organizations = [applyOrganization(record, to: GoogleOrganization())]
+        }
         person.phoneNumbers = nonEmpty(record.phones.filter { !$0.value.isBlank }.map(makePhone))
         person.emailAddresses = nonEmpty(record.emails.filter { !$0.value.isBlank }.map(makeEmail))
-        person.addresses = nonEmpty(record.postalAddresses.filter { !$0.value.isEmpty }.map(makeAddress))
+        person.addresses = nonEmpty(
+            record.postalAddresses.filter { !$0.value.isEmpty }.map(makeAddress))
         person.urls = nonEmpty(record.urls.filter { !$0.value.isBlank }.map(makeURL))
         person.birthdays = makeBirthdays(record.birthday)
         if let ownershipSourceID { GoogleOwnership.setSourceID(ownershipSourceID, on: &person) }
@@ -164,15 +182,25 @@ public enum GooglePersonMapper {
         var person = GooglePerson(resourceName: existing.resourceName, etag: existing.etag)
 
         person.names = updatedPrimary(
-            existing.names, wanted: hasName(record), make: { applyName(record, to: $0) }, clean: cleanName
+            existing.names, wanted: hasName(record), make: { applyName(record, to: $0) },
+            clean: cleanName
         )
         person.nicknames = updatedPrimary(
             existing.nicknames, wanted: !record.nickname.isBlank,
-            make: { var nickname = $0; nickname.value = record.nickname; return nickname }, clean: { $0 }
+            make: {
+                var nickname = $0
+                nickname.value = record.nickname
+                return nickname
+            }, clean: { $0 }
         )
         person.organizations = updatedPrimary(
-            existing.organizations, wanted: hasOrganization(record), make: { applyOrganization(record, to: $0) },
-            clean: { var org = $0; org.formattedType = nil; return org }
+            existing.organizations, wanted: hasOrganization(record),
+            make: { applyOrganization(record, to: $0) },
+            clean: {
+                var org = $0
+                org.formattedType = nil
+                return org
+            }
         )
 
         person.phoneNumbers = reconcile(
@@ -186,8 +214,10 @@ public enum GooglePersonMapper {
             label: { friendlyLabel($0.type) }, overlay: overlayEmail, make: makeEmail
         )
         person.addresses = reconcile(
-            existing: existing.addresses, desired: record.postalAddresses.filter { !$0.value.isEmpty },
-            matches: addressMatches, label: { friendlyLabel($0.type) }, overlay: overlayAddress, make: makeAddress
+            existing: existing.addresses,
+            desired: record.postalAddresses.filter { !$0.value.isEmpty },
+            matches: addressMatches, label: { friendlyLabel($0.type) }, overlay: overlayAddress,
+            make: makeAddress
         )
         person.urls = reconcile(
             existing: existing.urls, desired: record.urls.filter { !$0.value.isBlank },
@@ -208,7 +238,8 @@ public enum GooglePersonMapper {
         } else if dated.isEmpty {
             fields.removeAll { $0 == "birthdays" }
         } else {
-            person.birthdays = nonEmpty(contactBirthdays.filter { !dated.contains($0) }.map(withoutMetadata))
+            person.birthdays = nonEmpty(
+                contactBirthdays.filter { !dated.contains($0) }.map(withoutMetadata))
         }
 
         if let ownershipSourceID {
@@ -217,7 +248,8 @@ public enum GooglePersonMapper {
             fields.append("clientData")
         }
         return GoogleUpdatePayload(
-            resourceName: existing.resourceName, person: person, updatePersonFields: fields.joined(separator: ",")
+            resourceName: existing.resourceName, person: person,
+            updatePersonFields: fields.joined(separator: ",")
         )
     }
 
@@ -238,7 +270,8 @@ public enum GooglePersonMapper {
         var person = GooglePerson(resourceName: existing.resourceName, etag: existing.etag)
         var mask: [String] = []
 
-        for field in SyncField.recordFields where fields.contains(field) && fullMask.contains(field.peopleAPIField) {
+        for field in SyncField.recordFields
+        where fields.contains(field) && fullMask.contains(field.peopleAPIField) {
             switch field {
             case .name: person.names = full.person.names
             case .nickname: person.nicknames = full.person.nicknames
@@ -263,13 +296,17 @@ public enum GooglePersonMapper {
             GoogleOwnership.setSourceID(ownershipSourceID, on: &person)
             mask.append("clientData")
         }
-        return GoogleUpdatePayload(resourceName: existing.resourceName, person: person, updatePersonFields: mask.joined(separator: ","))
+        return GoogleUpdatePayload(
+            resourceName: existing.resourceName, person: person,
+            updatePersonFields: mask.joined(separator: ","))
     }
 
     /// Sets `biographies` to the note as plain text. A blank note sets nothing.
     public static func setNote(_ note: String, on person: inout GooglePerson) {
         guard !note.isBlank else { return }
-        person.extras["biographies"] = .array([.object(["value": .string(note), "contentType": .string("TEXT_PLAIN")])])
+        person.extras["biographies"] = .array([
+            .object(["value": .string(note), "contentType": .string("TEXT_PLAIN")])
+        ])
     }
 
     // MARK: building entries
@@ -302,7 +339,9 @@ public enum GooglePersonMapper {
         return name
     }
 
-    private static func applyOrganization(_ record: ContactRecord, to organization: GoogleOrganization) -> GoogleOrganization {
+    private static func applyOrganization(
+        _ record: ContactRecord, to organization: GoogleOrganization
+    ) -> GoogleOrganization {
         var organization = organization
         organization.name = nilIfBlank(record.organization)
         organization.title = nilIfBlank(record.jobTitle)
@@ -323,7 +362,9 @@ public enum GooglePersonMapper {
 
     private static func makeAddress(_ entry: Labeled<PostalAddress>) -> GoogleAddress {
         let address = entry.value
-        let lines = address.street.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+        let lines = address.street.split(
+            separator: "\n", maxSplits: 1, omittingEmptySubsequences: false
+        ).map(String.init)
         return GoogleAddress(
             type: googleType(entry.label),
             streetAddress: nilIfBlank(lines.first ?? ""),
@@ -344,13 +385,17 @@ public enum GooglePersonMapper {
     // MARK: overlays (edit a fetched entry, keeping its unmodeled keys)
 
     /// Keeps `type` when the label is unchanged (case-insensitively); otherwise retypes and drops the stale formatted type.
-    private static func retype(_ type: inout String?, _ formattedType: inout String?, to label: String?) {
+    private static func retype(
+        _ type: inout String?, _ formattedType: inout String?, to label: String?
+    ) {
         guard !sameLabel(friendlyLabel(type), label) else { return }
         type = googleType(label)
         formattedType = nil
     }
 
-    private static func overlayPhone(_ entry: GooglePhoneNumber, _ wanted: Labeled<String>) -> GooglePhoneNumber {
+    private static func overlayPhone(_ entry: GooglePhoneNumber, _ wanted: Labeled<String>)
+        -> GooglePhoneNumber
+    {
         var entry = entry
         if entry.value != wanted.value {
             entry.value = wanted.value
@@ -360,7 +405,9 @@ public enum GooglePersonMapper {
         return entry
     }
 
-    private static func overlayEmail(_ entry: GoogleEmailAddress, _ wanted: Labeled<String>) -> GoogleEmailAddress {
+    private static func overlayEmail(_ entry: GoogleEmailAddress, _ wanted: Labeled<String>)
+        -> GoogleEmailAddress
+    {
         var entry = entry
         if entry.value != wanted.value {
             entry.value = wanted.value
@@ -377,7 +424,9 @@ public enum GooglePersonMapper {
         return entry
     }
 
-    private static func overlayAddress(_ entry: GoogleAddress, _ wanted: Labeled<PostalAddress>) -> GoogleAddress {
+    private static func overlayAddress(_ entry: GoogleAddress, _ wanted: Labeled<PostalAddress>)
+        -> GoogleAddress
+    {
         let made = makeAddress(wanted)
         var entry = entry
         entry.streetAddress = made.streetAddress
@@ -395,12 +444,18 @@ public enum GooglePersonMapper {
 
     /// Same five display fields and case-folded ISO code. Sub-locality and sub-administrative area are ignored: they
     /// exist on the Apple side only.
-    private static func addressMatches(_ entry: GoogleAddress, _ wanted: Labeled<PostalAddress>) -> Bool {
-        guard let have = labeledAddress(entry), sameLabel(have.label, wanted.label) else { return false }
+    private static func addressMatches(_ entry: GoogleAddress, _ wanted: Labeled<PostalAddress>)
+        -> Bool
+    {
+        guard let have = labeledAddress(entry), sameLabel(have.label, wanted.label) else {
+            return false
+        }
         let a = have.value
         let b = wanted.value
-        return a.street == b.street && a.city == b.city && a.state == b.state && a.postalCode == b.postalCode
-            && a.country == b.country && a.isoCountryCode?.lowercased() == b.isoCountryCode?.lowercased()
+        return a.street == b.street && a.city == b.city && a.state == b.state
+            && a.postalCode == b.postalCode
+            && a.country == b.country
+            && a.isoCountryCode?.lowercased() == b.isoCountryCode?.lowercased()
     }
 
     // MARK: update helpers
@@ -411,7 +466,8 @@ public enum GooglePersonMapper {
         _ existing: [T]?, wanted: Bool, make: (T) -> T, clean: (T) -> T
     ) -> [T]? where T: GoogleDefaultInit {
         var entries = contactSourced(existing)
-        let index = entries.firstIndex { $0.metadata?.primary == true } ?? (entries.isEmpty ? nil : 0)
+        let index =
+            entries.firstIndex { $0.metadata?.primary == true } ?? (entries.isEmpty ? nil : 0)
         var primary: T?
         if let index { primary = entries.remove(at: index) }
         if wanted {
@@ -432,7 +488,9 @@ public enum GooglePersonMapper {
 
     /// Reuses fetched entries equal to a wanted one, overlays edits on the fetched entry with the same label, and builds
     /// the rest from scratch. Only contact-sourced entries take part.
-    private static func reconcile<Entry: GoogleMetadataCarrying, Value: Sendable & Hashable & Codable>(
+    private static func reconcile<
+        Entry: GoogleMetadataCarrying, Value: Sendable & Hashable & Codable
+    >(
         existing: [Entry]?, desired: [Labeled<Value>],
         matches: (Entry, Labeled<Value>) -> Bool,
         label: (Entry) -> String?,
@@ -442,7 +500,9 @@ public enum GooglePersonMapper {
         var unused = contactSourced(existing)
         var chosen = [Entry?](repeating: nil, count: desired.count)
         for (index, wanted) in desired.enumerated() {
-            if let match = unused.firstIndex(where: { matches($0, wanted) }) { chosen[index] = unused.remove(at: match) }
+            if let match = unused.firstIndex(where: { matches($0, wanted) }) {
+                chosen[index] = unused.remove(at: match)
+            }
         }
         for (index, wanted) in desired.enumerated() where chosen[index] == nil {
             if let match = unused.firstIndex(where: { sameLabel(label($0), wanted.label) }) {
@@ -488,7 +548,8 @@ public enum GooglePersonMapper {
 
     /// Types spelled the same as their friendly name; matched case-insensitively.
     private static let standardTypes: Set<String> = [
-        "mobile", "home", "work", "other", "main", "pager", "blog", "profile", "ftp", "reservations",
+        "mobile", "home", "work", "other", "main", "pager", "blog", "profile", "ftp",
+        "reservations",
     ]
 }
 

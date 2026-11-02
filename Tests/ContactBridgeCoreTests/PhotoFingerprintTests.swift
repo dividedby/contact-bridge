@@ -2,6 +2,7 @@ import CoreGraphics
 import Foundation
 import Testing
 import UniformTypeIdentifiers
+
 @testable import ContactBridgeCore
 
 struct PhotoFingerprintTests {
@@ -16,7 +17,8 @@ struct PhotoFingerprintTests {
         let scene = PhotoTestImages.scene(seed: 1, width: 600, height: 600)
         let original = try fingerprint(PhotoTestImages.jpeg(scene, quality: 0.95))
         let recompressed = try fingerprint(PhotoTestImages.jpeg(scene, quality: 0.3))
-        let smaller = try fingerprint(PhotoTestImages.jpeg(PhotoTestImages.scaled(scene, width: 128, height: 128)))
+        let smaller = try fingerprint(
+            PhotoTestImages.jpeg(PhotoTestImages.scaled(scene, width: 128, height: 128)))
         #expect(original.isSimilar(to: recompressed))
         #expect(original.isSimilar(to: smaller))
         #expect(smaller.isSimilar(to: original))
@@ -24,7 +26,9 @@ struct PhotoFingerprintTests {
 
     @Test("Different photos are not similar")
     func different() throws {
-        let prints = try (1...12).map { try fingerprint(PhotoTestImages.jpeg(PhotoTestImages.scene(seed: UInt64($0)))) }
+        let prints = try (1...12).map {
+            try fingerprint(PhotoTestImages.jpeg(PhotoTestImages.scene(seed: UInt64($0))))
+        }
         for (index, print) in prints.enumerated() {
             for other in prints[(index + 1)...] { #expect(!print.isSimilar(to: other)) }
         }
@@ -33,7 +37,8 @@ struct PhotoFingerprintTests {
     @Test("Solid colours: the same one survives recompression, another one does not match")
     func solidColours() throws {
         let red = try fingerprint(PhotoTestImages.jpeg(PhotoTestImages.solid(.red), quality: 0.9))
-        let redAgain = try fingerprint(PhotoTestImages.jpeg(PhotoTestImages.solid(.red, width: 90, height: 90), quality: 0.4))
+        let redAgain = try fingerprint(
+            PhotoTestImages.jpeg(PhotoTestImages.solid(.red, width: 90, height: 90), quality: 0.4))
         let blue = try fingerprint(PhotoTestImages.jpeg(PhotoTestImages.solid(.blue)))
         let white = try fingerprint(PhotoTestImages.jpeg(PhotoTestImages.solid(.white)))
         let black = try fingerprint(PhotoTestImages.jpeg(PhotoTestImages.solid(.black)))
@@ -47,7 +52,8 @@ struct PhotoFingerprintTests {
     @Test("The same colours laid out differently are not similar")
     func layout() throws {
         let sideBySide = try fingerprint(PhotoTestImages.jpeg(PhotoTestImages.split(.red, .blue)))
-        let stacked = try fingerprint(PhotoTestImages.jpeg(PhotoTestImages.split(.red, .blue, stacked: true)))
+        let stacked = try fingerprint(
+            PhotoTestImages.jpeg(PhotoTestImages.split(.red, .blue, stacked: true)))
         let swapped = try fingerprint(PhotoTestImages.jpeg(PhotoTestImages.split(.blue, .red)))
         #expect(!sideBySide.isSimilar(to: stacked))
         #expect(!sideBySide.isSimilar(to: swapped))
@@ -59,7 +65,9 @@ struct PhotoFingerprintTests {
         // Pixels are red left, blue right; orientation 6 displays them rotated a quarter turn clockwise: red on top.
         let raw = PhotoTestImages.split(.red, .blue, width: 240, height: 120)
         let rotated = try fingerprint(PhotoTestImages.jpeg(raw, orientation: 6))
-        let redOnTop = try fingerprint(PhotoTestImages.jpeg(PhotoTestImages.split(.red, .blue, width: 120, height: 240, stacked: true)))
+        let redOnTop = try fingerprint(
+            PhotoTestImages.jpeg(
+                PhotoTestImages.split(.red, .blue, width: 120, height: 240, stacked: true)))
         let unrotated = try fingerprint(PhotoTestImages.jpeg(raw))
         #expect(rotated.isSimilar(to: redOnTop))
         #expect(!rotated.isSimilar(to: unrotated))
@@ -75,13 +83,17 @@ struct PhotoFingerprintTests {
 
         let transparent = PhotoTestImages.solid(PhotoTestImages.RGB(r: 0, g: 0, b: 0, a: 0))
         let white = try fingerprint(PhotoTestImages.jpeg(PhotoTestImages.solid(.white)))
-        #expect(try fingerprint(try #require(PhotoTestImages.encode(transparent, as: .png))).isSimilar(to: white))
+        #expect(
+            try fingerprint(try #require(PhotoTestImages.encode(transparent, as: .png))).isSimilar(
+                to: white))
     }
 
     @Test("HEIC decodes and matches the same picture as a JPEG")
     func heic() throws {
         let scene = PhotoTestImages.scene(seed: 5)
-        let heic = try #require(PhotoTestImages.encode(scene, as: .heic, quality: 0.8), "this machine cannot encode HEIC")
+        let heic = try #require(
+            PhotoTestImages.encode(scene, as: .heic, quality: 0.8),
+            "this machine cannot encode HEIC")
         #expect(try fingerprint(heic).isSimilar(to: try fingerprint(PhotoTestImages.jpeg(scene))))
         let other = try fingerprint(PhotoTestImages.jpeg(PhotoTestImages.scene(seed: 6)))
         #expect(!(try fingerprint(heic)).isSimilar(to: other))
@@ -115,28 +127,42 @@ struct PhotoFingerprintTests {
 
     @Test("A fingerprint survives JSON, including a hash with the top bit set")
     func codable() throws {
-        let original = PhotoFingerprint(hash: UInt64.max, colors: Data((0..<48).map { UInt8($0 * 5) }))
-        let decoded = try JSONDecoder().decode(PhotoFingerprint.self, from: JSONEncoder().encode(original))
+        let original = PhotoFingerprint(
+            hash: UInt64.max, colors: Data((0..<48).map { UInt8($0 * 5) }))
+        let decoded = try JSONDecoder().decode(
+            PhotoFingerprint.self, from: JSONEncoder().encode(original))
         #expect(decoded == original && decoded.hash == UInt64.max)
         let real = try fingerprint(PhotoTestImages.jpeg(PhotoTestImages.scene(seed: 9)))
-        #expect(try JSONDecoder().decode(PhotoFingerprint.self, from: JSONEncoder().encode(real)) == real)
+        #expect(
+            try JSONDecoder().decode(PhotoFingerprint.self, from: JSONEncoder().encode(real))
+                == real)
     }
 
-    @Test("A wide photo matches its centre-square thumbnail either way round; another wide photo's thumbnail does not")
+    @Test(
+        "A wide photo matches its centre-square thumbnail either way round; another wide photo's thumbnail does not"
+    )
     func centreSquareThumbnail() throws {
         for seed in UInt64(1)...40 {
             let (width, height) = [(768, 400), (400, 768), (1024, 768)][Int(seed % 3)]
             let wide = PhotoTestImages.scene(seed: seed, width: width, height: height)
             let original = try fingerprint(PhotoTestImages.jpeg(wide))
-            let thumbnail = try fingerprint(PhotoTestImages.jpeg(PhotoTestImages.centreSquare(wide), quality: 0.7))
-            #expect(original.centreHash != nil && thumbnail.centreHash == nil, "only a picture that is not square has a centre")
+            let thumbnail = try fingerprint(
+                PhotoTestImages.jpeg(PhotoTestImages.centreSquare(wide), quality: 0.7))
+            #expect(
+                original.centreHash != nil && thumbnail.centreHash == nil,
+                "only a picture that is not square has a centre")
             #expect(original.isSimilar(to: thumbnail) && thumbnail.isSimilar(to: original))
-            let other = try fingerprint(PhotoTestImages.jpeg(PhotoTestImages.centreSquare(PhotoTestImages.scene(seed: seed + 50, width: width, height: height))))
+            let other = try fingerprint(
+                PhotoTestImages.jpeg(
+                    PhotoTestImages.centreSquare(
+                        PhotoTestImages.scene(seed: seed + 50, width: width, height: height))))
             #expect(!original.isSimilar(to: other))
         }
     }
 
-    @Test("A fingerprint stored before centres were added still decodes, and compares whole pictures as before")
+    @Test(
+        "A fingerprint stored before centres were added still decodes, and compares whole pictures as before"
+    )
     func storedWithoutCentre() throws {
         let stored = Data(#"{"hash":42,"colors":"AAAA"}"#.utf8)
         let decoded = try JSONDecoder().decode(PhotoFingerprint.self, from: stored)
@@ -144,14 +170,22 @@ struct PhotoFingerprintTests {
         #expect(decoded.isSimilar(to: PhotoFingerprint(hash: 42, colors: Data([0, 0, 0]))))
     }
 
-    @Test("Contacts' readings: a thumbnail alone is a photo, and is the picture read when the full one is not available")
+    @Test(
+        "Contacts' readings: a thumbnail alone is a photo, and is the picture read when the full one is not available"
+    )
     func thumbnailOnlyReads() {
-        let thumb = Data([1, 2, 3]), full = Data([4, 5])
+        let thumb = Data([1, 2, 3])
+        let full = Data([4, 5])
         #expect(ICloudPhotoRead.signature(imageDataAvailable: false, thumbnail: thumb).hasPhoto)
         #expect(ICloudPhotoRead.signature(imageDataAvailable: true, thumbnail: nil).hasPhoto)
         #expect(!ICloudPhotoRead.signature(imageDataAvailable: false, thumbnail: nil).hasPhoto)
-        #expect(ICloudPhotoRead.picture(imageDataAvailable: false, image: nil, thumbnail: thumb) == thumb)
-        #expect(ICloudPhotoRead.picture(imageDataAvailable: true, image: full, thumbnail: thumb) == full)
-        #expect(ICloudPhotoRead.picture(imageDataAvailable: false, image: nil, thumbnail: nil) == nil)
+        #expect(
+            ICloudPhotoRead.picture(imageDataAvailable: false, image: nil, thumbnail: thumb)
+                == thumb)
+        #expect(
+            ICloudPhotoRead.picture(imageDataAvailable: true, image: full, thumbnail: thumb) == full
+        )
+        #expect(
+            ICloudPhotoRead.picture(imageDataAvailable: false, image: nil, thumbnail: nil) == nil)
     }
 }

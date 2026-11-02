@@ -79,12 +79,24 @@ enum MenuBarGlyph {
         front.addEllipse(in: CGRect(x: 290, y: 228, width: 180, height: 180))
         front.move(to: CGPoint(x: 370, y: 730))
         front.addLine(to: CGPoint(x: 244, y: 730))
-        front.addCurve(to: CGPoint(x: 200, y: 686), control1: CGPoint(x: 214.67, y: 730), control2: CGPoint(x: 200, y: 715.33))
-        front.addCurve(to: CGPoint(x: 380, y: 446), control1: CGPoint(x: 200, y: 470), control2: CGPoint(x: 281, y: 446))
-        front.addCurve(to: CGPoint(x: 546.01, y: 558.13), control1: CGPoint(x: 454.44, y: 446), control2: CGPoint(x: 518.71, y: 459.57))
-        front.addCurve(to: CGPoint(x: 461.66, y: 563.22), control1: CGPoint(x: 518.03, y: 551.23), control2: CGPoint(x: 488.61, y: 553.01))
-        front.addCurve(to: CGPoint(x: 395.14, y: 615.33), control1: CGPoint(x: 434.71, y: 573.44), control2: CGPoint(x: 411.51, y: 591.61))
-        front.addCurve(to: CGPoint(x: 370, y: 696), control1: CGPoint(x: 378.77, y: 639.04), control2: CGPoint(x: 370, y: 667.18))
+        front.addCurve(
+            to: CGPoint(x: 200, y: 686), control1: CGPoint(x: 214.67, y: 730),
+            control2: CGPoint(x: 200, y: 715.33))
+        front.addCurve(
+            to: CGPoint(x: 380, y: 446), control1: CGPoint(x: 200, y: 470),
+            control2: CGPoint(x: 281, y: 446))
+        front.addCurve(
+            to: CGPoint(x: 546.01, y: 558.13), control1: CGPoint(x: 454.44, y: 446),
+            control2: CGPoint(x: 518.71, y: 459.57))
+        front.addCurve(
+            to: CGPoint(x: 461.66, y: 563.22), control1: CGPoint(x: 518.03, y: 551.23),
+            control2: CGPoint(x: 488.61, y: 553.01))
+        front.addCurve(
+            to: CGPoint(x: 395.14, y: 615.33), control1: CGPoint(x: 434.71, y: 573.44),
+            control2: CGPoint(x: 411.51, y: 591.61))
+        front.addCurve(
+            to: CGPoint(x: 370, y: 696), control1: CGPoint(x: 378.77, y: 639.04),
+            control2: CGPoint(x: 370, y: 667.18))
         front.closeSubpath()
         let mirror = CGAffineTransform(translationX: 1024, y: 0).scaledBy(x: -1, y: 1)
         let both = CGMutablePath()
@@ -100,9 +112,15 @@ enum MenuBarGlyph {
         context.fillEllipse(in: CGRect(x: centre.x - 5.5, y: centre.y - 5.5, width: 11, height: 11))
         context.setBlendMode(.normal)
         let configuration = NSImage.SymbolConfiguration(pointSize: 7, weight: .bold)
-        guard let symbol = NSImage(systemSymbolName: name, accessibilityDescription: nil)?.withSymbolConfiguration(configuration) else { return }
+        guard
+            let symbol = NSImage(systemSymbolName: name, accessibilityDescription: nil)?
+                .withSymbolConfiguration(configuration)
+        else { return }
         let box = symbol.size
-        symbol.draw(in: NSRect(x: centre.x - box.width / 2, y: centre.y - box.height / 2, width: box.width, height: box.height))
+        symbol.draw(
+            in: NSRect(
+                x: centre.x - box.width / 2, y: centre.y - box.height / 2, width: box.width,
+                height: box.height))
     }
 }
 
@@ -132,7 +150,9 @@ struct MenuBarContent: View {
         case .none: EmptyView()
         }
         Divider()
-        Toggle("Open at login", isOn: Binding(get: { model.loginItem.isOn }, set: { model.loginItem.setEnabled($0) }))
+        Toggle(
+            "Open at login",
+            isOn: Binding(get: { model.loginItem.isOn }, set: { model.loginItem.setEnabled($0) }))
         if model.loginItem.needsApproval {
             Button("Allow in Login Items settings…") { model.loginItem.openSystemSettings() }
         }

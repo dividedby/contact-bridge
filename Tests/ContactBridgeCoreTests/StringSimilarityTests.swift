@@ -1,4 +1,5 @@
 import Testing
+
 @testable import ContactBridgeCore
 
 struct StringSimilarityTests {
@@ -14,18 +15,22 @@ struct StringSimilarityTests {
         #expect(StringSimilarity.jaroWinkler("a", "") == 0)
     }
 
-    @Test("Known reference values", arguments: [
-        ("martha", "marhta", 0.961),
-        ("dixon", "dicksonx", 0.813),
-        ("jellyfish", "smellyfish", 0.896),
-    ])
+    @Test(
+        "Known reference values",
+        arguments: [
+            ("martha", "marhta", 0.961),
+            ("dixon", "dicksonx", 0.813),
+            ("jellyfish", "smellyfish", 0.896),
+        ])
     func reference(a: String, b: String, expected: Double) {
         #expect(abs(StringSimilarity.jaroWinkler(a, b) - expected) < 0.001)
     }
 
     @Test("Symmetric")
     func symmetric() {
-        #expect(StringSimilarity.jaroWinkler("jon", "john") == StringSimilarity.jaroWinkler("john", "jon"))
+        #expect(
+            StringSimilarity.jaroWinkler("jon", "john")
+                == StringSimilarity.jaroWinkler("john", "jon"))
     }
 
     @Test("Works on non-Latin text")

@@ -57,7 +57,8 @@ public enum ThreeWayDiff {
     ///     its own labels, and only entries one side lacks are a difference.
     public static func diff(
         icloud: ContactRecord, google: ContactRecord, base: SyncBaseline,
-        icloudNoteHash: String? = nil, googleNoteHash: String? = nil, googleEtag: String? = nil, labelsMatter: Bool = true,
+        icloudNoteHash: String? = nil, googleNoteHash: String? = nil, googleEtag: String? = nil,
+        labelsMatter: Bool = true,
         at now: Date = Date()
     ) -> LinkDiff {
         var changes: [SyncField: FieldChange] = [:]
@@ -65,7 +66,8 @@ public enum ThreeWayDiff {
         var desired = google
 
         for field in SyncField.recordFields {
-            let change = classify(field, icloud: icloud, google: google, base: base, labelsMatter: labelsMatter)
+            let change = classify(
+                field, icloud: icloud, google: google, base: base, labelsMatter: labelsMatter)
             changes[field] = change
             // Two edits that agree after normalizing still send iCloud's exact form when it differs from Google's.
             guard change == .pushToGoogle || change == .bothEditedEqual else { continue }
@@ -75,14 +77,17 @@ public enum ThreeWayDiff {
             } else {
                 candidate.copy(field, from: icloud)
             }
-            if exact(field, candidate) != exact(field, google) || orderedEntries(field, candidate) != orderedEntries(field, google) {
+            if exact(field, candidate) != exact(field, google)
+                || orderedEntries(field, candidate) != orderedEntries(field, google)
+            {
                 desired = candidate
                 pushFields.insert(field)
             }
         }
 
         let noteChange = classifyNote(
-            icloud: icloudNoteHash, google: googleNoteHash, baseIcloud: base.icloudNoteHash, baseGoogle: base.googleNoteHash
+            icloud: icloudNoteHash, google: googleNoteHash, baseIcloud: base.icloudNoteHash,
+            baseGoogle: base.googleNoteHash
         )
         changes[.note] = noteChange
         let pushesNote = noteChange == .pushToGoogle && googleNoteHash != icloudNoteHash
@@ -100,13 +105,16 @@ public enum ThreeWayDiff {
             baseline.icloud.copy(field, from: icloud)
             baseline.google.copy(field, from: desired)
         }
-        if !held.contains(.note), let icloudNoteHash, let googleNoteHash, base.icloudNoteHash != nil, base.googleNoteHash != nil {
+        if !held.contains(.note), let icloudNoteHash, let googleNoteHash,
+            base.icloudNoteHash != nil, base.googleNoteHash != nil
+        {
             baseline.icloudNoteHash = icloudNoteHash
             baseline.googleNoteHash = pushesNote ? icloudNoteHash : googleNoteHash
         }
 
         return LinkDiff(
-            changes: changes, pushFields: pushFields, reviewFields: reviewFields, desiredGoogle: desired,
+            changes: changes, pushFields: pushFields, reviewFields: reviewFields,
+            desiredGoogle: desired,
             updatedBaseline: baseline
         )
     }
@@ -114,11 +122,16 @@ public enum ThreeWayDiff {
     /// Whether Google moved the contact on since the baseline: a different etag AND a different projection (etags churn
     /// without edits). iCloud is held at the baseline, so only Google's side counts. Used before deleting a Google contact
     /// because its iCloud one is gone.
-    static func googleChanged(_ person: GooglePerson, since baseline: SyncBaseline, at now: Date) -> Bool {
-        guard person.etag != baseline.googleEtag, let record = GooglePersonMapper.record(from: person, source: .google) else { return false }
+    static func googleChanged(_ person: GooglePerson, since baseline: SyncBaseline, at now: Date)
+        -> Bool
+    {
+        guard person.etag != baseline.googleEtag,
+            let record = GooglePersonMapper.record(from: person, source: .google)
+        else { return false }
         let diff = diff(
             icloud: baseline.icloud, google: record, base: baseline,
-            icloudNoteHash: baseline.icloudNoteHash, googleNoteHash: GooglePersonMapper.noteHash(of: person), at: now
+            icloudNoteHash: baseline.icloudNoteHash,
+            googleNoteHash: GooglePersonMapper.noteHash(of: person), at: now
         )
         return diff.changes.values.contains { $0 != .unchanged }
     }
@@ -126,12 +139,15 @@ public enum ThreeWayDiff {
     // MARK: classification
 
     private static func classify(
-        _ field: SyncField, icloud: ContactRecord, google: ContactRecord, base: SyncBaseline, labelsMatter: Bool
+        _ field: SyncField, icloud: ContactRecord, google: ContactRecord, base: SyncBaseline,
+        labelsMatter: Bool
     ) -> FieldChange {
         guard isList(field) else {
             let iChanged = exact(field, icloud) != exact(field, base.icloud)
             let gChanged = exact(field, google) != exact(field, base.google)
-            return resolve(iChanged: iChanged, gChanged: gChanged, equal: normalized(field, icloud) == normalized(field, google))
+            return resolve(
+                iChanged: iChanged, gChanged: gChanged,
+                equal: normalized(field, icloud) == normalized(field, google))
         }
 
         let baseICloud = exactMap(field, base.icloud)
@@ -141,11 +157,16 @@ public enum ThreeWayDiff {
         // Entries Google had that iCloud did not: they are never compared, only carried along.
         let googleOnly = Set(baseGoogle.keys).subtracting(baseICloud.keys)
         let iChanged = currentICloud != baseICloud
-        let gChanged = currentGoogle.filter { !googleOnly.contains($0.key) } != baseGoogle.filter { !googleOnly.contains($0.key) }
+        let gChanged =
+            currentGoogle.filter { !googleOnly.contains($0.key) }
+            != baseGoogle.filter { !googleOnly.contains($0.key) }
         // An iCloud edit that adopts a Google-only entry makes it shared again.
         let stillGoogleOnly = googleOnly.subtracting(currentICloud.keys)
         let theirs = normalizedMap(field, google).filter { !stillGoogleOnly.contains($0.key) }
-        let equal = labelsMatter ? normalizedMap(field, icloud) == theirs : Set(normalizedMap(field, icloud).keys) == Set(theirs.keys)
+        let equal =
+            labelsMatter
+            ? normalizedMap(field, icloud) == theirs
+            : Set(normalizedMap(field, icloud).keys) == Set(theirs.keys)
         let change = resolve(iChanged: iChanged, gChanged: gChanged, equal: equal)
         return change == .unchanged && currentGoogle != baseGoogle ? .googleOnlyChange : change
     }
@@ -159,9 +180,12 @@ public enum ThreeWayDiff {
         }
     }
 
-    private static func classifyNote(icloud: String?, google: String?, baseIcloud: String?, baseGoogle: String?) -> FieldChange {
+    private static func classifyNote(
+        icloud: String?, google: String?, baseIcloud: String?, baseGoogle: String?
+    ) -> FieldChange {
         guard let icloud, let google, let baseIcloud, let baseGoogle else { return .unchanged }
-        return resolve(iChanged: icloud != baseIcloud, gChanged: google != baseGoogle, equal: icloud == google)
+        return resolve(
+            iChanged: icloud != baseIcloud, gChanged: google != baseGoogle, equal: icloud == google)
     }
 
     // MARK: comparison keys
@@ -189,20 +213,25 @@ public enum ThreeWayDiff {
 
     /// What a single-value group says, as spelled (surrounding whitespace aside).
     private static func exact(_ field: SyncField, _ record: ContactRecord) -> Snapshot {
-        func text(_ parts: String...) -> Snapshot { .text(parts.map(trimmed).joined(separator: separator)) }
+        func text(_ parts: String...) -> Snapshot {
+            .text(parts.map(trimmed).joined(separator: separator))
+        }
         switch field {
         case .name: return text(record.givenName, record.middleName, record.familyName)
         case .nickname: return text(record.nickname)
         case .organization: return text(record.organization, record.jobTitle)
         case .birthday: return text(birthdayText(record.birthday))
-        case .phones, .emails, .postalAddresses, .urls: return .text(orderedEntries(field, record).map(\.exact).joined(separator: "\n"))
+        case .phones, .emails, .postalAddresses, .urls:
+            return .text(orderedEntries(field, record).map(\.exact).joined(separator: "\n"))
         case .note: return .text("")
         }
     }
 
     /// What a single-value group says after folding case, accents and spacing.
     private static func normalized(_ field: SyncField, _ record: ContactRecord) -> Snapshot {
-        func text(_ parts: String...) -> Snapshot { .text(parts.map(MergePlan.comparisonKey).joined(separator: separator)) }
+        func text(_ parts: String...) -> Snapshot {
+            .text(parts.map(MergePlan.comparisonKey).joined(separator: separator))
+        }
         switch field {
         case .name: return text(record.givenName, record.middleName, record.familyName)
         case .nickname: return text(record.nickname)
@@ -214,10 +243,13 @@ public enum ThreeWayDiff {
 
     private static func birthdayText(_ birthday: DateComponents?) -> String {
         guard let birthday else { return "" }
-        return "\(birthday.year.map(String.init) ?? "-")/\(birthday.month ?? 0)/\(birthday.day ?? 0)"
+        return
+            "\(birthday.year.map(String.init) ?? "-")/\(birthday.month ?? 0)/\(birthday.day ?? 0)"
     }
 
-    private static func trimmed(_ text: String) -> String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private static func trimmed(_ text: String) -> String {
+        text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 
     /// Entry key to exact label and value.
     private static func exactMap(_ field: SyncField, _ record: ContactRecord) -> [String: String] {
@@ -225,7 +257,9 @@ public enum ThreeWayDiff {
     }
 
     /// Entry key to normalized label.
-    private static func normalizedMap(_ field: SyncField, _ record: ContactRecord) -> [String: String] {
+    private static func normalizedMap(_ field: SyncField, _ record: ContactRecord) -> [String:
+        String]
+    {
         Dictionary(uniqueKeysWithValues: orderedEntries(field, record).map { ($0.key, $0.label) })
     }
 
@@ -235,16 +269,21 @@ public enum ThreeWayDiff {
         case .phones: entries(record.phones, key: MergePlan.phoneKey, text: trimmed)
         case .emails: entries(record.emails, key: EmailNormalizer.normalize, text: trimmed)
         case .urls: entries(record.urls, key: MergePlan.urlKey, text: trimmed)
-        case .postalAddresses: entries(record.postalAddresses, key: MergePlan.addressKey, text: addressText)
+        case .postalAddresses:
+            entries(record.postalAddresses, key: MergePlan.addressKey, text: addressText)
         default: []
         }
     }
 
     private static func addressText(_ address: PostalAddress) -> String {
-        [address.street, address.city, address.state, address.postalCode, address.country].map(trimmed).joined(separator: separator)
+        [address.street, address.city, address.state, address.postalCode, address.country].map(
+            trimmed
+        ).joined(separator: separator)
     }
 
-    private static func entries<Value>(_ list: [Labeled<Value>], key: (Value) -> String?, text: (Value) -> String) -> [Entry] {
+    private static func entries<Value>(
+        _ list: [Labeled<Value>], key: (Value) -> String?, text: (Value) -> String
+    ) -> [Entry] {
         var seen = Set<String>()
         return list.compactMap { entry in
             guard let key = key(entry.value), seen.insert(key).inserted else { return nil }
@@ -261,19 +300,28 @@ public enum ThreeWayDiff {
 
     // MARK: desired Google lists
 
-    private static func applyDesiredList(_ field: SyncField, icloud: ContactRecord, base: ContactRecord, to desired: inout ContactRecord) {
+    private static func applyDesiredList(
+        _ field: SyncField, icloud: ContactRecord, base: ContactRecord,
+        to desired: inout ContactRecord
+    ) {
         switch field {
         case .phones:
-            desired.phones = desiredList(icloud: icloud.phones, google: desired.phones, base: base.phones, key: MergePlan.phoneKey, text: trimmed)
+            desired.phones = desiredList(
+                icloud: icloud.phones, google: desired.phones, base: base.phones,
+                key: MergePlan.phoneKey, text: trimmed)
         case .emails:
             desired.emails = desiredList(
-                icloud: icloud.emails, google: desired.emails, base: base.emails, key: EmailNormalizer.normalize, text: trimmed
+                icloud: icloud.emails, google: desired.emails, base: base.emails,
+                key: EmailNormalizer.normalize, text: trimmed
             )
         case .urls:
-            desired.urls = desiredList(icloud: icloud.urls, google: desired.urls, base: base.urls, key: MergePlan.urlKey, text: trimmed)
+            desired.urls = desiredList(
+                icloud: icloud.urls, google: desired.urls, base: base.urls, key: MergePlan.urlKey,
+                text: trimmed)
         case .postalAddresses:
             desired.postalAddresses = desiredList(
-                icloud: icloud.postalAddresses, google: desired.postalAddresses, base: base.postalAddresses,
+                icloud: icloud.postalAddresses, google: desired.postalAddresses,
+                base: base.postalAddresses,
                 key: MergePlan.addressKey, text: addressText
             )
         default: break
@@ -285,9 +333,12 @@ public enum ThreeWayDiff {
     /// spelling in place. Google-only entries, entries without a key, untouched entries in Google's spelling, and
     /// Google's order are kept. If iCloud removed every entry and Google has no Google-only ones, the list is empty.
     private static func desiredList<Value>(
-        icloud: [Labeled<Value>], google: [Labeled<Value>], base: [Labeled<Value>], key: (Value) -> String?, text: (Value) -> String
+        icloud: [Labeled<Value>], google: [Labeled<Value>], base: [Labeled<Value>],
+        key: (Value) -> String?, text: (Value) -> String
     ) -> [Labeled<Value>] {
-        func exactText(_ entry: Labeled<Value>) -> String { trimmed(entry.label ?? "") + separator + text(entry.value) }
+        func exactText(_ entry: Labeled<Value>) -> String {
+            trimmed(entry.label ?? "") + separator + text(entry.value)
+        }
         var current: [String: Labeled<Value>] = [:]
         var currentOrder: [String] = []
         for entry in icloud {

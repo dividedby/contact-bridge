@@ -16,7 +16,10 @@ public struct PhotoHistoryEntry: Sendable, Hashable, Codable {
     public var urlKey: String?
     public var photo: Data
 
-    public init(at: Date, operation: Operation, icloudID: String, resourceName: String, urlKey: String?, photo: Data) {
+    public init(
+        at: Date, operation: Operation, icloudID: String, resourceName: String, urlKey: String?,
+        photo: Data
+    ) {
         self.at = at
         self.operation = operation
         self.icloudID = icloudID
@@ -47,7 +50,8 @@ extension PhotoHistoryStoring {
 /// `photo-history/YYYY-MM-DD.jsonl` next to `links.json`: one JSON object per line, one file per day.
 public final class PhotoHistoryStore: PhotoHistoryStoring, Sendable {
     public static var defaultDirectory: URL {
-        LinkStore.defaultURL.deletingLastPathComponent().appendingPathComponent("photo-history", isDirectory: true)
+        LinkStore.defaultURL.deletingLastPathComponent().appendingPathComponent(
+            "photo-history", isDirectory: true)
     }
 
     private let directory: URL
@@ -58,7 +62,10 @@ public final class PhotoHistoryStore: PhotoHistoryStoring, Sendable {
     /// - Parameters:
     ///   - retentionDays: days kept, counting today's.
     ///   - timeZone: decides which day an entry belongs to.
-    public init(directory: URL = PhotoHistoryStore.defaultDirectory, retentionDays: Int = 30, timeZone: TimeZone = .current) {
+    public init(
+        directory: URL = PhotoHistoryStore.defaultDirectory, retentionDays: Int = 30,
+        timeZone: TimeZone = .current
+    ) {
         self.directory = directory
         self.retentionDays = retentionDays
         self.timeZone = timeZone
@@ -86,13 +93,17 @@ public final class PhotoHistoryStore: PhotoHistoryStoring, Sendable {
         encoder.dateEncodingStrategy = .iso8601
         var lines: [String: Data] = [:]
         for entry in entries {
-            lines[formatter.string(from: entry.at), default: Data()] += try encoder.encode(entry) + Data("\n".utf8)
+            lines[formatter.string(from: entry.at), default: Data()] +=
+                try encoder.encode(entry) + Data("\n".utf8)
         }
         try lock.withLock { _ in
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(
+                at: directory, withIntermediateDirectories: true)
             for (day, data) in lines {
                 let url = directory.appendingPathComponent("\(day).jsonl")
-                if !FileManager.default.fileExists(atPath: url.path) { FileManager.default.createFile(atPath: url.path, contents: nil) }
+                if !FileManager.default.fileExists(atPath: url.path) {
+                    FileManager.default.createFile(atPath: url.path, contents: nil)
+                }
                 let handle = try FileHandle(forUpdating: url)
                 defer { try? handle.close() }
                 var payload = data
@@ -100,7 +111,9 @@ public final class PhotoHistoryStore: PhotoHistoryStoring, Sendable {
                 if size > 0 {
                     // A tail cut short by a crash must not swallow the line appended after it.
                     try handle.seek(toOffset: size - 1)
-                    if try handle.read(upToCount: 1) != Data("\n".utf8) { payload = Data("\n".utf8) + data }
+                    if try handle.read(upToCount: 1) != Data("\n".utf8) {
+                        payload = Data("\n".utf8) + data
+                    }
                     try handle.seekToEnd()
                 }
                 try handle.write(contentsOf: payload)
@@ -116,7 +129,9 @@ public final class PhotoHistoryStore: PhotoHistoryStoring, Sendable {
             try dayFiles().flatMap { url -> [PhotoHistoryEntry] in
                 let text = String(decoding: try Data(contentsOf: url), as: UTF8.self)
                 // A line cut short by a crash is skipped rather than hiding the rest.
-                return text.split(separator: "\n").compactMap { try? decoder.decode(PhotoHistoryEntry.self, from: Data($0.utf8)) }
+                return text.split(separator: "\n").compactMap {
+                    try? decoder.decode(PhotoHistoryEntry.self, from: Data($0.utf8))
+                }
             }
         }
     }
@@ -128,8 +143,11 @@ public final class PhotoHistoryStore: PhotoHistoryStoring, Sendable {
         return try lock.withLock { _ in
             var removed = 0
             for url in try dayFiles() {
-                guard let day = formatter.date(from: String(url.lastPathComponent.dropLast(".jsonl".count))),
-                      let expires = calendar.date(byAdding: .day, value: retentionDays + 1, to: day), now >= expires
+                guard
+                    let day = formatter.date(
+                        from: String(url.lastPathComponent.dropLast(".jsonl".count))),
+                    let expires = calendar.date(byAdding: .day, value: retentionDays + 1, to: day),
+                    now >= expires
                 else { continue }
                 try FileManager.default.removeItem(at: url)
                 removed += 1
@@ -142,9 +160,15 @@ public final class PhotoHistoryStore: PhotoHistoryStoring, Sendable {
     private func dayFiles() throws -> [URL] {
         guard FileManager.default.fileExists(atPath: directory.path) else { return [] }
         let formatter = formatter()
-        return try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
-            .filter { $0.pathExtension == "jsonl" && formatter.date(from: String($0.lastPathComponent.dropLast(".jsonl".count))) != nil }
-            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+        return try FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: nil
+        )
+        .filter {
+            $0.pathExtension == "jsonl"
+                && formatter.date(from: String($0.lastPathComponent.dropLast(".jsonl".count)))
+                    != nil
+        }
+        .sorted { $0.lastPathComponent < $1.lastPathComponent }
     }
 }
 

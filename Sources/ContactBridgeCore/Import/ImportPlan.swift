@@ -31,7 +31,9 @@ public enum ImportSelection {
     }
 
     /// `selected` without the automated text-message senders among `candidates`; every other tick stays.
-    public static func excludingTextMessageSenders(_ selected: Set<String>, from candidates: [ImportCandidate]) -> Set<String> {
+    public static func excludingTextMessageSenders(
+        _ selected: Set<String>, from candidates: [ImportCandidate]
+    ) -> Set<String> {
         selected.subtracting(candidates.filter(\.isShortCodeSender).map(\.id))
     }
 }
@@ -52,7 +54,8 @@ public struct ImportLink: Sendable, Hashable {
     public var isNameOnly: Bool { importAnywayCandidate != nil }
 
     public init(
-        icloudID: String, googleResourceName: String, confidence: Double, reasons: [String], icloudName: String = "", googleName: String = "",
+        icloudID: String, googleResourceName: String, confidence: Double, reasons: [String],
+        icloudName: String = "", googleName: String = "",
         importAnywayCandidate: ImportCandidate? = nil
     ) {
         self.importAnywayCandidate = importAnywayCandidate
@@ -82,7 +85,8 @@ public struct PossibleMatch: Sendable, Hashable, Identifiable {
     public var googleName: String
 
     public init(
-        icloudID: String, googleID: String, googleSource: ContactSource, confidence: Double, reasons: [String], flags: [MatchFlag],
+        icloudID: String, googleID: String, googleSource: ContactSource, confidence: Double,
+        reasons: [String], flags: [MatchFlag],
         icloudName: String = "", googleName: String = ""
     ) {
         self.icloudName = icloudName
@@ -112,7 +116,8 @@ public struct ImportPlan: Sendable, Hashable {
     public var diagnostics: MatchDiagnostics
 
     public init(
-        toImport: [ImportCandidate] = [], otherContactCandidates: [ImportCandidate] = [], links: [ImportLink] = [],
+        toImport: [ImportCandidate] = [], otherContactCandidates: [ImportCandidate] = [],
+        links: [ImportLink] = [],
         possibleMatches: [PossibleMatch] = [], diagnostics: MatchDiagnostics = MatchDiagnostics()
     ) {
         self.toImport = toImport
@@ -122,7 +127,10 @@ public struct ImportPlan: Sendable, Hashable {
         self.diagnostics = diagnostics
     }
 
-    public var isEmpty: Bool { toImport.isEmpty && otherContactCandidates.isEmpty && links.isEmpty && possibleMatches.isEmpty }
+    public var isEmpty: Bool {
+        toImport.isEmpty && otherContactCandidates.isEmpty && links.isEmpty
+            && possibleMatches.isEmpty
+    }
 
     /// Possible matches that involve this Google record.
     public func possibleMatches(forGoogleID id: String) -> [PossibleMatch] {

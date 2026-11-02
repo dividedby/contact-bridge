@@ -8,8 +8,10 @@ enum PhotoImage {
     /// The image decoded at no more than `maxPixel` on its longest side, EXIF orientation applied. Never uses an embedded
     /// thumbnail (it can be stale), and never enlarges. Nil when the bytes are not an image this machine can decode.
     static func thumbnail(from data: Data, maxPixel: Int) -> CGImage? {
-        guard let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
-              CGImageSourceGetCount(source) > 0
+        guard
+            let source = CGImageSourceCreateWithData(
+                data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
+            CGImageSourceGetCount(source) > 0
         else { return nil }
         let longest = longestSide(of: source) ?? maxPixel
         let options: [CFString: Any] = [
@@ -23,13 +25,17 @@ enum PhotoImage {
 
     /// Whether the bytes decode to a picture.
     static func isDecodable(_ data: Data) -> Bool {
-        guard let source = CGImageSourceCreateWithData(data as CFData, nil), CGImageSourceGetCount(source) > 0 else { return false }
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+            CGImageSourceGetCount(source) > 0
+        else { return false }
         return CGImageSourceCreateImageAtIndex(source, 0, nil) != nil
     }
 
     private static func longestSide(of source: CGImageSource) -> Int? {
-        guard let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
-              let width = properties[kCGImagePropertyPixelWidth] as? Int, let height = properties[kCGImagePropertyPixelHeight] as? Int
+        guard
+            let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+            let width = properties[kCGImagePropertyPixelWidth] as? Int,
+            let height = properties[kCGImagePropertyPixelHeight] as? Int
         else { return nil }
         return max(width, height)
     }
@@ -39,10 +45,11 @@ enum PhotoImage {
         var bytes = [UInt8](repeating: 0, count: width * height * 4)
         let drawn = bytes.withUnsafeMutableBytes { buffer -> Bool in
             guard let space = CGColorSpace(name: CGColorSpace.sRGB),
-                  let context = CGContext(
-                      data: buffer.baseAddress, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
-                      space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-                  )
+                let context = CGContext(
+                    data: buffer.baseAddress, width: width, height: height, bitsPerComponent: 8,
+                    bytesPerRow: width * 4,
+                    space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+                )
             else { return false }
             context.setFillColor(red: 1, green: 1, blue: 1, alpha: 1)
             context.fill(CGRect(x: 0, y: 0, width: width, height: height))

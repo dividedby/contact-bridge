@@ -1,4 +1,5 @@
 import Testing
+
 @testable import ContactBridgeCore
 
 struct DuplicateMatcherTests {
@@ -16,7 +17,9 @@ struct DuplicateMatcherTests {
         )
     }
 
-    private func company(_ id: String, _ org: String, phones: [String] = [], emails: [String] = []) -> ContactRecord {
+    private func company(_ id: String, _ org: String, phones: [String] = [], emails: [String] = [])
+        -> ContactRecord
+    {
         person(id, "", "", phones: phones, emails: emails, org: org)
     }
 
@@ -69,7 +72,9 @@ struct DuplicateMatcherTests {
         #expect(clusters[0].reasons.contains("similar name"))
     }
 
-    @Test("A given name that is an initial of the other still agrees", arguments: [("J", "John"), ("john", "J.")])
+    @Test(
+        "A given name that is an initial of the other still agrees",
+        arguments: [("J", "John"), ("john", "J.")])
     func initialAgrees(a: String, b: String) {
         let clusters = matcher.findClusters(in: [
             person("a", a, "Smith", phones: ["415-555-2671"]),
@@ -80,10 +85,13 @@ struct DuplicateMatcherTests {
         #expect(clusters[0].flags.isEmpty)
     }
 
-    @Test("Near-identical given names sharing a phone are different people, low and flagged", arguments: [
-        ("Mark", "Mary"), ("Jane", "June"), ("Lee", "Leo"), ("Mike", "Mia"), ("Joan", "John"),
-        ("Eric", "Erica"), ("Alex", "Alexa"), ("Ann", "Anna"), ("Sara", "Sarah"), ("Jon", "John"),
-    ])
+    @Test(
+        "Near-identical given names sharing a phone are different people, low and flagged",
+        arguments: [
+            ("Mark", "Mary"), ("Jane", "June"), ("Lee", "Leo"), ("Mike", "Mia"), ("Joan", "John"),
+            ("Eric", "Erica"), ("Alex", "Alexa"), ("Ann", "Anna"), ("Sara", "Sarah"),
+            ("Jon", "John"),
+        ])
     func nearIdenticalGivenNamesPhone(a: String, b: String) {
         let clusters = matcher.findClusters(in: [
             person("a", a, "Smith", phones: ["415-555-2671"]),
@@ -92,12 +100,17 @@ struct DuplicateMatcherTests {
         #expect(clusters.count == 1)
         #expect(clusters[0].level == .low)
         #expect(clusters[0].flags == [.sharedPhoneDifferentNames])
-        #expect(!clusters[0].reasons.contains("same name") && !clusters[0].reasons.contains("similar name"))
+        #expect(
+            !clusters[0].reasons.contains("same name")
+                && !clusters[0].reasons.contains("similar name"))
     }
 
-    @Test("Given-name spelling variants sharing an email join at medium with an informational flag", arguments: [
-        ("Sara", "Sarah"), ("Jon", "John"), ("Allan", "Alan"), ("Eric", "Erica"), ("Alex", "Alexa"), ("Ann", "Anna"),
-    ])
+    @Test(
+        "Given-name spelling variants sharing an email join at medium with an informational flag",
+        arguments: [
+            ("Sara", "Sarah"), ("Jon", "John"), ("Allan", "Alan"), ("Eric", "Erica"),
+            ("Alex", "Alexa"), ("Ann", "Anna"),
+        ])
     func spellingVariantEmail(a: String, b: String) {
         let clusters = matcher.findClusters(in: [
             person("a", a, "Smith", emails: ["x@example.com"]),
@@ -111,9 +124,11 @@ struct DuplicateMatcherTests {
         #expect(clusters[0].edges.allSatisfy { $0.joinsCluster })
     }
 
-    @Test("Less similar given names sharing an email stay low and flagged", arguments: [
-        ("Mark", "Mary"), ("Jane", "June"), ("Lee", "Leo"), ("Mike", "Mia"), ("Joan", "John"),
-    ])
+    @Test(
+        "Less similar given names sharing an email stay low and flagged",
+        arguments: [
+            ("Mark", "Mary"), ("Jane", "June"), ("Lee", "Leo"), ("Mike", "Mia"), ("Joan", "John"),
+        ])
     func differentGivenNamesEmail(a: String, b: String) {
         let clusters = matcher.findClusters(in: [
             person("a", a, "Smith", emails: ["x@example.com"]),
@@ -124,9 +139,11 @@ struct DuplicateMatcherTests {
         #expect(clusters[0].flags == [.sharedEmailDifferentNames])
     }
 
-    @Test("Katherine nicknames sharing an email are the same name, not a spelling variant", arguments: [
-        ("Kate", "Katie"), ("Katy", "Katie"), ("Kathryn", "Katherine"), ("Catherine", "Kate"),
-    ])
+    @Test(
+        "Katherine nicknames sharing an email are the same name, not a spelling variant",
+        arguments: [
+            ("Kate", "Katie"), ("Katy", "Katie"), ("Kathryn", "Katherine"), ("Catherine", "Kate"),
+        ])
     func katherineNicknames(a: String, b: String) {
         let clusters = matcher.findClusters(in: [
             person("a", a, "Smith", emails: ["x@example.com"]),
@@ -138,7 +155,9 @@ struct DuplicateMatcherTests {
         #expect(clusters[0].reasons.contains("same name"))
     }
 
-    @Test("Katie and Kathy are not nicknames of each other: sharing a phone or email is low and flagged")
+    @Test(
+        "Katie and Kathy are not nicknames of each other: sharing a phone or email is low and flagged"
+    )
     func katieKathy() {
         let phone = matcher.findClusters(in: [
             person("a", "Katie", "Smith", phones: ["415-555-2671"]),
@@ -176,7 +195,9 @@ struct DuplicateMatcherTests {
 
     // MARK: member-level name contradictions
 
-    @Test("An org-only record holding two different people's phones cannot make them one cluster at medium")
+    @Test(
+        "An org-only record holding two different people's phones cannot make them one cluster at medium"
+    )
     func orgBridgesTwoPeople() {
         let clusters = matcher.findClusters(in: [
             person("j", "John", "Smith", phones: ["415-555-2671"]),
@@ -205,7 +226,10 @@ struct DuplicateMatcherTests {
         #expect(cluster.members.map(\.id) == ["j", "k", "n"])
         #expect(cluster.level == .low)
         #expect(cluster.flags == [.memberNameConflict])
-        #expect(cluster.edges.contains { Set([$0.firstID, $0.secondID]) == ["k", "n"] && !$0.joinsCluster })
+        #expect(
+            cluster.edges.contains {
+                Set([$0.firstID, $0.secondID]) == ["k", "n"] && !$0.joinsCluster
+            })
     }
 
     @Test("Compatible members get no member-name flag")
@@ -233,20 +257,28 @@ struct DuplicateMatcherTests {
     @Test("Dropped switchboard identifiers and unchecked large clusters are reported")
     func diagnosticsOthers() {
         var generator = SeededGenerator(seed: 11)
-        let switchboard = (0..<150).map { person("s\($0)", randomWord(&generator), randomWord(&generator), phones: ["415-555-2671"]) }
+        let switchboard = (0..<150).map {
+            person(
+                "s\($0)", randomWord(&generator), randomWord(&generator), phones: ["415-555-2671"])
+        }
         #expect(matcher.analyze(switchboard).diagnostics.droppedSwitchboardIdentifiers == 1)
 
         let big = (0..<60).map { person("b\($0)", "Ann", "Lee", emails: ["ann@example.com"]) }
         let result = matcher.analyze(big)
         #expect(result.clusters.count == 1)
         #expect(result.diagnostics.clustersSkippingMemberNameCheck == 1)
-        #expect(matcher.analyze((0..<10).map { person("c\($0)", "Ann", "Lee", emails: ["ann@example.com"]) })
+        #expect(
+            matcher.analyze(
+                (0..<10).map { person("c\($0)", "Ann", "Lee", emails: ["ann@example.com"]) }
+            )
             .diagnostics == MatchDiagnostics())
     }
 
-    @Test("A person and an unnamed record on one phone is capped below high and flagged", arguments: [
-        "", "Acme Corp",
-    ])
+    @Test(
+        "A person and an unnamed record on one phone is capped below high and flagged",
+        arguments: [
+            "", "Acme Corp",
+        ])
     func phoneWithUnnamedRecord(org: String) {
         let clusters = matcher.findClusters(in: [
             person("a", "Ann", "Lee", phones: ["415-555-2671"]),
@@ -307,7 +339,9 @@ struct DuplicateMatcherTests {
     @Test("A fuzzy name alone is lower than an exact one")
     func fuzzyNameOnly() {
         let exact = matcher.findClusters(in: [person("a", "Ann", "Lee"), person("b", "Ann", "Lee")])
-        let fuzzy = matcher.findClusters(in: [person("a", "Jon", "Smith"), person("b", "John", "Smith")])
+        let fuzzy = matcher.findClusters(in: [
+            person("a", "Jon", "Smith"), person("b", "John", "Smith"),
+        ])
         #expect(fuzzy.count == 1)
         #expect(fuzzy[0].reasons == ["similar name"])
         #expect(fuzzy[0].confidence == 0.4)
@@ -318,7 +352,9 @@ struct DuplicateMatcherTests {
 
     @Test("Different first names with the same surname do not match")
     func differentGivenNames() {
-        let clusters = matcher.findClusters(in: [person("a", "John", "Smith"), person("b", "Jane", "Smith")])
+        let clusters = matcher.findClusters(in: [
+            person("a", "John", "Smith"), person("b", "Jane", "Smith"),
+        ])
         #expect(clusters.isEmpty)
     }
 
@@ -446,7 +482,10 @@ struct DuplicateMatcherTests {
     @Test("A number shared by a huge number of records is treated as a switchboard")
     func switchboard() {
         var generator = SeededGenerator(seed: 7)
-        let records = (0..<150).map { person("r\($0)", randomWord(&generator), randomWord(&generator), phones: ["415-555-2671"]) }
+        let records = (0..<150).map {
+            person(
+                "r\($0)", randomWord(&generator), randomWord(&generator), phones: ["415-555-2671"])
+        }
         #expect(matcher.findClusters(in: records).isEmpty)
     }
 
@@ -464,11 +503,16 @@ struct DuplicateMatcherTests {
         #expect(cluster.flags.isEmpty)
         #expect(cluster.edges.map { [$0.firstID, $0.secondID] } == [["dad1", "dad2"]])
         #expect(cluster.relatedEdges.count == 1)
-        #expect(Set([cluster.relatedEdges[0].firstID, cluster.relatedEdges[0].secondID]) == ["dad1", "mom"])
+        #expect(
+            Set([cluster.relatedEdges[0].firstID, cluster.relatedEdges[0].secondID]) == [
+                "dad1", "mom",
+            ])
         #expect(cluster.relatedEdges[0].match.flags == [.sharedPhoneDifferentNames])
     }
 
-    @Test("A nameless record on a household phone cannot launder two different people into a high cluster")
+    @Test(
+        "A nameless record on a household phone cannot launder two different people into a high cluster"
+    )
     func householdWithFamilyRecord() {
         let clusters = matcher.findClusters(in: [
             person("dad", "Dan", "Jones", phones: ["415-555-2671"]),
@@ -484,7 +528,8 @@ struct DuplicateMatcherTests {
         #expect(cluster.edges.count == 3)
     }
 
-    @Test("Weak-only pairs still surface as their own low-confidence cluster, with no related edges")
+    @Test(
+        "Weak-only pairs still surface as their own low-confidence cluster, with no related edges")
     func weakOnlyPair() {
         let clusters = matcher.findClusters(in: [
             person("a", "Alice", "Jones", phones: ["415-555-2671"]),
@@ -555,10 +600,14 @@ struct DuplicateMatcherTests {
         var records: [ContactRecord] = []
         for i in 0..<4000 {
             let phone = "+1415\(2_000_000 + i)"
-            records.append(person("r\(i)", randomWord(&generator), randomWord(&generator), phones: [phone], emails: ["u\(i)@example.com"]))
+            records.append(
+                person(
+                    "r\(i)", randomWord(&generator), randomWord(&generator), phones: [phone],
+                    emails: ["u\(i)@example.com"]))
         }
         let victim = records[10]
-        records.append(person("dup1", victim.givenName, victim.familyName, emails: ["u10@example.com"]))
+        records.append(
+            person("dup1", victim.givenName, victim.familyName, emails: ["u10@example.com"]))
         records.append(person("dup2", "Zz", "Yy", phones: ["+1415\(2_000_077)"]))
         let clusters = matcher.findClusters(in: records)
         #expect(clusters.count == 2)
@@ -588,7 +637,9 @@ struct DuplicateMatcherTests {
     @Test("An oversized name block still matches exact-name groups that fit under the cap")
     func oversizedNameBlockExactFallback() {
         var generator = SeededGenerator(seed: 3)
-        var records = (0..<250).map { person("r\($0)", "J" + randomWord(&generator).lowercased(), "Smith") }
+        var records = (0..<250).map {
+            person("r\($0)", "J" + randomWord(&generator).lowercased(), "Smith")
+        }
         records.append(person("x1", "Jonas", "Smith"))
         records.append(person("x2", "Jonas", "Smith"))
         let clusters = matcher.findClusters(in: records)
@@ -607,7 +658,9 @@ struct DuplicateMatcherTests {
 
 /// Dissimilar synthetic names: sequential names like "Given1"/"Given2" are legitimately near-duplicates.
 func randomWord(_ generator: inout SeededGenerator) -> String {
-    String((0..<7).map { _ in Character(UnicodeScalar(UInt8.random(in: 97...122, using: &generator))) }).capitalized
+    String(
+        (0..<7).map { _ in Character(UnicodeScalar(UInt8.random(in: 97...122, using: &generator))) }
+    ).capitalized
 }
 
 struct SeededGenerator: RandomNumberGenerator {

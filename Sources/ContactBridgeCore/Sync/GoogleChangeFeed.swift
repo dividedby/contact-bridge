@@ -71,7 +71,9 @@ extension GoogleChangeFeedError: LocalizedError {
 public struct GoogleChangeFeed: Sendable {
     /// Hash of the fields the real client requests; part of the sync state so a field change forces a full listing.
     public static var currentFieldsVersion: String {
-        SHA256.hash(data: Data(URLSessionGoogleContactsClient.personFields.utf8)).map { String(format: "%02x", $0) }.joined()
+        SHA256.hash(data: Data(URLSessionGoogleContactsClient.personFields.utf8)).map {
+            String(format: "%02x", $0)
+        }.joined()
     }
 
     private static let maxPages = 1000
@@ -79,7 +81,10 @@ public struct GoogleChangeFeed: Sendable {
     private let client: any GoogleContactsClient
     private let fieldsVersion: String
 
-    public init(client: any GoogleContactsClient, fieldsVersion: String = GoogleChangeFeed.currentFieldsVersion) {
+    public init(
+        client: any GoogleContactsClient,
+        fieldsVersion: String = GoogleChangeFeed.currentFieldsVersion
+    ) {
         self.client = client
         self.fieldsVersion = fieldsVersion
     }
@@ -88,27 +93,37 @@ public struct GoogleChangeFeed: Sendable {
     ///   - accountEmail: the signed-in account, when known. A different one than `state.googleAccount` pauses. Unknown
     ///     (nil or empty) while an account is saved throws `GoogleChangeFeedError.accountUnconfirmed`: nothing is read.
     ///   - requireFullListing: list everything even though a valid sync token exists.
-    public func fetch(state: SyncState, accountEmail: String? = nil, requireFullListing: Bool = false) async throws -> GoogleFeed {
+    public func fetch(
+        state: SyncState, accountEmail: String? = nil, requireFullListing: Bool = false
+    ) async throws -> GoogleFeed {
         let accountEmail = accountEmail.flatMap { $0.isEmpty ? nil : $0 }
         func feed(
-            _ status: GoogleFeed.Status, _ mode: GoogleFeed.Mode, people: [GooglePerson] = [], deleted: Set<String> = [], token: String? = nil
+            _ status: GoogleFeed.Status, _ mode: GoogleFeed.Mode, people: [GooglePerson] = [],
+            deleted: Set<String> = [], token: String? = nil
         ) -> GoogleFeed {
             var live: [String: GooglePerson] = [:]
             var index: [String: String] = [:]
             for person in people {
                 guard let name = person.resourceName else { continue }
                 live[name] = person
-                if let tag = person.contactBridgeSourceID, !tag.isEmpty, (index[tag] ?? name) >= name { index[tag] = name }
+                if let tag = person.contactBridgeSourceID, !tag.isEmpty,
+                    (index[tag] ?? name) >= name
+                {
+                    index[tag] = name
+                }
             }
             return GoogleFeed(
-                status: status, mode: mode, people: live, deleted: deleted, nextSyncToken: token, fieldsVersion: fieldsVersion,
+                status: status, mode: mode, people: live, deleted: deleted, nextSyncToken: token,
+                fieldsVersion: fieldsVersion,
                 account: accountEmail ?? state.googleAccount, ownershipIndex: index
             )
         }
 
         if let saved = state.googleAccount {
             guard let accountEmail else { throw GoogleChangeFeedError.accountUnconfirmed }
-            if saved.lowercased() != accountEmail.lowercased() { return feed(.paused(.accountChanged), .full(.requested)) }
+            if saved.lowercased() != accountEmail.lowercased() {
+                return feed(.paused(.accountChanged), .full(.requested))
+            }
         }
 
         var reason: GoogleFeed.FullListingReason?
@@ -125,18 +140,23 @@ public struct GoogleChangeFeed: Sendable {
                 let (changes, next) = try await list(syncToken: token)
                 // A deletion marker is a stub with only a resource name, so it is told apart before anything is mapped.
                 let markers = Set(changes.filter(\.isDeleted).compactMap(\.resourceName))
-                return feed(.ok, .incremental, people: changes.filter { !$0.isDeleted }, deleted: markers, token: next)
+                return feed(
+                    .ok, .incremental, people: changes.filter { !$0.isDeleted }, deleted: markers,
+                    token: next)
             } catch GoogleAPIError.syncTokenExpired {
                 reason = .tokenExpired
             }
         }
 
         let (everyone, next) = try await list(syncToken: nil)
-        return feed(.ok, .full(reason ?? .noToken), people: everyone.filter { !$0.isDeleted }, token: next)
+        return feed(
+            .ok, .full(reason ?? .noToken), people: everyone.filter { !$0.isDeleted }, token: next)
     }
 
     /// Follows page tokens to the end; the sync token comes with the last page.
-    private func list(syncToken: String?) async throws -> (people: [GooglePerson], nextSyncToken: String?) {
+    private func list(syncToken: String?) async throws -> (
+        people: [GooglePerson], nextSyncToken: String?
+    ) {
         var people: [GooglePerson] = []
         var seen = Set<String>()
         var pageToken: String?
@@ -146,7 +166,9 @@ public struct GoogleChangeFeed: Sendable {
             people += page.people
             pages += 1
             guard let next = page.nextPageToken else { return (people, page.nextSyncToken) }
-            guard pages < Self.maxPages, seen.insert(next).inserted else { throw GoogleListingError.pagingDidNotTerminate("connections") }
+            guard pages < Self.maxPages, seen.insert(next).inserted else {
+                throw GoogleListingError.pagingDidNotTerminate("connections")
+            }
             pageToken = next
         }
     }

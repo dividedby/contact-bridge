@@ -29,7 +29,8 @@ public protocol AppleScriptRunning: Sendable {
 
     /// Compiles `source` (which defines `handler`) and calls the handler with `arguments` as its positional parameters.
     /// Arguments travel as Apple Event descriptors, never as script text, so no value needs escaping.
-    func call(handler: String, in source: String, arguments: [NSAppleEventDescriptor]) async throws -> NSAppleEventDescriptor
+    func call(handler: String, in source: String, arguments: [NSAppleEventDescriptor]) async throws
+        -> NSAppleEventDescriptor
 }
 
 /// `NSAppleScript` on one dedicated serial queue (NSAppleScript is not thread-safe, so every instance is created, compiled
@@ -43,15 +44,23 @@ public final class NSAppleScriptRunner: AppleScriptRunning {
     public init() {}
 
     public func run(source: String) async throws -> NSAppleEventDescriptor {
-        try await onQueue { Result(descriptor: try Self.execute(source: source, event: nil)) }.descriptor
+        try await onQueue { Result(descriptor: try Self.execute(source: source, event: nil)) }
+            .descriptor
     }
 
-    public func call(handler: String, in source: String, arguments: [NSAppleEventDescriptor]) async throws -> NSAppleEventDescriptor {
+    public func call(handler: String, in source: String, arguments: [NSAppleEventDescriptor])
+        async throws -> NSAppleEventDescriptor
+    {
         // The descriptors are only read on the queue; callers hand over ownership.
         let box = Result(descriptor: NSAppleEventDescriptor.list())
-        for (index, argument) in arguments.enumerated() { box.descriptor.insert(argument, at: index + 1) }
+        for (index, argument) in arguments.enumerated() {
+            box.descriptor.insert(argument, at: index + 1)
+        }
         return try await onQueue {
-            Result(descriptor: try Self.execute(source: source, event: Self.subroutineEvent(handler: handler, arguments: box.descriptor)))
+            Result(
+                descriptor: try Self.execute(
+                    source: source,
+                    event: Self.subroutineEvent(handler: handler, arguments: box.descriptor)))
         }.descriptor
     }
 
@@ -70,31 +79,42 @@ public final class NSAppleScriptRunner: AppleScriptRunning {
     private static let subroutineName: AEKeyword = 0x736E_616D
     private static let directObject: AEKeyword = 0x2D2D_2D2D
 
-    private static func subroutineEvent(handler: String, arguments: NSAppleEventDescriptor) -> NSAppleEventDescriptor {
+    private static func subroutineEvent(handler: String, arguments: NSAppleEventDescriptor)
+        -> NSAppleEventDescriptor
+    {
         let event = NSAppleEventDescriptor(
-            eventClass: scriptSuite, eventID: subroutineEvent, targetDescriptor: NSAppleEventDescriptor.currentProcess(),
+            eventClass: scriptSuite, eventID: subroutineEvent,
+            targetDescriptor: NSAppleEventDescriptor.currentProcess(),
             returnID: AEReturnID(-1), transactionID: AETransactionID(0)
         )
         // AppleScript handler names are case-insensitive; the event carries the lower-cased name.
-        event.setParam(NSAppleEventDescriptor(string: handler.lowercased()), forKeyword: subroutineName)
+        event.setParam(
+            NSAppleEventDescriptor(string: handler.lowercased()), forKeyword: subroutineName)
         event.setParam(arguments, forKeyword: directObject)
         return event
     }
 
-    private static func execute(source: String, event: NSAppleEventDescriptor?) throws -> NSAppleEventDescriptor {
+    private static func execute(source: String, event: NSAppleEventDescriptor?) throws
+        -> NSAppleEventDescriptor
+    {
         guard let script = NSAppleScript(source: source) else {
-            throw AppleScriptError(number: -2741, message: "Could not create a script from the source.")
+            throw AppleScriptError(
+                number: -2741, message: "Could not create a script from the source.")
         }
         var info: NSDictionary?
         guard script.compileAndReturnError(&info) else { throw error(from: info) }
-        let result = event.map { script.executeAppleEvent($0, error: &info) } ?? script.executeAndReturnError(&info)
+        let result =
+            event.map { script.executeAppleEvent($0, error: &info) }
+            ?? script.executeAndReturnError(&info)
         if info != nil { throw error(from: info) }
         return result
     }
 
     private static func error(from info: NSDictionary?) -> AppleScriptError {
         let number = (info?["NSAppleScriptErrorNumber"] as? NSNumber)?.intValue ?? -1
-        let message = (info?["NSAppleScriptErrorMessage"] as? String) ?? (info?["NSAppleScriptErrorBriefMessage"] as? String) ?? "AppleScript failed."
+        let message =
+            (info?["NSAppleScriptErrorMessage"] as? String)
+            ?? (info?["NSAppleScriptErrorBriefMessage"] as? String) ?? "AppleScript failed."
         return AppleScriptError(number: number, message: message)
     }
 }

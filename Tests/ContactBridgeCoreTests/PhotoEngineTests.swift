@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+
 @testable import ContactBridgeCore
 
 /// Photo sync through the real engine: observe, plan, field writes, photo writes, tokens, confirmations and follow-ups.
@@ -14,11 +15,15 @@ struct PhotoEngineTests {
 
     private func setup(count: Int = 3, planner: SyncPlanner = SyncPlanner()) async throws -> Setup {
         let photos = try await PhotoRig.linked(count: count)
-        let support = SyncPhotoSupport(fetcher: photos.fetcher, history: photos.photoHistory, sleep: { _ in })
-        return Setup(photos: photos, engine: EngineRig(photos.base, planner: planner, photos: support))
+        let support = SyncPhotoSupport(
+            fetcher: photos.fetcher, history: photos.photoHistory, sleep: { _ in })
+        return Setup(
+            photos: photos, engine: EngineRig(photos.base, planner: planner, photos: support))
     }
 
-    @Test("Photos go each way in a run, the summary says so, and a second run changes nothing and reads no picture")
+    @Test(
+        "Photos go each way in a run, the summary says so, and a second run changes nothing and reads no picture"
+    )
     func flowsBothWaysAndSettles() async throws {
         let rig = try await setup()
         defer { rig.photos.cleanUp() }
@@ -30,14 +35,20 @@ struct PhotoEngineTests {
 
         let snapshot = await rig.engine.snapshot
         let run = try #require(snapshot.lastRun)
-        #expect(run.photosToGoogle == 1 && run.photosToICloud == 1 && run.text == "Copied 1 photo to Google, 1 to iCloud.")
+        #expect(
+            run.photosToGoogle == 1 && run.photosToICloud == 1
+                && run.text == "Copied 1 photo to Google, 1 to iCloud.")
         let onGoogle = await rig.photos.googlePhoto(1)
         let onICloud = try await rig.photos.icloudPhoto("I2")
         #expect(onGoogle != nil && onICloud != nil)
         let conflicts = try rig.photos.base.reviews.load().filter { $0.kind == .photoConflict }
-        #expect(conflicts.map(\.id) == ["photoConflict|I3|people/c3"] && conflicts.first?.photoReason == .firstSightDiffers)
+        #expect(
+            conflicts.map(\.id) == ["photoConflict|I3|people/c3"]
+                && conflicts.first?.photoReason == .firstSightDiffers)
         #expect(snapshot.reviewItems.map(\.kind) == [.photoConflict])
-        #expect(try rig.engine.state.baselines.values.allSatisfy { $0.photo != nil } == false, "the pair with a question has no baseline yet")
+        #expect(
+            try rig.engine.state.baselines.values.allSatisfy { $0.photo != nil } == false,
+            "the pair with a question has no baseline yet")
 
         // The timer's run: iCloud is unchanged (our own write moved the token, and it was stepped past), nothing is read.
         let reads = rig.photos.store.photoReads
@@ -50,12 +61,16 @@ struct PhotoEngineTests {
         let after = rig.photos.store.photoReads
         let downloads = await rig.photos.fetcher.requested.count
         let writes = await rig.photos.google.photoWrites.count
-        #expect(after.data == reads.data && after.signatures == reads.signatures && downloads == requested)
+        #expect(
+            after.data == reads.data && after.signatures == reads.signatures
+                && downloads == requested)
         #expect(writes == 1)
         await rig.engine.engine.stop()
     }
 
-    @Test("More than the limit of photo writes asks first; confirming writes them once, and the next run does not ask again")
+    @Test(
+        "More than the limit of photo writes asks first; confirming writes them once, and the next run does not ask again"
+    )
     func confirmation() async throws {
         let rig = try await setup(count: 30)
         defer { rig.photos.cleanUp() }
@@ -67,7 +82,9 @@ struct PhotoEngineTests {
             Issue.record("expected a confirmation pause, got \(paused.status)")
             return
         }
-        #expect(summary.contains("write 21 of 30 contact photos to Google") && paused.confirmationSummary == summary)
+        #expect(
+            summary.contains("write 21 of 30 contact photos to Google")
+                && paused.confirmationSummary == summary)
         #expect(await rig.photos.google.photoWrites.isEmpty)
 
         await rig.engine.engine.confirmAndContinue()
@@ -82,21 +99,28 @@ struct PhotoEngineTests {
         await rig.engine.engine.stop()
     }
 
-    @Test("A photo write that fails for a moment keeps the run's tokens where they were, so the next run does it")
+    @Test(
+        "A photo write that fails for a moment keeps the run's tokens where they were, so the next run does it"
+    )
     func transientFailureRestoresTokens() async throws {
         let rig = try await setup(count: 2)
         defer { rig.photos.cleanUp() }
         let tokensBefore = try rig.engine.state
         try await rig.photos.setICloudPhoto("I1", one)
-        await rig.photos.google.inject(.error(.other(status: 500, message: "try later")), on: .updateContactPhoto)
+        await rig.photos.google.inject(
+            .error(.other(status: 500, message: "try later")), on: .updateContactPhoto)
         _ = await rig.engine.startAndRun()
 
         let first = await rig.engine.snapshot
         #expect(first.lastRun?.photosToGoogle == 0 && first.lastRun?.leftForNextRun == 1)
-        let putOff = first.lastRun?.warnings.filter { $0.contains("put off until the next run") } ?? []
-        #expect(putOff.count == 1 && putOff.first?.contains("try later") == true, "the screen says why")
+        let putOff =
+            first.lastRun?.warnings.filter { $0.contains("put off until the next run") } ?? []
+        #expect(
+            putOff.count == 1 && putOff.first?.contains("try later") == true, "the screen says why")
         let held = try rig.engine.state
-        #expect(held.icloudChangeToken == tokensBefore.icloudChangeToken && held.googleSyncToken == tokensBefore.googleSyncToken)
+        #expect(
+            held.icloudChangeToken == tokensBefore.icloudChangeToken
+                && held.googleSyncToken == tokensBefore.googleSyncToken)
         #expect(await rig.photos.googlePhoto(1) == nil)
 
         await rig.engine.engine.syncNow()
@@ -110,14 +134,18 @@ struct PhotoEngineTests {
     func followUpAfterCreate() async throws {
         let rig = try await setup(count: 2)
         defer { rig.photos.cleanUp() }
-        let carol = try await rig.photos.base.addICloudContact("Carol", "Newman", phone: "415-555-0100", note: "n")
+        let carol = try await rig.photos.base.addICloudContact(
+            "Carol", "Newman", phone: "415-555-0100", note: "n")
         try await rig.photos.setICloudPhoto(carol.sourceIdentifier, one)
         _ = await rig.engine.startAndRun()
         #expect(await rig.engine.snapshot.lastRun?.created == 1)
-        let carolPerson = try #require(await rig.photos.base.taggedPeople(carol.sourceIdentifier).first)
-        #expect(GooglePersonMapper.photos(of: carolPerson).contact == nil, "the first run only created her")
+        let carolPerson = try #require(
+            await rig.photos.base.taggedPeople(carol.sourceIdentifier).first)
+        #expect(
+            GooglePersonMapper.photos(of: carolPerson).contact == nil,
+            "the first run only created her")
 
-        await rig.engine.clock.waitForSleepers(2) // the timer, and the follow-up's debounce
+        await rig.engine.clock.waitForSleepers(2)  // the timer, and the follow-up's debounce
         await rig.engine.advance(10)
         let after = try #require(await rig.photos.base.taggedPeople(carol.sourceIdentifier).first)
         #expect(GooglePersonMapper.photos(of: after).contact != nil)
@@ -125,7 +153,9 @@ struct PhotoEngineTests {
         await rig.engine.engine.stop()
     }
 
-    @Test("The first-sync preview lists the photos it would copy, and approving still goes through with the same counts")
+    @Test(
+        "The first-sync preview lists the photos it would copy, and approving still goes through with the same counts"
+    )
     func previewShowsPhotos() async throws {
         let rig = try await setup(count: 2)
         defer { rig.photos.cleanUp() }
@@ -135,7 +165,9 @@ struct PhotoEngineTests {
         await rig.engine.engine.refreshPreview()
 
         let preview = try #require(await rig.engine.snapshot.preview)
-        #expect(preview.photos.map(\.name) == ["First1 Last1"] && preview.counts.photo == 1 && !preview.isEmpty)
+        #expect(
+            preview.photos.map(\.name) == ["First1 Last1"] && preview.counts.photo == 1
+                && !preview.isEmpty)
         #expect(await rig.photos.googlePhoto(1) == nil, "a preview writes nothing")
 
         #expect(await rig.engine.engine.approveFirstSync() == .started)
@@ -152,7 +184,9 @@ struct PhotoEngineTests {
         try await rig.photos.setICloudPhoto("I1", nil)
 
         await rig.engine.engine.syncNow()
-        #expect(try rig.photos.base.reviews.load().isEmpty && rig.photos.photoBaseline("I1")?.pendingRemoval != nil)
+        #expect(
+            try rig.photos.base.reviews.load().isEmpty
+                && rig.photos.photoBaseline("I1")?.pendingRemoval != nil)
         rig.engine.clock.advance(by: 360)
         await rig.engine.engine.syncNow()
         let items = try rig.photos.base.reviews.load()
@@ -163,7 +197,9 @@ struct PhotoEngineTests {
         await rig.engine.engine.stop()
     }
 
-    @Test("With profile photos on, Google is listed in full when the last full listing is over a day old, and not before")
+    @Test(
+        "With profile photos on, Google is listed in full when the last full listing is over a day old, and not before"
+    )
     func profileFullListing() async throws {
         let stale = try await setup(count: 2)
         defer { stale.photos.cleanUp() }
@@ -211,14 +247,18 @@ struct PhotoEngineTests {
         let reads = rig.photos.store.photoReads
         _ = await rig.engine.startAndRun()
 
-        #expect(rig.photos.store.photoReads.data == reads.data && rig.photos.store.photoReads.signatures == reads.signatures)
+        #expect(
+            rig.photos.store.photoReads.data == reads.data
+                && rig.photos.store.photoReads.signatures == reads.signatures)
         let writes = await rig.photos.google.photoWrites
         let downloads = await rig.photos.fetcher.requested
         #expect(writes.isEmpty && downloads.isEmpty)
         await rig.engine.engine.stop()
     }
 
-    @Test("Put-off photo changes are counted by reason; ones that need no retry are left out, and carried writes say why")
+    @Test(
+        "Put-off photo changes are counted by reason; ones that need no retry are left out, and carried writes say why"
+    )
     func putOffReasons() {
         var report = PhotoRunReport()
         report.skipped = [
@@ -229,15 +269,18 @@ struct PhotoEngineTests {
             .init(icloudID: "I5", reason: .permanent("refused")),
         ]
         report.carried = 2
-        #expect(report.putOffReasons == [
-            "2 photo changes were put off until the next run: backup failed",
-            "1 photo change was put off until the next run: download failed",
-            "2 Google photo changes wait for the next run: Google takes at most 60 photo changes per run.",
-        ])
+        #expect(
+            report.putOffReasons == [
+                "2 photo changes were put off until the next run: backup failed",
+                "1 photo change was put off until the next run: download failed",
+                "2 Google photo changes wait for the next run: Google takes at most 60 photo changes per run.",
+            ])
         #expect(PhotoRunReport().putOffReasons.isEmpty)
     }
 
-    @Test("A wide Google photo copied to iCloud and then kept only as a centre-square thumbnail is not a change or a removal")
+    @Test(
+        "A wide Google photo copied to iCloud and then kept only as a centre-square thumbnail is not a change or a removal"
+    )
     func centreSquareThumbnailIsTheSamePhoto() async throws {
         let rig = try await setup(count: 2)
         defer { rig.photos.cleanUp() }
@@ -247,7 +290,8 @@ struct PhotoEngineTests {
         #expect(await rig.engine.snapshot.lastRun?.photosToICloud == 1)
 
         // What macOS reports once iCloud has synced the photo: a re-encoded centre square, and a moved change token.
-        try await rig.photos.setICloudPhoto("I2", PhotoTestImages.jpeg(PhotoTestImages.centreSquare(wide), quality: 0.7))
+        try await rig.photos.setICloudPhoto(
+            "I2", PhotoTestImages.jpeg(PhotoTestImages.centreSquare(wide), quality: 0.7))
         let writes = await rig.photos.google.photoWrites.count
         for _ in 0..<2 { await rig.engine.engine.syncNow() }
         let run = try #require(await rig.engine.snapshot.lastRun)
@@ -257,7 +301,8 @@ struct PhotoEngineTests {
         await rig.engine.engine.stop()
     }
 
-    @Test("A photo save iCloud does not keep is not counted as copied, says why, and is tried again")
+    @Test(
+        "A photo save iCloud does not keep is not counted as copied, says why, and is tried again")
     func photoSaveNotKept() async throws {
         let rig = try await setup(count: 2)
         defer { rig.photos.cleanUp() }
@@ -276,7 +321,9 @@ struct PhotoEngineTests {
         await rig.engine.engine.stop()
     }
 
-    @Test("The one-time repair looks again at pairs whose iCloud contact has a photo and keeps real removals as questions")
+    @Test(
+        "The one-time repair looks again at pairs whose iCloud contact has a photo and keeps real removals as questions"
+    )
     func repairOfOlderPhotoRecords() async throws {
         let rig = try await setup(count: 3)
         defer { rig.photos.cleanUp() }
@@ -285,23 +332,37 @@ struct PhotoEngineTests {
         try await rig.photos.setGooglePhoto(1, one)
         try await rig.photos.setGooglePhoto(2, two)
         let fingerprints = ImageIOPhotoFingerprinter()
-        let stale = PhotoBaseline(icloud: fingerprints.fingerprint(of: one), google: fingerprints.fingerprint(of: one), syncedAt: Date())
-        let removed = PhotoBaseline(icloud: fingerprints.fingerprint(of: two), google: fingerprints.fingerprint(of: two), syncedAt: Date())
+        let stale = PhotoBaseline(
+            icloud: fingerprints.fingerprint(of: one), google: fingerprints.fingerprint(of: one),
+            syncedAt: Date())
+        let removed = PhotoBaseline(
+            icloud: fingerprints.fingerprint(of: two), google: fingerprints.fingerprint(of: two),
+            syncedAt: Date())
         try rig.photos.base.stateStore.update {
             $0.baselines["I1"]?.photo = stale
             $0.baselines["I2"]?.photo = removed
             $0.photoRepairVersion = 0
         }
-        try rig.photos.base.reviews.add([
-            ReviewCandidate(kind: .photoConflict, icloudID: "I1", resourceName: "people/c1", fields: [], photoStamp: "s1", photoReason: .removedInICloud),
-            ReviewCandidate(kind: .photoConflict, icloudID: "I2", resourceName: "people/c2", fields: [], photoStamp: "s2", photoReason: .removedInICloud),
-        ], at: Date())
+        try rig.photos.base.reviews.add(
+            [
+                ReviewCandidate(
+                    kind: .photoConflict, icloudID: "I1", resourceName: "people/c1", fields: [],
+                    photoStamp: "s1", photoReason: .removedInICloud),
+                ReviewCandidate(
+                    kind: .photoConflict, icloudID: "I2", resourceName: "people/c2", fields: [],
+                    photoStamp: "s2", photoReason: .removedInICloud),
+            ], at: Date())
 
         let writes = await rig.photos.google.photoWrites.count
-        let fresh = try await PhotoRepair.run(store: rig.photos.store, state: rig.photos.base.stateStore, reviews: rig.photos.base.reviews)
+        let fresh = try await PhotoRepair.run(
+            store: rig.photos.store, state: rig.photos.base.stateStore,
+            reviews: rig.photos.base.reviews)
         #expect(fresh == ["I1"])
-        #expect(try rig.photos.photoBaseline("I1") == nil && rig.photos.photoBaseline("I2") == removed)
-        #expect(try rig.photos.base.reviews.load().compactMap(\.icloudID) == ["I2"], "a photo really gone from iCloud is still asked about")
+        #expect(
+            try rig.photos.photoBaseline("I1") == nil && rig.photos.photoBaseline("I2") == removed)
+        #expect(
+            try rig.photos.base.reviews.load().compactMap(\.icloudID) == ["I2"],
+            "a photo really gone from iCloud is still asked about")
         #expect(try rig.photos.state.photoRepairVersion == PhotoRepair.currentVersion)
 
         // Looked at afresh, I1's two sides hold the same picture: recorded, nothing written, nothing asked.
@@ -312,14 +373,17 @@ struct PhotoEngineTests {
         await rig.engine.engine.stop()
     }
 
-    @Test("A sync run does the repair first when the stored records are older, and not while sync is paused")
+    @Test(
+        "A sync run does the repair first when the stored records are older, and not while sync is paused"
+    )
     func repairRunsBeforePlanning() async throws {
         let rig = try await setup(count: 2)
         defer { rig.photos.cleanUp() }
         try await rig.photos.setICloudPhoto("I1", one)
         try await rig.photos.setGooglePhoto(1, one)
         try rig.photos.base.stateStore.update {
-            $0.baselines["I1"]?.photo = PhotoBaseline(icloud: ImageIOPhotoFingerprinter().fingerprint(of: two), syncedAt: Date())
+            $0.baselines["I1"]?.photo = PhotoBaseline(
+                icloud: ImageIOPhotoFingerprinter().fingerprint(of: two), syncedAt: Date())
             $0.photoRepairVersion = 0
             $0.pause = .user
         }
@@ -330,7 +394,9 @@ struct PhotoEngineTests {
 
         await rig.engine.engine.resume()
         #expect(try rig.photos.state.photoRepairVersion == PhotoRepair.currentVersion)
-        #expect(await rig.photos.google.photoWrites.count == writes, "the stale record did not make I1 look changed")
+        #expect(
+            await rig.photos.google.photoWrites.count == writes,
+            "the stale record did not make I1 look changed")
         await rig.engine.engine.stop()
     }
 }

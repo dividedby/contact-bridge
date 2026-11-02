@@ -109,13 +109,18 @@ public struct MergePlan: Sendable, Hashable {
         }
 
         var droppedLabels: [DroppedLabel] = []
-        merged.phones = unionLabeled(.phones, members.map(\.phones), key: Self.phoneKey, describe: { $0 }, dropped: &droppedLabels)
+        merged.phones = unionLabeled(
+            .phones, members.map(\.phones), key: Self.phoneKey, describe: { $0 },
+            dropped: &droppedLabels)
         merged.emails = unionLabeled(
-            .emails, members.map(\.emails), key: { EmailNormalizer.normalize($0) }, describe: { $0 }, dropped: &droppedLabels
+            .emails, members.map(\.emails), key: { EmailNormalizer.normalize($0) },
+            describe: { $0 }, dropped: &droppedLabels
         )
-        merged.urls = unionLabeled(.urls, members.map(\.urls), key: Self.urlKey, describe: { $0 }, dropped: &droppedLabels)
+        merged.urls = unionLabeled(
+            .urls, members.map(\.urls), key: Self.urlKey, describe: { $0 }, dropped: &droppedLabels)
         merged.postalAddresses = unionLabeled(
-            .postalAddresses, members.map(\.postalAddresses), key: Self.addressKey, describe: Self.describe, dropped: &droppedLabels
+            .postalAddresses, members.map(\.postalAddresses), key: Self.addressKey,
+            describe: Self.describe, dropped: &droppedLabels
         )
 
         return MergePlan(
@@ -150,7 +155,9 @@ public struct MergePlan: Sendable, Hashable {
         prefersNew: (_ current: Value, _ new: Value) -> Bool,
         display: (Value) -> String
     ) -> Outcome<Value> {
-        let entries = members.compactMap { record in value(record).map { (id: record.id, value: $0) } }
+        let entries = members.compactMap { record in
+            value(record).map { (id: record.id, value: $0) }
+        }
 
         var invalidPick: MergeField?
         if let pickID = picks[field] {
@@ -170,8 +177,12 @@ public struct MergePlan: Sendable, Hashable {
             }
         }
 
-        guard let first = groups.first else { return Outcome(value: nil, conflict: nil, invalidPick: invalidPick) }
-        guard groups.count > 1 else { return Outcome(value: first.value, conflict: nil, invalidPick: invalidPick) }
+        guard let first = groups.first else {
+            return Outcome(value: nil, conflict: nil, invalidPick: invalidPick)
+        }
+        guard groups.count > 1 else {
+            return Outcome(value: first.value, conflict: nil, invalidPick: invalidPick)
+        }
         let conflict = MergeConflict(
             field: field,
             candidates: groups.map { MergeCandidate(recordID: $0.id, value: display($0.value)) },
@@ -194,9 +205,11 @@ public struct MergePlan: Sendable, Hashable {
 
     /// Folds case, diacritics, width and whitespace only. Punctuation and symbols count, so "Acme \u{1F680}" differs from "Acme".
     static func comparisonKey(_ text: String) -> String {
-        text.folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: nil)
-            .split(whereSeparator: \.isWhitespace)
-            .joined(separator: " ")
+        text.folding(
+            options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: nil
+        )
+        .split(whereSeparator: \.isWhitespace)
+        .joined(separator: " ")
     }
 
     /// Same month and day, and the years agree or at least one is unknown.

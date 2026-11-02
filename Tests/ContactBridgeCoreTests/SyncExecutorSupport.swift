@@ -1,6 +1,7 @@
 import Foundation
 import Synchronization
 import Testing
+
 @testable import ContactBridgeCore
 
 /// A Google client that forwards to a `FakeGoogleClient` and can misreport or "crash" after a batch call has really
@@ -26,12 +27,20 @@ final class FaultyGoogle: GoogleContactsClient, Sendable {
     /// While on, listings leave out every contact that carries an ownership tag, as a listing that lags behind creates does.
     func setListingLag(_ on: Bool) { lagging.withLock { $0 = on } }
 
-    func arm(_ fault: Fault, on operation: FakeGoogleClient.Operation) { armed.withLock { $0[operation] = fault } }
+    func arm(_ fault: Fault, on operation: FakeGoogleClient.Operation) {
+        armed.withLock { $0[operation] = fault }
+    }
 
-    private func finish(_ results: [GoogleBatchResult], _ operation: FakeGoogleClient.Operation) throws -> [GoogleBatchResult] {
+    private func finish(_ results: [GoogleBatchResult], _ operation: FakeGoogleClient.Operation)
+        throws -> [GoogleBatchResult]
+    {
         switch armed.withLock({ $0.removeValue(forKey: operation) }) {
         case .ambiguousAfterApply?:
-            return results.map { GoogleBatchResult(resourceName: $0.resourceName, outcome: .ambiguous(reason: "the answer was lost")) }
+            return results.map {
+                GoogleBatchResult(
+                    resourceName: $0.resourceName,
+                    outcome: .ambiguous(reason: "the answer was lost"))
+            }
         case .crashAfterApply?:
             throw Crash()
         case nil:
@@ -44,13 +53,25 @@ final class FaultyGoogle: GoogleContactsClient, Sendable {
         if lagging.withLock({ $0 }) { page.people.removeAll { $0.contactBridgeSourceID != nil } }
         return page
     }
-    func listOtherContacts(pageToken: String?) async throws -> GooglePeoplePage { try await inner.listOtherContacts(pageToken: pageToken) }
-    func getPerson(resourceName: String) async throws -> GooglePerson { try await inner.getPerson(resourceName: resourceName) }
-    func createContact(_ person: GooglePerson) async throws -> GooglePerson { try await inner.createContact(person) }
-    func updateContact(resourceName: String, etag: String, person: GooglePerson, updatePersonFields: String) async throws -> GooglePerson {
-        try await inner.updateContact(resourceName: resourceName, etag: etag, person: person, updatePersonFields: updatePersonFields)
+    func listOtherContacts(pageToken: String?) async throws -> GooglePeoplePage {
+        try await inner.listOtherContacts(pageToken: pageToken)
     }
-    func deleteContact(resourceName: String) async throws { try await inner.deleteContact(resourceName: resourceName) }
+    func getPerson(resourceName: String) async throws -> GooglePerson {
+        try await inner.getPerson(resourceName: resourceName)
+    }
+    func createContact(_ person: GooglePerson) async throws -> GooglePerson {
+        try await inner.createContact(person)
+    }
+    func updateContact(
+        resourceName: String, etag: String, person: GooglePerson, updatePersonFields: String
+    ) async throws -> GooglePerson {
+        try await inner.updateContact(
+            resourceName: resourceName, etag: etag, person: person,
+            updatePersonFields: updatePersonFields)
+    }
+    func deleteContact(resourceName: String) async throws {
+        try await inner.deleteContact(resourceName: resourceName)
+    }
     func batchCreate(_ people: [GooglePerson]) async throws -> [GoogleBatchResult] {
         try finish(try await inner.batchCreate(people), .batchCreate)
     }
@@ -60,14 +81,19 @@ final class FaultyGoogle: GoogleContactsClient, Sendable {
     func batchDelete(_ resourceNames: [String]) async throws -> [GoogleBatchResult] {
         try finish(try await inner.batchDelete(resourceNames), .batchDelete)
     }
-    func ensureGroup(named name: String) async throws -> String { try await inner.ensureGroup(named: name) }
+    func ensureGroup(named name: String) async throws -> String {
+        try await inner.ensureGroup(named: name)
+    }
     func addMembers(groupResourceName: String, memberResourceNames: [String]) async throws {
-        try await inner.addMembers(groupResourceName: groupResourceName, memberResourceNames: memberResourceNames)
+        try await inner.addMembers(
+            groupResourceName: groupResourceName, memberResourceNames: memberResourceNames)
     }
     func updateContactPhoto(resourceName: String, photoBytes: Data) async throws -> GooglePerson {
         try await inner.updateContactPhoto(resourceName: resourceName, photoBytes: photoBytes)
     }
-    func deleteContactPhoto(resourceName: String) async throws -> GooglePerson { try await inner.deleteContactPhoto(resourceName: resourceName) }
+    func deleteContactPhoto(resourceName: String) async throws -> GooglePerson {
+        try await inner.deleteContactPhoto(resourceName: resourceName)
+    }
 }
 
 final class TestClock: Sendable {
@@ -95,35 +121,56 @@ final class ExecutorRig: @unchecked Sendable {
         self.history = history
         faulty = FaultyGoogle(world.google)
         stateStore = InMemorySyncStateStore(world.state)
-        try linkStore.add(world.links.links.map { ImportedLink(icloudID: $0.key, googleResourceName: $0.value.googleResourceName, displayName: $0.value.displayName) }, at: world.clock)
-        directory = FileManager.default.temporaryDirectory.appendingPathComponent("executor-tests-\(UUID().uuidString)", isDirectory: true)
-        let store = world.store, google = world.google, notes = world.notes, directory = directory, clock = clock
-        backups = BackupCoordinator(makeSetup: {
-            BackupSetup(writer: BackupWriter(store: store, google: google, notes: notes, baseDirectory: directory, now: { clock.now() }))
-        }, now: { clock.now() })
+        try linkStore.add(
+            world.links.links.map {
+                ImportedLink(
+                    icloudID: $0.key, googleResourceName: $0.value.googleResourceName,
+                    displayName: $0.value.displayName)
+            }, at: world.clock)
+        directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "executor-tests-\(UUID().uuidString)", isDirectory: true)
+        let store = world.store
+        let google = world.google
+        let notes = world.notes
+        let directory = directory
+        let clock = clock
+        backups = BackupCoordinator(
+            makeSetup: {
+                BackupSetup(
+                    writer: BackupWriter(
+                        store: store, google: google, notes: notes, baseDirectory: directory,
+                        now: { clock.now() }))
+            }, now: { clock.now() })
     }
 
     /// Eight contacts that already match and have synced.
-    static func linked(count: Int = 6, history: any SyncHistoryStoring = InMemorySyncHistoryStore()) async throws -> ExecutorRig {
+    static func linked(count: Int = 6, history: any SyncHistoryStoring = InMemorySyncHistoryStore())
+        async throws -> ExecutorRig
+    {
         try ExecutorRig(try await SyncWorld.linked(count: count), history: history)
     }
 
     func makeExecutor() -> SyncExecutor {
         let clock = clock
         return SyncExecutor(
-            google: faulty, links: linkStore, state: stateStore, reviews: reviews, journal: journal, history: history,
+            google: faulty, links: linkStore, state: stateStore, reviews: reviews, journal: journal,
+            history: history,
             backups: backups, now: { clock.now() }
         )
     }
 
-    func plan(_ trigger: SyncTrigger = .scheduled, requireFullListing: Bool = false) async throws -> SyncPlan {
+    func plan(_ trigger: SyncTrigger = .scheduled, requireFullListing: Bool = false) async throws
+        -> SyncPlan
+    {
         world.state = try stateStore.load()
         world.links = try linkStore.load()
         world.clock = clock.now()
         return try await world.plan(trigger, requireFullListing: requireFullListing)
     }
 
-    func run(_ plan: SyncPlan) async throws -> SyncRunReport { try await makeExecutor().execute(plan: plan) }
+    func run(_ plan: SyncPlan) async throws -> SyncRunReport {
+        try await makeExecutor().execute(plan: plan)
+    }
 
     /// Plans and executes in one go.
     @discardableResult
@@ -133,12 +180,16 @@ final class ExecutorRig: @unchecked Sendable {
     var links: [String: LinkEntry] { get throws { try linkStore.load().links } }
 
     func backupFolders() -> Int {
-        ((try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []).filter { !$0.hasPrefix(".") }.count
+        ((try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []).filter {
+            !$0.hasPrefix(".")
+        }.count
     }
 
     func cleanUp() { try? FileManager.default.removeItem(at: directory) }
 
-    func googlePerson(_ resourceName: String) async throws -> GooglePerson { try await world.google.getPerson(resourceName: resourceName) }
+    func googlePerson(_ resourceName: String) async throws -> GooglePerson {
+        try await world.google.getPerson(resourceName: resourceName)
+    }
 
     func taggedPeople(_ icloudID: String) async -> [GooglePerson] {
         await world.google.allPeople.filter { $0.contactBridgeSourceID == icloudID }
@@ -150,8 +201,11 @@ final class ExecutorRig: @unchecked Sendable {
 
     /// A brand-new iCloud contact with a note, as the user would add one.
     @discardableResult
-    func addICloudContact(_ given: String, _ family: String, phone: String, note: String? = nil) async throws -> ContactRecord {
-        let created = try await world.store.create(SyncFixtures.icloud("", given, family, phones: [phone]), backup: .forTesting())
+    func addICloudContact(_ given: String, _ family: String, phone: String, note: String? = nil)
+        async throws -> ContactRecord
+    {
+        let created = try await world.store.create(
+            SyncFixtures.icloud("", given, family, phones: [phone]), backup: .forTesting())
         if let note { try await world.notes.setNote(note, forID: created.sourceIdentifier) }
         return created
     }

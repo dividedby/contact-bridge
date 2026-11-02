@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+
 @testable import ContactBridgeCore
 
 struct MergePlanTests {
@@ -28,7 +29,8 @@ struct MergePlanTests {
     @Test("Plan targets the survivor and lists the others for deletion in order")
     func identity() {
         let survivor = record("a", given: "Ann")
-        let plan = MergePlan.build(survivor: survivor, others: [record("c"), record("b"), record("a"), record("c")])
+        let plan = MergePlan.build(
+            survivor: survivor, others: [record("c"), record("b"), record("a"), record("c")])
         #expect(plan.survivorID == "a")
         #expect(plan.deleteIDs == ["c", "b"])
         #expect(plan.merged.id == "a")
@@ -60,7 +62,8 @@ struct MergePlanTests {
                 record("g2", phones: [(nil, "1 212 555 3344"), (nil, "415-555-9999")]),
             ]
         )
-        #expect(plan.merged.phones.map(\.value) == ["(415) 555-2671", "212-555-3344", "415-555-9999"])
+        #expect(
+            plan.merged.phones.map(\.value) == ["(415) 555-2671", "212-555-3344", "415-555-9999"])
     }
 
     @Test("Survivor's label wins on collision; a missing label is filled from others")
@@ -69,56 +72,80 @@ struct MergePlanTests {
             survivor: record("a", phones: [("mobile", "415-555-2671"), (nil, "212-555-3344")]),
             others: [record("g1", phones: [("home", "+14155552671"), ("work", "+12125553344")])]
         )
-        #expect(plan.merged.phones == [
-            Labeled(label: "mobile", value: "415-555-2671"),
-            Labeled(label: "work", value: "212-555-3344"),
-        ])
+        #expect(
+            plan.merged.phones == [
+                Labeled(label: "mobile", value: "415-555-2671"),
+                Labeled(label: "work", value: "212-555-3344"),
+            ])
     }
 
-    @Test("Phones with different extensions are distinct; unnormalizable ones dedupe on trimmed text")
+    @Test(
+        "Phones with different extensions are distinct; unnormalizable ones dedupe on trimmed text")
     func phoneEdgeCases() {
         let plan = MergePlan.build(
             survivor: record("a", phones: [(nil, "415-555-2671 x1"), (nil, "555-1234")]),
-            others: [record("g1", phones: [(nil, "415-555-2671 x2"), (nil, " 555-1234 "), (nil, "415-555-2671 ext 1")])]
+            others: [
+                record(
+                    "g1",
+                    phones: [
+                        (nil, "415-555-2671 x2"), (nil, " 555-1234 "), (nil, "415-555-2671 ext 1"),
+                    ])
+            ]
         )
-        #expect(plan.merged.phones.map(\.value) == ["415-555-2671 x1", "555-1234", "415-555-2671 x2"])
+        #expect(
+            plan.merged.phones.map(\.value) == ["415-555-2671 x1", "555-1234", "415-555-2671 x2"])
     }
 
     @Test("Emails dedupe case-insensitively and keep the first spelling")
     func emailsUnion() {
         let plan = MergePlan.build(
             survivor: record("a", emails: [("home", "Ann@Example.com")]),
-            others: [record("g1", emails: [("work", " ann@example.COM "), ("work", "ann@work.com")])]
+            others: [
+                record("g1", emails: [("work", " ann@example.COM "), ("work", "ann@work.com")])
+            ]
         )
-        #expect(plan.merged.emails == [
-            Labeled(label: "home", value: "Ann@Example.com"),
-            Labeled(label: "work", value: "ann@work.com"),
-        ])
+        #expect(
+            plan.merged.emails == [
+                Labeled(label: "home", value: "Ann@Example.com"),
+                Labeled(label: "work", value: "ann@work.com"),
+            ])
     }
 
     @Test("URLs dedupe ignoring scheme, www, case and trailing slash")
     func urlsUnion() {
         let plan = MergePlan.build(
             survivor: record("a", urls: [("home", "https://www.Example.com/")]),
-            others: [record("g1", urls: [(nil, "http://example.com"), (nil, "https://example.com/about")])]
+            others: [
+                record(
+                    "g1", urls: [(nil, "http://example.com"), (nil, "https://example.com/about")])
+            ]
         )
-        #expect(plan.merged.urls.map(\.value) == ["https://www.Example.com/", "https://example.com/about"])
+        #expect(
+            plan.merged.urls.map(\.value) == [
+                "https://www.Example.com/", "https://example.com/about",
+            ])
     }
 
     @Test("URL paths and queries are case-sensitive; only scheme and host fold")
     func urlPathCase() {
         let plan = MergePlan.build(
             survivor: record("a", urls: [(nil, "https://Example.com/About")]),
-            others: [record("g1", urls: [
-                (nil, "HTTP://WWW.EXAMPLE.COM/About/"),
-                (nil, "https://example.com/about"),
-                (nil, "https://example.com/?Q=1"),
-                (nil, "https://example.com/?q=1"),
-            ])]
+            others: [
+                record(
+                    "g1",
+                    urls: [
+                        (nil, "HTTP://WWW.EXAMPLE.COM/About/"),
+                        (nil, "https://example.com/about"),
+                        (nil, "https://example.com/?Q=1"),
+                        (nil, "https://example.com/?q=1"),
+                    ])
+            ]
         )
-        #expect(plan.merged.urls.map(\.value) == [
-            "https://Example.com/About", "https://example.com/about", "https://example.com/?Q=1", "https://example.com/?q=1",
-        ])
+        #expect(
+            plan.merged.urls.map(\.value) == [
+                "https://Example.com/About", "https://example.com/about",
+                "https://example.com/?Q=1", "https://example.com/?q=1",
+            ])
     }
 
     @Test("Symbol-only address fields are never dropped, and still dedupe")
@@ -126,7 +153,13 @@ struct MergePlanTests {
         let hash = PostalAddress(street: "#")
         let plan = MergePlan.build(
             survivor: record("a", addresses: [("home", hash)]),
-            others: [record("g1", addresses: [(nil, PostalAddress(street: "#")), (nil, PostalAddress(street: "?"))])]
+            others: [
+                record(
+                    "g1",
+                    addresses: [
+                        (nil, PostalAddress(street: "#")), (nil, PostalAddress(street: "?")),
+                    ])
+            ]
         )
         #expect(plan.merged.postalAddresses.map(\.value) == [hash, PostalAddress(street: "?")])
     }
@@ -144,12 +177,15 @@ struct MergePlanTests {
         #expect(punctuation.conflicts.map(\.field) == [.givenName])
 
         let folded = MergePlan.build(
-            survivor: record("a", given: "Jos\u{00E9}", org: " ACME  corp "), others: [record("g1", given: "JOSE", org: "acme corp")]
+            survivor: record("a", given: "Jos\u{00E9}", org: " ACME  corp "),
+            others: [record("g1", given: "JOSE", org: "acme corp")]
         )
         #expect(folded.conflicts.isEmpty)
     }
 
-    @Test("Birthday candidates name the record that holds the displayed value, and picking yields it exactly")
+    @Test(
+        "Birthday candidates name the record that holds the displayed value, and picking yields it exactly"
+    )
     func birthdayPickKeepsYear() {
         let survivor = record("s", birthday: DateComponents(month: 3, day: 9))
         let a = record("a", birthday: DateComponents(year: 1990, month: 3, day: 9))
@@ -163,7 +199,8 @@ struct MergePlanTests {
         #expect(plan.merged.birthday == a.birthday)
 
         for (id, expected) in [("a", a.birthday), ("c", c.birthday), ("s", survivor.birthday)] {
-            let picked = MergePlan.build(survivor: survivor, others: [a, c], picks: [.birthday: id])
+            let picked = MergePlan.build(
+                survivor: survivor, others: [a, c], picks: [.birthday: id])
             #expect(picked.merged.birthday == expected)
             #expect(picked.conflicts.isEmpty)
         }
@@ -172,32 +209,45 @@ struct MergePlanTests {
     @Test("Discarded labels on collisions are recorded; filled or identical labels are not")
     func droppedLabels() {
         let plan = MergePlan.build(
-            survivor: record("a", phones: [("mobile", "415-555-2671"), (nil, "212-555-3344")], emails: [("home", "a@x.com")]),
+            survivor: record(
+                "a", phones: [("mobile", "415-555-2671"), (nil, "212-555-3344")],
+                emails: [("home", "a@x.com")]),
             others: [
-                record("g1",
-                       phones: [("home", "+14155552671"), ("work", "+12125553344")],
-                       emails: [("HOME", "A@x.com"), ("work", "a@x.com")]),
+                record(
+                    "g1",
+                    phones: [("home", "+14155552671"), ("work", "+12125553344")],
+                    emails: [("HOME", "A@x.com"), ("work", "a@x.com")]),
                 record("g2", phones: [("mobile", "4155552671"), (nil, "(415) 555-2671")]),
             ]
         )
         #expect(plan.merged.phones.map(\.label) == ["mobile", "work"])
-        #expect(plan.droppedLabels == [
-            DroppedLabel(field: .phones, value: "415-555-2671", keptLabel: "mobile", droppedLabel: "home"),
-            DroppedLabel(field: .emails, value: "a@x.com", keptLabel: "home", droppedLabel: "work"),
-        ])
+        #expect(
+            plan.droppedLabels == [
+                DroppedLabel(
+                    field: .phones, value: "415-555-2671", keptLabel: "mobile", droppedLabel: "home"
+                ),
+                DroppedLabel(
+                    field: .emails, value: "a@x.com", keptLabel: "home", droppedLabel: "work"),
+            ])
         #expect(MergePlan.build(survivor: plan.merged, others: []).droppedLabels.isEmpty)
     }
 
     @Test("Addresses dedupe on folded fields and skip empty ones")
     func addressesUnion() {
-        let home = PostalAddress(street: "1 Main St", city: "Austin", state: "TX", postalCode: "78701", country: "USA")
-        let homeShouting = PostalAddress(street: "1 MAIN ST", city: "austin", state: "tx", postalCode: "78701", country: "usa")
-        let work = PostalAddress(street: "9 Elm", city: "Austin", state: "TX", postalCode: "78702", country: "USA")
+        let home = PostalAddress(
+            street: "1 Main St", city: "Austin", state: "TX", postalCode: "78701", country: "USA")
+        let homeShouting = PostalAddress(
+            street: "1 MAIN ST", city: "austin", state: "tx", postalCode: "78701", country: "usa")
+        let work = PostalAddress(
+            street: "9 Elm", city: "Austin", state: "TX", postalCode: "78702", country: "USA")
         let plan = MergePlan.build(
             survivor: record("a", addresses: [("home", home), (nil, PostalAddress())]),
             others: [record("g1", addresses: [("other", homeShouting), ("work", work)])]
         )
-        #expect(plan.merged.postalAddresses == [Labeled(label: "home", value: home), Labeled(label: "work", value: work)])
+        #expect(
+            plan.merged.postalAddresses == [
+                Labeled(label: "home", value: home), Labeled(label: "work", value: work),
+            ])
     }
 
     @Test("Blank multi-value entries are dropped")
@@ -206,7 +256,8 @@ struct MergePlanTests {
             survivor: record("a", phones: [(nil, "  ")], emails: [(nil, "")], urls: [(nil, " ")]),
             others: []
         )
-        #expect(plan.merged.phones.isEmpty && plan.merged.emails.isEmpty && plan.merged.urls.isEmpty)
+        #expect(
+            plan.merged.phones.isEmpty && plan.merged.emails.isEmpty && plan.merged.urls.isEmpty)
     }
 
     // MARK: single-value
@@ -215,7 +266,10 @@ struct MergePlanTests {
     func noConflict() {
         let plan = MergePlan.build(
             survivor: record("a", given: "Ann", org: "Acme"),
-            others: [record("g1", given: "ANN", family: "Lee", nickname: "Annie", org: "acme", title: "CTO")]
+            others: [
+                record(
+                    "g1", given: "ANN", family: "Lee", nickname: "Annie", org: "acme", title: "CTO")
+            ]
         )
         #expect(plan.conflicts.isEmpty)
         #expect(!plan.hasUnresolvedConflicts)
@@ -346,10 +400,15 @@ struct MergePlanTests {
     @Test("Merging a merged result with nothing changes nothing")
     func idempotent() {
         let first = MergePlan.build(
-            survivor: record("a", given: "Ann", phones: [("mobile", "415-555-2671"), (nil, "415-555-2671")], emails: [("home", "a@x.com")]),
+            survivor: record(
+                "a", given: "Ann", phones: [("mobile", "415-555-2671"), (nil, "415-555-2671")],
+                emails: [("home", "a@x.com")]),
             others: [
-                record("g1", given: "Annie", family: "Lee", phones: [("home", "+14155552671"), ("work", "212-555-3344")],
-                       urls: [(nil, "https://example.com")], birthday: DateComponents(month: 3, day: 9)),
+                record(
+                    "g1", given: "Annie", family: "Lee",
+                    phones: [("home", "+14155552671"), ("work", "212-555-3344")],
+                    urls: [(nil, "https://example.com")], birthday: DateComponents(month: 3, day: 9)
+                )
             ]
         )
         let again = MergePlan.build(survivor: first.merged, others: [])
@@ -363,7 +422,8 @@ struct MergePlanTests {
 
     @Test("Merging a duplicate-free record with nothing is a no-op")
     func noOp() {
-        let survivor = record("a", given: "Ann", phones: [("mobile", "415-555-2671")], emails: [("home", "a@x.com")])
+        let survivor = record(
+            "a", given: "Ann", phones: [("mobile", "415-555-2671")], emails: [("home", "a@x.com")])
         let plan = MergePlan.build(survivor: survivor, others: [])
         #expect(plan.merged == survivor)
         #expect(plan.isNoOp(for: survivor))
@@ -374,7 +434,8 @@ struct MergePlanTests {
     func pure() {
         let survivor = record("a", given: "Ann", phones: [("mobile", "415-555-2671")])
         let other = record("g1", given: "Bob", phones: [("home", "212-555-3344")])
-        let copyS = survivor, copyO = other
+        let copyS = survivor
+        let copyO = other
         _ = MergePlan.build(survivor: survivor, others: [other], picks: [.givenName: "g1"])
         #expect(survivor == copyS && other == copyO)
     }

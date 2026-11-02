@@ -92,7 +92,8 @@ public struct ICloudScanner: Sendable {
     ///   - now: the clock.
     public init(
         store: any ContactStoring, notes: (any NotesProvider)? = nil,
-        contactsAppRunning: @escaping @Sendable () -> Bool = { false }, now: @escaping @Sendable () -> Date = { Date() }
+        contactsAppRunning: @escaping @Sendable () -> Bool = { false },
+        now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.store = store
         self.notes = notes
@@ -101,7 +102,9 @@ public struct ICloudScanner: Sendable {
     }
 
     /// - Parameter links: `links.json`, so an empty container is caught while only Phase 1 links (no baselines) exist.
-    public func scan(state: SyncState, links: LinkTable = LinkTable(), trigger: SyncTrigger = .scheduled) async throws -> ICloudScan {
+    public func scan(
+        state: SyncState, links: LinkTable = LinkTable(), trigger: SyncTrigger = .scheduled
+    ) async throws -> ICloudScan {
         let token = try await store.changeToken()
         let container = try await store.containerID()
         let tokenChanged = token == nil || token != state.icloudChangeToken
@@ -109,17 +112,27 @@ public struct ICloudScanner: Sendable {
 
         func empty(_ status: ICloudScan.Status) -> ICloudScan {
             ICloudScan(
-                status: status, records: [], changeToken: token, containerID: container, noteHashes: [:], noteTexts: [:],
-                notesReason: reason, notes: .notRead, notesReadAt: nil, changedIDs: [], addedIDs: [], missingIDs: []
+                status: status, records: [], changeToken: token, containerID: container,
+                noteHashes: [:], noteTexts: [:],
+                notesReason: reason, notes: .notRead, notesReadAt: nil, changedIDs: [],
+                addedIDs: [], missingIDs: []
             )
         }
 
-        if let saved = state.icloudContainerID, let container, saved != container { return empty(.paused(.containerChanged)) }
+        if let saved = state.icloudContainerID, let container, saved != container {
+            return empty(.paused(.containerChanged))
+        }
         if !tokenChanged, reason == .skipped { return empty(.unchanged) }
 
-        let records = try await store.fetchAll().sorted { $0.sourceIdentifier < $1.sourceIdentifier }
-        if records.isEmpty, !state.baselines.isEmpty || !links.links.isEmpty { return empty(.paused(.containerChanged)) }
-        if reason == .skipped, records.contains(where: { state.baselines[$0.sourceIdentifier] == nil && !$0.isEmpty }) {
+        let records = try await store.fetchAll().sorted {
+            $0.sourceIdentifier < $1.sourceIdentifier
+        }
+        if records.isEmpty, !state.baselines.isEmpty || !links.links.isEmpty {
+            return empty(.paused(.containerChanged))
+        }
+        if reason == .skipped,
+            records.contains(where: { state.baselines[$0.sourceIdentifier] == nil && !$0.isEmpty })
+        {
             reason = .newContacts
         }
 
@@ -161,17 +174,25 @@ public struct ICloudScanner: Sendable {
         }
         let present = Set(records.map(\.sourceIdentifier))
         return ICloudScan(
-            status: .changed, records: records, changeToken: token, containerID: container, noteHashes: hashes, noteTexts: texts,
-            notesReason: reason, notes: outcome, notesReadAt: readAt, changedIDs: changed, addedIDs: added,
+            status: .changed, records: records, changeToken: token, containerID: container,
+            noteHashes: hashes, noteTexts: texts,
+            notesReason: reason, notes: outcome, notesReadAt: readAt, changedIDs: changed,
+            addedIDs: added,
             missingIDs: state.baselines.keys.filter { !present.contains($0) }.sorted()
         )
     }
 
-    private func notesReason(tokenChanged: Bool, state: SyncState, trigger: SyncTrigger) -> NotesReadReason {
+    private func notesReason(tokenChanged: Bool, state: SyncState, trigger: SyncTrigger)
+        -> NotesReadReason
+    {
         if !state.firstSyncApproved { return .firstSync }
         if trigger == .syncNow { return .syncNow }
         if tokenChanged, contactsAppRunning() { return .contactsRunning }
-        if let last = state.lastNotesReadAt, now().timeIntervalSince(last) <= Self.notesRefreshInterval { return .skipped }
+        if let last = state.lastNotesReadAt,
+            now().timeIntervalSince(last) <= Self.notesRefreshInterval
+        {
+            return .skipped
+        }
         return .stale24h
     }
 }

@@ -25,7 +25,8 @@ public struct PhotoRunReport: Sendable, Hashable {
             /// What went wrong, in words for the user; nil for the reasons that need no explaining.
             public var message: String? {
                 switch self {
-                case .couldNotSaveOld(let text): "the photo being replaced could not be saved to the photo history first (\(text))"
+                case .couldNotSaveOld(let text):
+                    "the photo being replaced could not be saved to the photo history first (\(text))"
                 case .failed(let text), .permanent(let text), .notAttempted(let text): text
                 case .googleChanged, .icloudChanged, .notLinked, .vanished: nil
                 }
@@ -64,14 +65,24 @@ public struct PhotoRunReport: Sendable, Hashable {
 
     /// Everything the plan asked for was done, or is bound to be planned again without help. When false the engine keeps its
     /// tokens where they were, so the next run reads the same changes again.
-    public var isComplete: Bool { carried == 0 && halted == nil && !skipped.contains { $0.needsAnotherLook } }
+    public var isComplete: Bool {
+        carried == 0 && halted == nil && !skipped.contains { $0.needsAnotherLook }
+    }
 
     /// Photo changes left for a later run: everything skipped except what was given up on, plus carried Google writes.
-    public var leftForNextRun: Int { skipped.filter { if case .permanent = $0.reason { false } else { true } }.count + carried }
+    public var leftForNextRun: Int {
+        skipped.filter { if case .permanent = $0.reason { false } else { true } }.count + carried
+    }
 
     /// Photos given up on this run: iCloud id and why. They are left alone until a photo changes.
     public var givenUp: [(icloudID: String, message: String)] {
-        skipped.compactMap { if case .permanent(let message) = $0.reason { (icloudID: $0.icloudID, message: message) } else { nil } }
+        skipped.compactMap {
+            if case .permanent(let message) = $0.reason {
+                (icloudID: $0.icloudID, message: message)
+            } else {
+                nil
+            }
+        }
     }
 
     /// Why photo changes were left for the next run, one line per reason, so "tried again on the next run" is not a mystery.
@@ -86,7 +97,8 @@ public struct PhotoRunReport: Sendable, Hashable {
         }
         var lines = order.map { message in
             let count = counts[message] ?? 0
-            return "\(count) photo change\(count == 1 ? " was" : "s were") put off until the next run: \(message)"
+            return
+                "\(count) photo change\(count == 1 ? " was" : "s were") put off until the next run: \(message)"
         }
         if carried > 0 {
             lines.append(
@@ -138,12 +150,18 @@ public struct PhotoExecutor: Sendable {
     ///   - needsNotes: the iCloud backup must hold notes (they can be read); false when notes access is not granted.
     ///   - sleep: waits between Google writes; tests pass one that does not wait.
     public init(
-        google: any GoogleContactsClient, store: any ContactStoring, links: any LinkStoring, state: any SyncStateStoring,
-        reviews: any ReviewStoring, history: any PhotoHistoryStoring, backups: BackupCoordinator, fetcher: any GooglePhotoFetching,
+        google: any GoogleContactsClient, store: any ContactStoring, links: any LinkStoring,
+        state: any SyncStateStoring,
+        reviews: any ReviewStoring, history: any PhotoHistoryStoring, backups: BackupCoordinator,
+        fetcher: any GooglePhotoFetching,
         icloudFallback: (any ContactsAppPhotoWriting)? = nil,
-        containerID: String? = nil, needsNotes: Bool = true, now: @escaping @Sendable () -> Date = { Date() },
-        sleep: @escaping @Sendable (TimeInterval) async throws -> Void = { try await Task.sleep(for: .seconds($0)) },
-        maxGoogleWrites: Int = PhotoExecutor.maxGoogleWrites, minGoogleWriteInterval: TimeInterval = PhotoExecutor.minGoogleWriteInterval
+        containerID: String? = nil, needsNotes: Bool = true,
+        now: @escaping @Sendable () -> Date = { Date() },
+        sleep: @escaping @Sendable (TimeInterval) async throws -> Void = {
+            try await Task.sleep(for: .seconds($0))
+        },
+        maxGoogleWrites: Int = PhotoExecutor.maxGoogleWrites,
+        minGoogleWriteInterval: TimeInterval = PhotoExecutor.minGoogleWriteInterval
     ) {
         self.google = google
         self.store = store
@@ -191,14 +209,18 @@ public struct PhotoExecutor: Sendable {
         do {
             for op in ops {
                 try Task.checkCancellation()
-                guard linked[op.icloudID]?.googleResourceName == op.resourceName, baselinedIDs.contains(op.icloudID) else {
+                guard linked[op.icloudID]?.googleResourceName == op.resourceName,
+                    baselinedIDs.contains(op.icloudID)
+                else {
                     progress.skip(op, .notLinked)
                     continue
                 }
                 switch op.kind {
                 case .recordBaseline:
                     progress.pendingBaselines[op.icloudID] = op.baseline
-                    if progress.pendingBaselines.count >= Self.baselineBatch { try flushBaselines(&progress) }
+                    if progress.pendingBaselines.count >= Self.baselineBatch {
+                        try flushBaselines(&progress)
+                    }
                     progress.report.recorded += 1
                     progress.report.completed.append(op.icloudID)
                 case .copyToGoogle, .deleteOnGoogle:
@@ -221,25 +243,36 @@ public struct PhotoExecutor: Sendable {
         try flushBaselines(&progress)
         // Our own iCloud writes moved the store's token; step the saved one past them so they are not read as edits.
         if let before = progress.icloudTokenBefore {
-            try await ICloudTokenAdvance.advance(store: store, state: state, reviews: reviews, from: before)
+            try await ICloudTokenAdvance.advance(
+                store: store, state: state, reviews: reviews, from: before)
         }
-        do { try history.prune(now: now()) } catch { progress.report.warnings.append("Old photo history could not be cleaned up: \(error.localizedDescription)") }
+        do { try history.prune(now: now()) } catch {
+            progress.report.warnings.append(
+                "Old photo history could not be cleaned up: \(error.localizedDescription)")
+        }
         return progress.report
     }
 
     /// A failure that repeating cannot fix: noted on the pair's baseline against the photos it was planned on, and reported.
-    private func giveUp(_ op: PlannedPhotoOp, _ error: any Error, _ progress: inout RunProgress) throws {
+    private func giveUp(_ op: PlannedPhotoOp, _ error: any Error, _ progress: inout RunProgress)
+        throws
+    {
         let message = error.localizedDescription
         // Reported by the engine, grouped by message and named (`PhotoRunReport.givenUp`, `PhotoNotice`).
         progress.skip(op, .permanent(message))
-        var marked = try progress.pendingBaselines[op.icloudID] ?? state.load().baselines[op.icloudID]?.photo ?? PhotoBaseline(syncedAt: now())
-        marked.failure = PhotoBaseline.Failure(stamp: op.failureStamp ?? "", message: message, at: now())
+        var marked =
+            try progress.pendingBaselines[op.icloudID] ?? state.load().baselines[op.icloudID]?.photo
+            ?? PhotoBaseline(syncedAt: now())
+        marked.failure = PhotoBaseline.Failure(
+            stamp: op.failureStamp ?? "", message: message, at: now())
         try saveBaseline(marked, for: op.icloudID, &progress)
     }
 
     /// A failed step: permanent ones are given up on, the rest are noted and tried again next run.
     /// `step` says which step failed, for a failure that is tried again (given-up messages are grouped as they are).
-    private func failed(_ op: PlannedPhotoOp, _ error: any Error, _ progress: inout RunProgress, step: String? = nil) throws {
+    private func failed(
+        _ op: PlannedPhotoOp, _ error: any Error, _ progress: inout RunProgress, step: String? = nil
+    ) throws {
         if PhotoErrors.isPermanent(error) {
             try giveUp(op, error, &progress)
         } else {
@@ -248,7 +281,9 @@ public struct PhotoExecutor: Sendable {
     }
 
     /// Saves `baseline` now (it follows a write to Google or iCloud), together with any recorded ones still pending.
-    private func saveBaseline(_ baseline: PhotoBaseline, for id: String, _ progress: inout RunProgress) throws {
+    private func saveBaseline(
+        _ baseline: PhotoBaseline, for id: String, _ progress: inout RunProgress
+    ) throws {
         progress.pendingBaselines[id] = baseline
         try flushBaselines(&progress)
     }
@@ -273,8 +308,10 @@ public struct PhotoExecutor: Sendable {
         var upload: Data?
         if case .copyToGoogle = op.kind {
             do {
-                guard try await store.photoSignatures(ids: [op.icloudID])[op.icloudID]?.thumbnailHash == op.expectedICloudHint,
-                      let original = try await store.photoData(id: op.icloudID)
+                guard
+                    try await store.photoSignatures(ids: [op.icloudID])[op.icloudID]?.thumbnailHash
+                        == op.expectedICloudHint,
+                    let original = try await store.photoData(id: op.icloudID)
                 else {
                     progress.skip(op, .icloudChanged)
                     return
@@ -318,14 +355,19 @@ public struct PhotoExecutor: Sendable {
 
         if let current {
             do {
-                guard let url = current.sizedURL(Self.copySize) else { throw GooglePhotoError.notAllowed("the photo has no usable address") }
+                guard let url = current.sizedURL(Self.copySize) else {
+                    throw GooglePhotoError.notAllowed("the photo has no usable address")
+                }
                 // One copy of each replaced photo: an attempt that fails after this must not add another next time.
                 if try !history.hasEntry(resourceName: op.resourceName, urlKey: current.key) {
                     let old = try await fetcher.fetch(url)
                     let operation: PhotoHistoryEntry.Operation = upload == nil ? .delete : .replace
-                    try history.append([PhotoHistoryEntry(
-                        at: now(), operation: operation, icloudID: op.icloudID, resourceName: op.resourceName, urlKey: current.key, photo: old
-                    )])
+                    try history.append([
+                        PhotoHistoryEntry(
+                            at: now(), operation: operation, icloudID: op.icloudID,
+                            resourceName: op.resourceName, urlKey: current.key, photo: old
+                        )
+                    ])
                 }
             } catch is CancellationError {
                 throw CancellationError()
@@ -342,7 +384,8 @@ public struct PhotoExecutor: Sendable {
         do {
             if progress.googleReceipt == nil {
                 progress.googleReceipt = try await backups.freshReceipt(
-                    requiring: BackupRequirement(containerID: containerID, needsGoogle: true), maxAge: SyncExecutor.maxBackupAge
+                    requiring: BackupRequirement(containerID: containerID, needsGoogle: true),
+                    maxAge: SyncExecutor.maxBackupAge
                 )
             }
         } catch is CancellationError {
@@ -361,7 +404,8 @@ public struct PhotoExecutor: Sendable {
         let returned: GooglePerson
         do {
             if let upload {
-                returned = try await google.updateContactPhoto(resourceName: op.resourceName, photoBytes: upload)
+                returned = try await google.updateContactPhoto(
+                    resourceName: op.resourceName, photoBytes: upload)
             } else {
                 returned = try await google.deleteContactPhoto(resourceName: op.resourceName)
             }
@@ -371,12 +415,19 @@ public struct PhotoExecutor: Sendable {
         } catch is CancellationError {
             throw CancellationError()
         } catch {
-            try fail(op, error, &progress, step: upload == nil ? "Google did not remove the photo" : "Google did not take the photo")
+            try fail(
+                op, error, &progress,
+                step: upload == nil
+                    ? "Google did not remove the photo" : "Google did not take the photo")
             return
         }
         progress.lastGoogleWrite = now()
         progress.googleWritesMade += 1
-        if upload == nil { progress.report.removedFromGoogle += 1 } else { progress.report.copiedToGoogle += 1 }
+        if upload == nil {
+            progress.report.removedFromGoogle += 1
+        } else {
+            progress.report.copiedToGoogle += 1
+        }
 
         var baseline = op.baseline
         baseline.googleURLKey = GooglePersonMapper.photos(of: returned).contact?.key
@@ -385,7 +436,9 @@ public struct PhotoExecutor: Sendable {
     }
 
     /// A failed Google call: noted, and the run stops if every later call would fail the same way.
-    private func fail(_ op: PlannedPhotoOp, _ error: any Error, _ progress: inout RunProgress, step: String? = nil) throws {
+    private func fail(
+        _ op: PlannedPhotoOp, _ error: any Error, _ progress: inout RunProgress, step: String? = nil
+    ) throws {
         if let api = error as? GoogleAPIError, let reason = SyncExecutor.haltReason(for: api) {
             progress.skip(op, .failed(Self.message(error, step: step)))
             progress.report.halted = progress.report.halted ?? reason
@@ -411,13 +464,18 @@ public struct PhotoExecutor: Sendable {
         }
         var finished: PhotoBaseline?
         do {
-            guard try await store.photoSignatures(ids: [op.icloudID])[op.icloudID]?.thumbnailHash == op.expectedICloudHint else {
+            guard
+                try await store.photoSignatures(ids: [op.icloudID])[op.icloudID]?.thumbnailHash
+                    == op.expectedICloudHint
+            else {
                 progress.skip(op, .icloudChanged)
                 return
             }
             var bytes: Data?
             if case .copyToICloud = op.kind {
-                guard let key = op.expectedGoogleURLKey, let url = GooglePhotoRef(url: key).sizedURL(Self.copySize) else {
+                guard let key = op.expectedGoogleURLKey,
+                    let url = GooglePhotoRef(url: key).sizedURL(Self.copySize)
+                else {
                     progress.skip(op, .googleChanged)
                     return
                 }
@@ -427,7 +485,8 @@ public struct PhotoExecutor: Sendable {
             if progress.icloudReceipt == nil {
                 do {
                     progress.icloudReceipt = try await backups.freshReceipt(
-                        requiring: BackupRequirement(containerID: containerID, needsNotes: needsNotes)
+                        requiring: BackupRequirement(
+                            containerID: containerID, needsNotes: needsNotes)
                     )
                 } catch is CancellationError {
                     throw CancellationError()
@@ -438,17 +497,26 @@ public struct PhotoExecutor: Sendable {
                     return
                 }
             }
-            if progress.icloudTokenBefore == nil { progress.icloudTokenBefore = .some(try await store.changeToken()) }
+            if progress.icloudTokenBefore == nil {
+                progress.icloudTokenBefore = .some(try await store.changeToken())
+            }
             guard let receipt = progress.icloudReceipt else { return }
             try await setICloudPhoto(bytes, for: op.icloudID, backup: receipt)
             // A save that macOS reports as done is read back before it counts: a photo that did not stay is tried again.
             let after = try await store.photoSignatures(ids: [op.icloudID])[op.icloudID]
             guard (after?.hasPhoto ?? false) == (bytes != nil) else {
-                let message = bytes == nil ? "iCloud still shows the photo after removing it" : "iCloud did not keep the photo"
+                let message =
+                    bytes == nil
+                    ? "iCloud still shows the photo after removing it"
+                    : "iCloud did not keep the photo"
                 progress.skip(op, .failed(message))
                 return
             }
-            if bytes == nil { progress.report.removedFromICloud += 1 } else { progress.report.copiedToICloud += 1 }
+            if bytes == nil {
+                progress.report.removedFromICloud += 1
+            } else {
+                progress.report.copiedToICloud += 1
+            }
 
             var baseline = op.baseline
             baseline.icloudHint = after?.thumbnailHash
@@ -505,8 +573,11 @@ public struct SyncPhotoSupport: Sendable {
 
     public init(
         fetcher: any GooglePhotoFetching, history: any PhotoHistoryStoring,
-        fingerprinter: any PhotoFingerprinting = ImageIOPhotoFingerprinter(), icloudFallback: (any ContactsAppPhotoWriting)? = nil,
-        sleep: @escaping @Sendable (TimeInterval) async throws -> Void = { try await Task.sleep(for: .seconds($0)) }
+        fingerprinter: any PhotoFingerprinting = ImageIOPhotoFingerprinter(),
+        icloudFallback: (any ContactsAppPhotoWriting)? = nil,
+        sleep: @escaping @Sendable (TimeInterval) async throws -> Void = {
+            try await Task.sleep(for: .seconds($0))
+        }
     ) {
         self.fetcher = fetcher
         self.history = history
@@ -520,10 +591,14 @@ public struct SyncPhotoSupport: Sendable {
 public enum PhotoNotice {
     /// `failures` are (contact name, message); `verb` is what could not be done ("synced"). Every name is listed: each one
     /// is a contact to fix by hand.
-    public static func lines(_ failures: [(name: String, message: String)], couldNotBe verb: String) -> [String] {
+    public static func lines(_ failures: [(name: String, message: String)], couldNotBe verb: String)
+        -> [String]
+    {
         var byMessage: [String: [String]] = [:]
         var order: [String] = []
-        for failure in failures.sorted(by: { $0.name.localizedStandardCompare($1.name) == .orderedAscending }) {
+        for failure in failures.sorted(by: {
+            $0.name.localizedStandardCompare($1.name) == .orderedAscending
+        }) {
             if byMessage[failure.message] == nil { order.append(failure.message) }
             byMessage[failure.message, default: []].append(failure.name)
         }

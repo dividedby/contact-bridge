@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+
 @testable import ContactBridgeCore
 
 @MainActor
@@ -16,18 +17,24 @@ struct SyncNotifierTests {
         snapshot.status = .idle
         snapshot.firstSyncApproved = true
         snapshot.lastRunAt = Date(timeIntervalSince1970: 1_800_000_000 + run * 60)
-        snapshot.reviewItems = reviews.map { SyncReviewSummary(id: $0, kind: .googleEdited, name: $0, detail: nil, fields: []) }
+        snapshot.reviewItems = reviews.map {
+            SyncReviewSummary(id: $0, kind: .googleEdited, name: $0, detail: nil, fields: [])
+        }
         return snapshot
     }
 
-    @Test("Off by default: building it, starting it and feeding it snapshots touches nothing in the system")
+    @Test(
+        "Off by default: building it, starting it and feeding it snapshots touches nothing in the system"
+    )
     func offByDefault() async {
         let delivery = InMemoryNotificationDelivery()
         let notifier = SyncNotifier(delivery: delivery, defaults: defaults())
         await notifier.start()
         notifier.observe(snapshot(reviews: ["a"]))
         await notifier.waitUntilDelivered()
-        #expect(!notifier.isOn && delivery.prompts == 0 && delivery.prepared == 0 && delivery.posted.isEmpty)
+        #expect(
+            !notifier.isOn && delivery.prompts == 0 && delivery.prepared == 0
+                && delivery.posted.isEmpty)
     }
 
     @Test("Turning it on asks macOS once, and then notices are posted")
@@ -36,7 +43,9 @@ struct SyncNotifierTests {
         let store = defaults()
         let notifier = SyncNotifier(delivery: delivery, defaults: store)
         await notifier.setEnabled(true)
-        #expect(notifier.isOn && delivery.prompts == 1 && delivery.prepared == 1 && notifier.message == nil)
+        #expect(
+            notifier.isOn && delivery.prompts == 1 && delivery.prepared == 1
+                && notifier.message == nil)
         #expect(store.bool(forKey: SyncNotifier.defaultsKey))
 
         notifier.observe(snapshot(reviews: ["a", "b"]))
@@ -50,13 +59,17 @@ struct SyncNotifierTests {
         #expect(delivery.posted.count == 1)
     }
 
-    @Test("A refusal at the prompt leaves it off and explains; an earlier refusal is not asked about again")
+    @Test(
+        "A refusal at the prompt leaves it off and explains; an earlier refusal is not asked about again"
+    )
     func refused() async {
         let delivery = InMemoryNotificationDelivery()
         delivery.promptAnswer = false
         let notifier = SyncNotifier(delivery: delivery, defaults: defaults())
         await notifier.setEnabled(true)
-        #expect(!notifier.isOn && notifier.message?.contains("System Settings") == true && delivery.prompts == 1)
+        #expect(
+            !notifier.isOn && notifier.message?.contains("System Settings") == true
+                && delivery.prompts == 1)
 
         await notifier.setEnabled(true)
         #expect(!notifier.isOn && delivery.prompts == 1)
@@ -64,7 +77,9 @@ struct SyncNotifierTests {
         #expect(delivery.settingsOpened == 1)
     }
 
-    @Test("Notices are not posted while it is off, but turning it on later does not announce what was already waiting")
+    @Test(
+        "Notices are not posted while it is off, but turning it on later does not announce what was already waiting"
+    )
     func trackingWhileOff() async {
         let delivery = InMemoryNotificationDelivery(permission: .allowed)
         let notifier = SyncNotifier(delivery: delivery, defaults: defaults())
@@ -79,7 +94,9 @@ struct SyncNotifierTests {
         #expect(delivery.posted.count == 1)
     }
 
-    @Test("A switch left on starts listening at launch; one that macOS has since blocked turns itself off")
+    @Test(
+        "A switch left on starts listening at launch; one that macOS has since blocked turns itself off"
+    )
     func launch() async {
         let store = defaults()
         store.set(true, forKey: SyncNotifier.defaultsKey)
@@ -110,7 +127,8 @@ struct SyncNotifierTests {
     func unavailable() async {
         let store = defaults()
         store.set(true, forKey: SyncNotifier.defaultsKey)
-        let notifier = SyncNotifier(delivery: nil, unavailableReason: "Not in demo mode.", defaults: store)
+        let notifier = SyncNotifier(
+            delivery: nil, unavailableReason: "Not in demo mode.", defaults: store)
         #expect(!notifier.isOn && notifier.unavailableReason == "Not in demo mode.")
         await notifier.setEnabled(true)
         #expect(!notifier.isOn && notifier.message == "Not in demo mode.")
@@ -118,7 +136,9 @@ struct SyncNotifierTests {
         await notifier.waitUntilDelivered()
     }
 
-    @Test("A cleared condition retracts the notice while the switch is on, and does nothing once it is off")
+    @Test(
+        "A cleared condition retracts the notice while the switch is on, and does nothing once it is off"
+    )
     func retract() async {
         let delivery = InMemoryNotificationDelivery()
         let notifier = SyncNotifier(delivery: delivery, defaults: defaults())

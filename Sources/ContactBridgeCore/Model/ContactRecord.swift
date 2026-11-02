@@ -32,8 +32,10 @@ public struct PostalAddress: Sendable, Hashable, Codable {
     public var subAdministrativeArea: String?
 
     public init(
-        street: String = "", city: String = "", state: String = "", postalCode: String = "", country: String = "",
-        isoCountryCode: String? = nil, subLocality: String? = nil, subAdministrativeArea: String? = nil
+        street: String = "", city: String = "", state: String = "", postalCode: String = "",
+        country: String = "",
+        isoCountryCode: String? = nil, subLocality: String? = nil,
+        subAdministrativeArea: String? = nil
     ) {
         self.street = street
         self.city = city

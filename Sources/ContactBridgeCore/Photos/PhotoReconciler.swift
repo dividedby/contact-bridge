@@ -57,8 +57,10 @@ public struct PhotoReconciler: Sendable {
     private let maxDownloads: Int
 
     public init(
-        store: any ContactStoring, google: any GoogleContactsClient, fetcher: any GooglePhotoFetching,
-        fingerprinter: any PhotoFingerprinting = ImageIOPhotoFingerprinter(), maxDownloads: Int = PhotoReconciler.maxDownloads
+        store: any ContactStoring, google: any GoogleContactsClient,
+        fetcher: any GooglePhotoFetching,
+        fingerprinter: any PhotoFingerprinting = ImageIOPhotoFingerprinter(),
+        maxDownloads: Int = PhotoReconciler.maxDownloads
     ) {
         self.store = store
         self.google = google
@@ -105,7 +107,8 @@ public struct PhotoReconciler: Sendable {
     ///   - questioned: iCloud ids that already have a photo question waiting. Such a pair is not read again just because its
     ///     baseline is missing or has a removal waiting; it is looked at when something about it changes.
     public func observe(
-        icloud scan: ICloudScan, feed: GoogleFeed, state: SyncState, links: LinkTable, keepSeparate: Set<String> = [],
+        icloud scan: ICloudScan, feed: GoogleFeed, state: SyncState, links: LinkTable,
+        keepSeparate: Set<String> = [],
         questioned: Set<String> = []
     ) async throws -> PhotoObservations {
         // A scan or a feed that paused the run is not to be derived anything from, and the plan will not use photos anyway.
@@ -124,14 +127,21 @@ public struct PhotoReconciler: Sendable {
                 continue
             }
             if scanned && !present.contains(id) { continue }
-            if feed.deleted.contains(name) || (feed.isFullListing && feed.people[name] == nil) { continue }
+            if feed.deleted.contains(name) || (feed.isFullListing && feed.people[name] == nil) {
+                continue
+            }
             if questioned.contains(id), !scanned, feed.people[name] == nil { continue }
-            pairs.append(Pair(
-                id: id, name: name, baseline: baseline.photo, profileEnabled: state.useGoogleProfilePhotos && !state.profilePhotoOptOut.contains(id)
-            ))
+            pairs.append(
+                Pair(
+                    id: id, name: name, baseline: baseline.photo,
+                    profileEnabled: state.useGoogleProfilePhotos
+                        && !state.profilePhotoOptOut.contains(id)
+                ))
         }
 
-        func needsLook(_ pair: Pair) -> Bool { pair.baseline == nil || pair.baseline?.pendingRemoval != nil }
+        func needsLook(_ pair: Pair) -> Bool {
+            pair.baseline == nil || pair.baseline?.pendingRemoval != nil
+        }
 
         // iCloud
         let toRead = pairs.filter { scanned || needsLook($0) }.map(\.id)
@@ -142,7 +152,9 @@ public struct PhotoReconciler: Sendable {
             let id = pairs[index].id
             let known = pairs[index].baseline
             guard reading.contains(id) else {
-                pairs[index].icloud = known?.icloud.map { PhotoSeen(fingerprint: $0, token: known?.icloudHint) }
+                pairs[index].icloud = known?.icloud.map {
+                    PhotoSeen(fingerprint: $0, token: known?.icloudHint)
+                }
                 continue
             }
             guard let signature = signatures[id] else {
@@ -150,7 +162,9 @@ public struct PhotoReconciler: Sendable {
                 continue
             }
             guard signature.hasPhoto else { continue }
-            if let fingerprint = known?.icloud, let hash = signature.thumbnailHash, hash == known?.icloudHint {
+            if let fingerprint = known?.icloud, let hash = signature.thumbnailHash,
+                hash == known?.icloudHint
+            {
                 pairs[index].icloud = PhotoSeen(fingerprint: fingerprint, token: hash)
                 continue
             }
@@ -166,11 +180,13 @@ public struct PhotoReconciler: Sendable {
                 }
                 guard let fingerprint = fingerprinter.fingerprint(of: data) else {
                     pairs[index].unreadable = PhotoReadFailure(
-                        resourceName: pairs[index].name, stamp: stamp, message: "the iCloud photo is not a picture this Mac can read"
+                        resourceName: pairs[index].name, stamp: stamp,
+                        message: "the iCloud photo is not a picture this Mac can read"
                     )
                     continue
                 }
-                pairs[index].icloud = PhotoSeen(fingerprint: fingerprint, token: signature.thumbnailHash)
+                pairs[index].icloud = PhotoSeen(
+                    fingerprint: fingerprint, token: signature.thumbnailHash)
             } catch is CancellationError {
                 throw CancellationError()
             } catch ContactStoreError.notFound {
@@ -182,7 +198,10 @@ public struct PhotoReconciler: Sendable {
 
         // Google: the people this run knows, and those a pair that needs a look has to fetch.
         var lookups = 0
-        for index in pairs.indices where !dropped.contains(index) && !pairs[index].failed && !pairs[index].skipped && pairs[index].unreadable == nil {
+        for index in pairs.indices
+        where !dropped.contains(index) && !pairs[index].failed && !pairs[index].skipped
+            && pairs[index].unreadable == nil
+        {
             let name = pairs[index].name
             if let listed = feed.people[name] {
                 pairs[index].person = listed
@@ -206,13 +225,20 @@ public struct PhotoReconciler: Sendable {
 
         var downloads: [Download] = []
         var updatedAt: [Int: Date] = [:]
-        for index in pairs.indices where !dropped.contains(index) && !pairs[index].failed && !pairs[index].skipped && pairs[index].unreadable == nil {
+        for index in pairs.indices
+        where !dropped.contains(index) && !pairs[index].failed && !pairs[index].skipped
+            && pairs[index].unreadable == nil
+        {
             let known = pairs[index].baseline
             guard let person = pairs[index].person else {
                 // Not listed: as far as anyone knows, as the baseline left it.
-                pairs[index].google = known?.google.map { PhotoSeen(fingerprint: $0, token: known?.googleURLKey) }
+                pairs[index].google = known?.google.map {
+                    PhotoSeen(fingerprint: $0, token: known?.googleURLKey)
+                }
                 if pairs[index].profileEnabled {
-                    pairs[index].profile = known?.googleProfile.map { PhotoSeen(fingerprint: $0, token: known?.googleProfileKey) }
+                    pairs[index].profile = known?.googleProfile.map {
+                        PhotoSeen(fingerprint: $0, token: known?.googleProfileKey)
+                    }
                 }
                 continue
             }
@@ -229,7 +255,9 @@ public struct PhotoReconciler: Sendable {
                 }
             }
             // The profile photo only matters to a contact that has no photo of its own, or whose iCloud photo is a copy of it.
-            let canUseProfile = known?.icloudOrigin == .googleProfile || (pairs[index].icloud == nil && photos.contact == nil)
+            let canUseProfile =
+                known?.icloudOrigin == .googleProfile
+                || (pairs[index].icloud == nil && photos.contact == nil)
             if pairs[index].profileEnabled, canUseProfile, let ref = photos.profile {
                 if let fingerprint = known?.googleProfile, known?.googleProfileKey == ref.key {
                     pairs[index].profile = PhotoSeen(fingerprint: fingerprint, token: ref.key)
@@ -251,11 +279,20 @@ public struct PhotoReconciler: Sendable {
                 pairs[job.pair].failed = true
             case .permanent(let message):
                 let stamp = "\(job.kind == .contact ? "google" : "profile"):\(job.ref.key)"
-                let failure = PhotoReadFailure(resourceName: pairs[job.pair].name, stamp: stamp, message: message)
-                if job.kind == .contact { pairs[job.pair].unreadable = failure } else { pairs[job.pair].profileFailure = failure }
+                let failure = PhotoReadFailure(
+                    resourceName: pairs[job.pair].name, stamp: stamp, message: message)
+                if job.kind == .contact {
+                    pairs[job.pair].unreadable = failure
+                } else {
+                    pairs[job.pair].profileFailure = failure
+                }
             case .fingerprint(let fingerprint):
                 let seen = PhotoSeen(fingerprint: fingerprint, token: job.ref.key)
-                if job.kind == .contact { pairs[job.pair].google = seen } else { pairs[job.pair].profile = seen }
+                if job.kind == .contact {
+                    pairs[job.pair].google = seen
+                } else {
+                    pairs[job.pair].profile = seen
+                }
             }
         }
 
@@ -272,9 +309,13 @@ public struct PhotoReconciler: Sendable {
                 result.unevaluated.append(pair.id)
                 continue
             }
-            if let profileFailure = pair.profileFailure { result.failures[pair.id] = profileFailure }
+            if let profileFailure = pair.profileFailure {
+                result.failures[pair.id] = profileFailure
+            }
             result.pairs[pair.id] = PhotoObservation(
-                icloudID: pair.id, resourceName: pair.name, seen: PhotoSnapshot(icloud: pair.icloud, google: pair.google, profile: pair.profile),
+                icloudID: pair.id, resourceName: pair.name,
+                seen: PhotoSnapshot(
+                    icloud: pair.icloud, google: pair.google, profile: pair.profile),
                 profileEnabled: pair.profileEnabled, contactUpdatedAt: updatedAt[index]
             )
         }
@@ -301,16 +342,28 @@ public struct PhotoReconciler: Sendable {
                     fingerprints[finished.0] = finished.1
                 }
                 group.addTask {
-                    guard let url = job.ref.sizedURL(128) else { return (position, .permanent("the photo has no usable address")) }
+                    guard let url = job.ref.sizedURL(128) else {
+                        return (position, .permanent("the photo has no usable address"))
+                    }
                     do {
-                        guard let fingerprint = fingerprinter.fingerprint(of: try await fetcher.fetch(url)) else {
-                            return (position, .permanent("the Google photo is not a picture this Mac can read"))
+                        guard
+                            let fingerprint = fingerprinter.fingerprint(
+                                of: try await fetcher.fetch(url))
+                        else {
+                            return (
+                                position,
+                                .permanent("the Google photo is not a picture this Mac can read")
+                            )
                         }
                         return (position, .fingerprint(fingerprint))
                     } catch is CancellationError {
                         throw CancellationError()
                     } catch {
-                        return (position, PhotoErrors.isPermanent(error) ? .permanent(error.localizedDescription) : .transient)
+                        return (
+                            position,
+                            PhotoErrors.isPermanent(error)
+                                ? .permanent(error.localizedDescription) : .transient
+                        )
                     }
                 }
                 running += 1

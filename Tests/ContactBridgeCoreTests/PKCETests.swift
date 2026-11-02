@@ -1,12 +1,14 @@
 import Foundation
 import Testing
+
 @testable import ContactBridgeCore
 
 struct PKCETests {
     @Test("S256 challenge matches the RFC 7636 appendix B vector")
     func rfcVector() {
         let verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
-        #expect(PKCE.challenge(forVerifier: verifier) == "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM")
+        #expect(
+            PKCE.challenge(forVerifier: verifier) == "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM")
     }
 
     @Test("Generated verifiers are 43-128 unreserved characters and differ every time")
@@ -18,7 +20,9 @@ struct PKCETests {
             #expect((43...128).contains(pkce.verifier.count))
             #expect(pkce.verifier.allSatisfy(unreserved.contains))
             #expect(pkce.challenge == PKCE.challenge(forVerifier: pkce.verifier))
-            #expect(!pkce.challenge.contains("=") && !pkce.challenge.contains("+") && !pkce.challenge.contains("/"))
+            #expect(
+                !pkce.challenge.contains("=") && !pkce.challenge.contains("+")
+                    && !pkce.challenge.contains("/"))
             seen.insert(pkce.verifier)
         }
         #expect(seen.count == 20)

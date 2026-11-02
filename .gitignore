@@ -10,3 +10,4 @@ Config/*.local.json
 *.p12
 backups/
 *.vcf
+node_modules/

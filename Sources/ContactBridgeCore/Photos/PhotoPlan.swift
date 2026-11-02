@@ -49,7 +49,8 @@ public struct PlannedPhotoOp: Sendable, Hashable {
     public var failureStamp: String?
 
     public init(
-        icloudID: String, resourceName: String, kind: Kind, baseline: PhotoBaseline, expectedGoogleURLKey: String? = nil,
+        icloudID: String, resourceName: String, kind: Kind, baseline: PhotoBaseline,
+        expectedGoogleURLKey: String? = nil,
         expectedICloudHint: String? = nil, failureStamp: String? = nil
     ) {
         self.icloudID = icloudID
@@ -67,7 +68,8 @@ extension PlannedPhotoOp.Kind {
     var text: String {
         switch self {
         case .copyToGoogle: "photo to Google"
-        case .copyToICloud(let source): source == .googleProfile ? "Google profile photo to iCloud" : "photo to iCloud"
+        case .copyToICloud(let source):
+            source == .googleProfile ? "Google profile photo to iCloud" : "photo to iCloud"
         case .deleteOnGoogle: "remove photo from Google"
         case .deleteOnICloud: "remove photo from iCloud"
         case .recordBaseline: "photos already agree"

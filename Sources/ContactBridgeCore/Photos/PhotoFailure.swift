@@ -21,7 +21,9 @@ enum PhotoErrors {
     }
 
     /// 408, 409 (Google's ABORTED: a concurrent write) and 429 are answers to try again.
-    private static func isClientError(_ status: Int) -> Bool { (400..<500).contains(status) && ![408, 409, 429].contains(status) }
+    private static func isClientError(_ status: Int) -> Bool {
+        (400..<500).contains(status) && ![408, 409, 429].contains(status)
+    }
 }
 
 /// A photo of a pair that could not be read, found by `PhotoReconciler`. The planner stores it as a failure on the pair's

@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+
 @testable import ContactBridgeCore
 
 struct InMemoryContactStoreTests {
@@ -33,10 +34,15 @@ struct InMemoryContactStoreTests {
     func unauthorized() async {
         let store = InMemoryContactStore(records: [record("a", "Ann")], authorization: .denied)
         await #expect(throws: ContactStoreError.accessDenied) { try await store.fetchAll() }
-        await #expect(throws: ContactStoreError.accessDenied) { try await store.delete(ids: ["a"], backup: .forTesting()) }
-        await #expect(throws: ContactStoreError.accessDenied) { try await store.exportVCard(ids: ["a"]) }
         await #expect(throws: ContactStoreError.accessDenied) {
-            try await store.merge(survivor: record("a", "Ann"), absorbing: [], backup: .forTesting())
+            try await store.delete(ids: ["a"], backup: .forTesting())
+        }
+        await #expect(throws: ContactStoreError.accessDenied) {
+            try await store.exportVCard(ids: ["a"])
+        }
+        await #expect(throws: ContactStoreError.accessDenied) {
+            try await store.merge(
+                survivor: record("a", "Ann"), absorbing: [], backup: .forTesting())
         }
     }
 
@@ -69,7 +75,9 @@ struct InMemoryContactStoreTests {
 
         var wrong = record("a", "Nope")
         wrong.sourceIdentifier = "zzz"
-        await #expect(throws: ContactStoreError.notFound(["zzz"])) { try await store.update(wrong, backup: .forTesting()) }
+        await #expect(throws: ContactStoreError.notFound(["zzz"])) {
+            try await store.update(wrong, backup: .forTesting())
+        }
     }
 
     @Test("delete is all-or-nothing")
@@ -96,7 +104,9 @@ struct InMemoryContactStoreTests {
         #expect(log.allSatisfy { $0.receiptID == receipt.id })
     }
 
-    private func countNotifications(of store: InMemoryContactStore, during work: () async throws -> Void) async throws -> Int {
+    private func countNotifications(
+        of store: InMemoryContactStore, during work: () async throws -> Void
+    ) async throws -> Int {
         let collector = Task {
             var count = 0
             for await _ in store.changes() { count += 1 }
@@ -125,7 +135,8 @@ struct InMemoryContactStoreTests {
         }
         #expect(one == 1)
         let merged = try await countNotifications(of: store) {
-            try await store.merge(survivor: record("a", "Anne"), absorbing: ["b"], backup: .forTesting())
+            try await store.merge(
+                survivor: record("a", "Anne"), absorbing: ["b"], backup: .forTesting())
         }
         #expect(merged == 1)
     }
@@ -135,7 +146,8 @@ struct InMemoryContactStoreTests {
     @Test("merge updates the survivor and deletes the duplicates in one logged step")
     func merge() async throws {
         let store = InMemoryContactStore(records: [
-            record("a", "Ann", phones: ["+14155552671"]), record("b", "Ann"), record("c", "Anne"), record("d", "Dee"),
+            record("a", "Ann", phones: ["+14155552671"]), record("b", "Ann"), record("c", "Anne"),
+            record("d", "Dee"),
         ])
         let receipt = BackupReceipt.forTesting()
         let survivor = record("a", "Ann", phones: ["+14155552671", "+12125553344"])
@@ -143,29 +155,37 @@ struct InMemoryContactStoreTests {
         let stored = try await store.fetchAll()
         #expect(stored.map(\.id) == ["a", "d"])
         #expect(stored[0].phones.count == 2)
-        #expect(store.mutationLog == [StoreMutation(kind: .merge, ids: ["a", "b", "c"], receiptID: receipt.id)])
+        #expect(
+            store.mutationLog == [
+                StoreMutation(kind: .merge, ids: ["a", "b", "c"], receiptID: receipt.id)
+            ])
     }
 
     @Test("merge is all-or-nothing and never deletes the survivor")
     func mergeGuards() async throws {
         let store = InMemoryContactStore(records: [record("a", "Ann"), record("b", "Bob")])
         await #expect(throws: ContactStoreError.notFound(["nope"])) {
-            try await store.merge(survivor: record("a", "Changed"), absorbing: ["b", "nope"], backup: .forTesting())
+            try await store.merge(
+                survivor: record("a", "Changed"), absorbing: ["b", "nope"], backup: .forTesting())
         }
         await #expect(throws: ContactStoreError.notFound(["ghost"])) {
-            try await store.merge(survivor: record("ghost", "G"), absorbing: ["b"], backup: .forTesting())
+            try await store.merge(
+                survivor: record("ghost", "G"), absorbing: ["b"], backup: .forTesting())
         }
         var stored = try await store.fetchAll()
         #expect(stored.map(\.givenName) == ["Ann", "Bob"])
         #expect(store.mutationLog.isEmpty)
 
-        try await store.merge(survivor: record("a", "Ann2"), absorbing: ["a", "b"], backup: .forTesting())
+        try await store.merge(
+            survivor: record("a", "Ann2"), absorbing: ["a", "b"], backup: .forTesting())
         stored = try await store.fetchAll()
         #expect(stored.map(\.id) == ["a"])
         #expect(stored[0].givenName == "Ann2")
     }
 
-    @Test("vCard export contains the requested contacts in the requested order and rejects unknown ids")
+    @Test(
+        "vCard export contains the requested contacts in the requested order and rejects unknown ids"
+    )
     func vcard() async throws {
         let store = InMemoryContactStore(records: [
             record("a", "Ann", phones: ["+14155552671"]), record("b", "Bob"), record("c", "Cy"),
@@ -178,6 +198,8 @@ struct InMemoryContactStoreTests {
         let cy = try #require(text.range(of: "FN:Cy Lee"))
         let ann = try #require(text.range(of: "FN:Ann Lee"))
         #expect(cy.lowerBound < ann.lowerBound)
-        await #expect(throws: ContactStoreError.notFound(["x"])) { try await store.exportVCard(ids: ["a", "x"]) }
+        await #expect(throws: ContactStoreError.notFound(["x"])) {
+            try await store.exportVCard(ids: ["a", "x"])
+        }
     }
 }

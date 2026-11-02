@@ -27,7 +27,10 @@ public struct GooglePhotos: Sendable, Hashable {
     /// a change might be, and any edit to the contact moves it.
     public var contactUpdatedAt: Date?
 
-    public init(contact: GooglePhotoRef? = nil, profile: GooglePhotoRef? = nil, contactUpdatedAt: Date? = nil) {
+    public init(
+        contact: GooglePhotoRef? = nil, profile: GooglePhotoRef? = nil,
+        contactUpdatedAt: Date? = nil
+    ) {
         self.contact = contact
         self.profile = profile
         self.contactUpdatedAt = contactUpdatedAt
@@ -43,13 +46,19 @@ extension GooglePersonMapper {
         var profile: [(url: String, primary: Bool)] = []
         if case .array(let entries)? = person.extras["photos"] {
             for entry in entries {
-                guard case .object(let fields) = entry, case .string(let url)? = fields["url"], !url.isEmpty else { continue }
+                guard case .object(let fields) = entry, case .string(let url)? = fields["url"],
+                    !url.isEmpty
+                else { continue }
                 if case .bool(true)? = fields["default"] { continue }
                 var type = "CONTACT"
                 var primary = false
                 if case .object(let metadata)? = fields["metadata"] {
                     if case .bool(let flag)? = metadata["primary"] { primary = flag }
-                    if case .object(let source)? = metadata["source"], case .string(let sourceType)? = source["type"] { type = sourceType }
+                    if case .object(let source)? = metadata["source"],
+                        case .string(let sourceType)? = source["type"]
+                    {
+                        type = sourceType
+                    }
                 }
                 switch type {
                 case "CONTACT": contact.append((url, primary))
@@ -61,13 +70,17 @@ extension GooglePersonMapper {
         func pick(_ photos: [(url: String, primary: Bool)]) -> GooglePhotoRef? {
             (photos.first { $0.primary } ?? photos.first).map { GooglePhotoRef(url: $0.url) }
         }
-        let updated = person.metadata?.sources?.first { $0.type == "CONTACT" }?.updateTime.flatMap(parseTimestamp)
-        return GooglePhotos(contact: pick(contact), profile: pick(profile), contactUpdatedAt: updated)
+        let updated = person.metadata?.sources?.first { $0.type == "CONTACT" }?.updateTime.flatMap(
+            parseTimestamp)
+        return GooglePhotos(
+            contact: pick(contact), profile: pick(profile), contactUpdatedAt: updated)
     }
 
     /// `url` without a trailing size option such as `=s100`, `=s100-c` or `=s0`.
     static func photoKey(ofURL url: String) -> String {
-        guard let range = url.range(of: #"=s\d+[^/=?#]*$"#, options: .regularExpression) else { return url }
+        guard let range = url.range(of: #"=s\d+[^/=?#]*$"#, options: .regularExpression) else {
+            return url
+        }
         return String(url[..<range.lowerBound])
     }
 

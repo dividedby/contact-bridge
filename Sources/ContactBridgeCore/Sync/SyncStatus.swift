@@ -53,7 +53,8 @@ public struct SyncEnvironment: Sendable {
     public var containerID: String?
 
     public init(
-        store: any ContactStoring, notes: (any NotesProvider)? = nil, google: any GoogleContactsClient, accountEmail: String? = nil,
+        store: any ContactStoring, notes: (any NotesProvider)? = nil,
+        google: any GoogleContactsClient, accountEmail: String? = nil,
         containerID: String? = nil
     ) {
         self.store = store
@@ -123,9 +124,12 @@ extension PauseReason {
     public var explanation: String {
         switch self {
         case .user: "You paused syncing."
-        case .accountChanged: "The signed-in Google account is not the one Contact Bridge has been syncing with. Sign back in to that account in Setup."
-        case .containerChanged: "The iCloud contacts account is not the one Contact Bridge has been syncing with, or it looks empty. Choose the original account in Setup."
-        case .googleEmpty: "Google reported no contacts at all while contacts are linked. That looks like a listing problem, not a deletion, so nothing was changed."
+        case .accountChanged:
+            "The signed-in Google account is not the one Contact Bridge has been syncing with. Sign back in to that account in Setup."
+        case .containerChanged:
+            "The iCloud contacts account is not the one Contact Bridge has been syncing with, or it looks empty. Choose the original account in Setup."
+        case .googleEmpty:
+            "Google reported no contacts at all while contacts are linked. That looks like a listing problem, not a deletion, so nothing was changed."
         case .notesUnavailable: "Notes cannot be read, so the note field is not being synced."
         case .needsConfirmation(let summary): summary
         }
@@ -192,7 +196,8 @@ public struct SyncRunSummary: Sendable, Hashable {
     }
 
     public var didAnything: Bool {
-        linksAdded + created + updated + deleted + alreadyGone + recoveredWrites + photosToGoogle + photosToICloud + photosRemoved > 0
+        linksAdded + created + updated + deleted + alreadyGone + recoveredWrites + photosToGoogle
+            + photosToICloud + photosRemoved > 0
     }
 
     private static func photos(_ count: Int) -> String { "\(count) photo\(count == 1 ? "" : "s")" }
@@ -207,13 +212,16 @@ public struct SyncRunSummary: Sendable, Hashable {
         if alreadyGone > 0 { parts.append("\(alreadyGone) already gone from Google") }
         if recoveredWrites > 0 { parts.append("confirmed \(recoveredWrites) from an earlier run") }
         if photosToGoogle > 0 && photosToICloud > 0 {
-            parts.append("copied \(Self.photos(photosToGoogle)) to Google, \(photosToICloud) to iCloud")
+            parts.append(
+                "copied \(Self.photos(photosToGoogle)) to Google, \(photosToICloud) to iCloud")
         } else if photosToGoogle > 0 {
             parts.append("copied \(Self.photos(photosToGoogle)) to Google")
         } else if photosToICloud > 0 {
             parts.append("copied \(Self.photos(photosToICloud)) to iCloud")
         }
-        if photosRemoved > 0 { parts.append("removed \(photosRemoved) photo\(photosRemoved == 1 ? "" : "s")") }
+        if photosRemoved > 0 {
+            parts.append("removed \(photosRemoved) photo\(photosRemoved == 1 ? "" : "s")")
+        }
         guard !parts.isEmpty else { return "Nothing needed changing." }
         let sentence = parts.joined(separator: ", ")
         return sentence.prefix(1).uppercased() + sentence.dropFirst() + "."
@@ -276,11 +284,15 @@ public struct SyncPreview: Sendable, Hashable {
     public var generatedAt: Date
 
     public var counts: Counts {
-        Counts(link: links.count, create: creates.count, update: updates.count, delete: deletes.count, review: reviews.count, photo: photos.count)
+        Counts(
+            link: links.count, create: creates.count, update: updates.count, delete: deletes.count,
+            review: reviews.count, photo: photos.count)
     }
 
     /// Nothing would be linked, created, changed or deleted.
-    public var isEmpty: Bool { links.isEmpty && creates.isEmpty && updates.isEmpty && deletes.isEmpty && photos.isEmpty }
+    public var isEmpty: Bool {
+        links.isEmpty && creates.isEmpty && updates.isEmpty && deletes.isEmpty && photos.isEmpty
+    }
 }
 
 /// The engine's whole published state. Every change is sent to `SyncEngine.snapshots()`.

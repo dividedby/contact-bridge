@@ -44,16 +44,26 @@ struct CleanupView: View {
 
     @ViewBuilder private var content: some View {
         if model.rows.isEmpty {
-            ContentUnavailableView("Your address book is empty", systemImage: "person.crop.circle.badge.questionmark", description: Text("There is nothing to clean up in this account."))
+            ContentUnavailableView(
+                "Your address book is empty", systemImage: "person.crop.circle.badge.questionmark",
+                description: Text("There is nothing to clean up in this account."))
         } else {
             VStack(spacing: 0) {
                 CleanupBar(model: model)
                 Divider()
                 if model.shownRows.isEmpty {
-                    ContentUnavailableView("No contacts match", systemImage: "line.3.horizontal.decrease.circle", description: Text("Turn off an option or change the search. Contacts you ticked stay ticked."))
+                    ContentUnavailableView(
+                        "No contacts match", systemImage: "line.3.horizontal.decrease.circle",
+                        description: Text(
+                            "Turn off an option or change the search. Contacts you ticked stay ticked."
+                        ))
                 } else {
                     List(model.shownRows) { row in
-                        CleanupRowView(row: row, isSelected: Binding(get: { model.isSelected(row.id) }, set: { model.setSelected(row.id, $0) }))
+                        CleanupRowView(
+                            row: row,
+                            isSelected: Binding(
+                                get: { model.isSelected(row.id) },
+                                set: { model.setSelected(row.id, $0) }))
                     }
                 }
             }
@@ -71,7 +81,8 @@ struct CleanupBar: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Toggle("Text-message senders", isOn: $model.filter.textMessageSenders)
-                    .help("Automated senders: short-code phone numbers with no person name or email")
+                    .help(
+                        "Automated senders: short-code phone numbers with no person name or email")
                 Toggle("No name", isOn: $model.filter.noName)
                     .help("No first, middle, last or nick name, and no organization")
                 Toggle("No phone or email", isOn: $model.filter.noPhoneOrEmail)
@@ -79,26 +90,33 @@ struct CleanupBar: View {
                 Toggle("Imported by Contact Bridge", isOn: $model.filter.importedByContactBridge)
                     .help("Contacts this app created from your Google contacts")
                 Spacer()
-                Text("\(model.shownRows.count) of \(ContactText.count(model.rows.count, "contact"))").foregroundStyle(.secondary)
+                Text(
+                    "\(model.shownRows.count) of \(ContactText.count(model.rows.count, "contact"))"
+                ).foregroundStyle(.secondary)
             }
             .toggleStyle(.button)
             HStack {
                 Button("Select all shown (\(model.shownRows.count))") { model.selectAllShown() }
                     .disabled(model.shownRows.isEmpty)
                 Button("Select none") { model.selectNone() }.disabled(selected == 0)
-                Text(selected == 0 ? "None selected" : "\(selected) selected").foregroundStyle(.secondary)
+                Text(selected == 0 ? "None selected" : "\(selected) selected").foregroundStyle(
+                    .secondary)
                 Spacer()
                 if selected > 0 {
-                    Button("Delete \(ContactText.count(selected, "contact"))…", role: .destructive) { model.confirmDelete() }
-                        .buttonStyle(.borderedProminent)
-                        .tint(.red)
-                        .disabled(model.deleteBlockReason != nil)
+                    Button("Delete \(ContactText.count(selected, "contact"))…", role: .destructive)
+                    { model.confirmDelete() }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.red)
+                    .disabled(model.deleteBlockReason != nil)
                 }
             }
             if model.filter.hasActiveOptions {
-                Text("Options combine: a contact has to match every one that is on.").font(.caption).foregroundStyle(.secondary)
+                Text("Options combine: a contact has to match every one that is on.").font(.caption)
+                    .foregroundStyle(.secondary)
             }
-            if selected > 0, let reason = model.deleteBlockReason { Text(reason).font(.caption).foregroundStyle(.orange) }
+            if selected > 0, let reason = model.deleteBlockReason {
+                Text(reason).font(.caption).foregroundStyle(.orange)
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
@@ -116,7 +134,9 @@ struct CleanupRowView: View {
                 .labelsHidden()
             VStack(alignment: .leading, spacing: 2) {
                 Text(row.displayName).lineLimit(1)
-                if !row.detail.isEmpty { Text(row.detail).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
+                if !row.detail.isEmpty {
+                    Text(row.detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
             }
             Spacer()
             if row.isTextMessageSender { badge("Text-message sender", .blue) }
@@ -159,9 +179,12 @@ struct CleanupSheet: View {
     @ViewBuilder private func doomedList(_ doomed: [CleanupRow]) -> some View {
         let rows = LazyVStack(alignment: .leading, spacing: 4) {
             ForEach(doomed) { row in
-                Label("\(row.displayName) · \(row.detail.isEmpty ? "no phone or email" : row.detail) · \(containerName)", systemImage: "trash")
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
+                Label(
+                    "\(row.displayName) · \(row.detail.isEmpty ? "no phone or email" : row.detail) · \(containerName)",
+                    systemImage: "trash"
+                )
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -176,52 +199,76 @@ struct CleanupSheet: View {
         let doomed = model.selectedRows
         return VStack(alignment: .leading, spacing: 12) {
             Text("Delete \(ContactText.count(doomed.count, "contact"))?").font(.title2)
-            Text(doomed.count == 1 ? "This contact will be deleted:" : "These \(doomed.count) contacts will be deleted:").font(.headline)
+            Text(
+                doomed.count == 1
+                    ? "This contact will be deleted:"
+                    : "These \(doomed.count) contacts will be deleted:"
+            ).font(.headline)
             doomedList(doomed)
-            Text("A new backup, including notes, is taken first, so you can get these contacts back from it."
-                + (model.syncIsOn ? "" : " Deleted contacts are also removed from the import links Contact Bridge keeps."))
-                .font(.caption).foregroundStyle(.secondary)
+            Text(
+                "A new backup, including notes, is taken first, so you can get these contacts back from it."
+                    + (model.syncIsOn
+                        ? ""
+                        : " Deleted contacts are also removed from the import links Contact Bridge keeps.")
+            )
+            .font(.caption).foregroundStyle(.secondary)
             if model.googleRemovalsPending > 0 {
-                Label("Also removed from Google on the next sync (\(ContactText.count(model.googleRemovalsPending, "contact"))).", systemImage: "arrow.triangle.2.circlepath")
-                    .foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
+                Label(
+                    "Also removed from Google on the next sync (\(ContactText.count(model.googleRemovalsPending, "contact"))).",
+                    systemImage: "arrow.triangle.2.circlepath"
+                )
+                .foregroundStyle(.orange)
+                .fixedSize(horizontal: false, vertical: true)
             }
             HStack {
                 Spacer()
                 Button("Cancel", role: .cancel) { model.showingConfirmation = false }
-                Button("Delete \(ContactText.count(doomed.count, "contact"))", role: .destructive) { Task { await model.deleteSelected() } }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.red)
-                    .disabled(doomed.isEmpty || model.deleteBlockReason != nil)
+                Button("Delete \(ContactText.count(doomed.count, "contact"))", role: .destructive) {
+                    Task { await model.deleteSelected() }
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.red)
+                .disabled(doomed.isEmpty || model.deleteBlockReason != nil)
             }
         }
     }
 
     private var progressView: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(model.phase == .deleting ? "Deleting contacts…" : "Taking a backup first…").font(.title2)
+            Text(model.phase == .deleting ? "Deleting contacts…" : "Taking a backup first…").font(
+                .title2)
             ProgressView()
-            Text("Keep this window open until it finishes.").font(.caption).foregroundStyle(.secondary)
+            Text("Keep this window open until it finishes.").font(.caption).foregroundStyle(
+                .secondary)
         }
     }
 
     private func result(_ run: CleanupRun) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Deleted \(ContactText.count(run.deletedCount, "contact"))").font(.title2)
-            Text("A backup with notes was taken first (\(ContactText.count(run.receipt.manifest.counts.icloud ?? 0, "contact"))).")
+            Text(
+                "A backup with notes was taken first (\(ContactText.count(run.receipt.manifest.counts.icloud ?? 0, "contact")))."
+            )
             if run.linksRemoved > 0 {
-                Text("\(ContactText.count(run.linksRemoved, "import link")) removed.").foregroundStyle(.secondary)
+                Text("\(ContactText.count(run.linksRemoved, "import link")) removed.")
+                    .foregroundStyle(.secondary)
             }
             if run.googleRemovalsPending > 0 {
-                Label("Also removed from Google on the next sync (\(ContactText.count(run.googleRemovalsPending, "contact"))).", systemImage: "arrow.triangle.2.circlepath")
-                    .foregroundStyle(.orange)
+                Label(
+                    "Also removed from Google on the next sync (\(ContactText.count(run.googleRemovalsPending, "contact"))).",
+                    systemImage: "arrow.triangle.2.circlepath"
+                )
+                .foregroundStyle(.orange)
             }
             ForEach(run.followUpWarnings, id: \.self) { warning in
-                Label(warning, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+                Label(warning, systemImage: "exclamationmark.triangle.fill").foregroundStyle(
+                    .orange
+                ).fixedSize(horizontal: false, vertical: true)
             }
             HStack {
                 Spacer()
-                Button("Done") { model.showingConfirmation = false }.keyboardShortcut(.defaultAction)
+                Button("Done") { model.showingConfirmation = false }.keyboardShortcut(
+                    .defaultAction)
             }
         }
     }

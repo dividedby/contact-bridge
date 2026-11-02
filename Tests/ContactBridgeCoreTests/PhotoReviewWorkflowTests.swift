@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+
 @testable import ContactBridgeCore
 
 /// Photo questions, decided: what each button does to the two contacts, the baselines and the review list.
@@ -12,27 +13,39 @@ final class PhotoReviewRig: @unchecked Sendable {
         self.photos = photos
         let base = photos.base
         let clock = base.clock
-        let support = SyncPhotoSupport(fetcher: photos.fetcher, history: photos.photoHistory, sleep: { _ in })
+        let support = SyncPhotoSupport(
+            fetcher: photos.fetcher, history: photos.photoHistory, sleep: { _ in })
         workflows = ReviewWorkflows(
-            store: base.world.store, google: base.faulty, notes: base.world.notes, backups: base.backups, links: base.linkStore,
-            state: base.stateStore, reviews: base.reviews, journal: base.journal, history: base.history, gate: gate,
+            store: base.world.store, google: base.faulty, notes: base.world.notes,
+            backups: base.backups, links: base.linkStore,
+            state: base.stateStore, reviews: base.reviews, journal: base.journal,
+            history: base.history, gate: gate,
             now: { clock.now() }, photos: support
         )
     }
 
-    static func linked(count: Int = 3) async throws -> PhotoReviewRig { PhotoReviewRig(try await PhotoRig.linked(count: count)) }
+    static func linked(count: Int = 3) async throws -> PhotoReviewRig {
+        PhotoReviewRig(try await PhotoRig.linked(count: count))
+    }
 
     /// Plans the photos as a run would and files the questions it finds.
     @discardableResult
     func ask() async throws -> [ReviewItem] {
         let plan = try await photos.look(.syncNow, fullListing: true).plan
-        _ = try photos.base.reviews.reconcile(with: plan, ignoredGoogle: [], at: photos.base.clock.now())
+        _ = try photos.base.reviews.reconcile(
+            with: plan, ignoredGoogle: [], at: photos.base.clock.now())
         return try items()
     }
 
-    func items() throws -> [ReviewItem] { try photos.base.reviews.load().filter { $0.kind == .photoConflict } }
-    func item(_ icloudID: String) throws -> ReviewItem { try #require(try items().first { $0.icloudID == icloudID }) }
-    func detail(_ icloudID: String) async throws -> ReviewDetail { try await workflows.loadDetail(try item(icloudID)) }
+    func items() throws -> [ReviewItem] {
+        try photos.base.reviews.load().filter { $0.kind == .photoConflict }
+    }
+    func item(_ icloudID: String) throws -> ReviewItem {
+        try #require(try items().first { $0.icloudID == icloudID })
+    }
+    func detail(_ icloudID: String) async throws -> ReviewDetail {
+        try await workflows.loadDetail(try item(icloudID))
+    }
 
     /// The pair's photos have been looked at and agree; then `change` happens and the removal is seen twice, five minutes on.
     func settled(_ id: String = "I1", picture: Data) async throws {
@@ -49,12 +62,17 @@ final class PhotoReviewRig: @unchecked Sendable {
     /// A run of the sync as the engine makes it, to see that nothing is asked or written again.
     func expectSettled(sourceLocation: SourceLocation = #_sourceLocation) async throws {
         let plan = try await photos.look(.syncNow, fullListing: true).plan
-        #expect(plan.review.filter { $0.kind == .photoConflict }.isEmpty, sourceLocation: sourceLocation)
-        #expect(plan.photoOps.allSatisfy { $0.kind == .recordBaseline }, sourceLocation: sourceLocation)
+        #expect(
+            plan.review.filter { $0.kind == .photoConflict }.isEmpty, sourceLocation: sourceLocation
+        )
+        #expect(
+            plan.photoOps.allSatisfy { $0.kind == .recordBaseline }, sourceLocation: sourceLocation)
     }
 
     func similar(_ data: Data?, to original: Data) -> Bool {
-        guard let data, let a = ImageIOPhotoFingerprinter().fingerprint(of: data), let b = ImageIOPhotoFingerprinter().fingerprint(of: original) else { return false }
+        guard let data, let a = ImageIOPhotoFingerprinter().fingerprint(of: data),
+            let b = ImageIOPhotoFingerprinter().fingerprint(of: original)
+        else { return false }
         return a.isSimilar(to: b)
     }
 }
@@ -70,19 +88,42 @@ struct PhotoReviewWorkflowTests {
 
     @Test("Each question offers the choices the spec lists, in its own words")
     func draftOptions() {
-        func titles(_ reason: PhotoConflictReason) -> [String] { PhotoReviewDraft(reason: reason).options.map(\.title) }
+        func titles(_ reason: PhotoConflictReason) -> [String] {
+            PhotoReviewDraft(reason: reason).options.map(\.title)
+        }
         #expect(titles(.firstSightDiffers) == ["Keep iCloud's photo", "Keep Google's photo"])
         #expect(titles(.bothChanged) == ["Keep iCloud's photo", "Keep Google's photo"])
-        #expect(titles(.removedOneChangedOther) == ["Keep iCloud's version", "Keep Google's version"])
-        #expect(titles(.removedInICloud) == ["Add Google's photo back to iCloud", "Delete it from Google too", "Do nothing"])
-        #expect(titles(.removedInGoogle) == ["Add iCloud's photo back to Google", "Delete it from iCloud too", "Do nothing"])
-        #expect(titles(.profileRemovedInICloud) == ["Add their Google profile photo back", "Do nothing (stop using their profile photo for this contact)"])
-        #expect(PhotoReviewDraft(reason: .profileRemovedInICloud).explanation.contains("can't be removed from Google"))
-        #expect(PhotoReviewDraft(reason: .removedInICloud).options.map(\.isDestructive) == [false, true, false])
-        #expect(PhotoReviewDraft(reason: .removedInGoogle).options.map(\.choice) == [.keepICloud, .keepGoogle, .doNothing])
+        #expect(
+            titles(.removedOneChangedOther) == ["Keep iCloud's version", "Keep Google's version"])
+        #expect(
+            titles(.removedInICloud) == [
+                "Add Google's photo back to iCloud", "Delete it from Google too", "Do nothing",
+            ])
+        #expect(
+            titles(.removedInGoogle) == [
+                "Add iCloud's photo back to Google", "Delete it from iCloud too", "Do nothing",
+            ])
+        #expect(
+            titles(.profileRemovedInICloud) == [
+                "Add their Google profile photo back",
+                "Do nothing (stop using their profile photo for this contact)",
+            ])
+        #expect(
+            PhotoReviewDraft(reason: .profileRemovedInICloud).explanation.contains(
+                "can't be removed from Google"))
+        #expect(
+            PhotoReviewDraft(reason: .removedInICloud).options.map(\.isDestructive) == [
+                false, true, false,
+            ])
+        #expect(
+            PhotoReviewDraft(reason: .removedInGoogle).options.map(\.choice) == [
+                .keepICloud, .keepGoogle, .doNothing,
+            ])
     }
 
-    @Test("The open item shows both pictures and the reason, and its stored stamp follows the live photos")
+    @Test(
+        "The open item shows both pictures and the reason, and its stored stamp follows the live photos"
+    )
     func detailShowsPictures() async throws {
         let rig = try await PhotoReviewRig.linked()
         defer { rig.photos.cleanUp() }
@@ -93,7 +134,9 @@ struct PhotoReviewWorkflowTests {
         let detail = try await rig.detail("I1")
         let photos = try #require(detail.photos)
         let google = await rig.photos.googlePhoto(1)
-        #expect(photos.draft.reason == .firstSightDiffers && photos.icloud == one && photos.google == google && photos.profile == nil)
+        #expect(
+            photos.draft.reason == .firstSightDiffers && photos.icloud == one
+                && photos.google == google && photos.profile == nil)
         #expect(detail.name == "First1 Last1")
         let stored = try rig.item("I1").photoStamp
         #expect(detail.stamp.photoStamp == stored)
@@ -101,7 +144,9 @@ struct PhotoReviewWorkflowTests {
 
     // MARK: conflicts
 
-    @Test("First sight, different photos: keeping iCloud's sends it to Google, saves Google's old one, and nothing is asked again")
+    @Test(
+        "First sight, different photos: keeping iCloud's sends it to Google, saves Google's old one, and nothing is asked again"
+    )
     func keepICloudAtFirstSight() async throws {
         let rig = try await PhotoReviewRig.linked()
         defer { rig.photos.cleanUp() }
@@ -117,7 +162,9 @@ struct PhotoReviewWorkflowTests {
         #expect(try rig.photos.photoHistory.entries().map(\.photo) == [try #require(old)])
         #expect(try rig.items().isEmpty)
         let baseline = try #require(try rig.photos.photoBaseline("I1"))
-        #expect(baseline.icloud != nil && baseline.google != nil && baseline.googleURLKey != nil && baseline.failure == nil)
+        #expect(
+            baseline.icloud != nil && baseline.google != nil && baseline.googleURLKey != nil
+                && baseline.failure == nil)
         try await rig.expectSettled()
     }
 
@@ -148,13 +195,18 @@ struct PhotoReviewWorkflowTests {
         try await rig.ask()
         #expect(try rig.item("I1").photoReason == .bothChanged)
 
-        #expect(done(try await rig.workflows.applyPhoto(try await rig.detail("I1"), choice: .keepICloud)))
+        #expect(
+            done(
+                try await rig.workflows.applyPhoto(try await rig.detail("I1"), choice: .keepICloud))
+        )
         let onGoogle = await rig.photos.googlePhoto(1)
         #expect(rig.similar(onGoogle, to: two))
         try await rig.expectSettled()
     }
 
-    @Test("Removed on one side and changed on the other: keeping the side with no photo removes the other's, after saving it")
+    @Test(
+        "Removed on one side and changed on the other: keeping the side with no photo removes the other's, after saving it"
+    )
     func removedAndChanged() async throws {
         let rig = try await PhotoReviewRig.linked()
         defer { rig.photos.cleanUp() }
@@ -165,7 +217,10 @@ struct PhotoReviewWorkflowTests {
         try await rig.ask()
         #expect(try rig.item("I1").photoReason == .removedOneChangedOther)
 
-        #expect(done(try await rig.workflows.applyPhoto(try await rig.detail("I1"), choice: .keepICloud)))
+        #expect(
+            done(
+                try await rig.workflows.applyPhoto(try await rig.detail("I1"), choice: .keepICloud))
+        )
         let onGoogle = await rig.photos.googlePhoto(1)
         #expect(onGoogle == nil)
         let history = try rig.photos.photoHistory.entries()
@@ -184,7 +239,10 @@ struct PhotoReviewWorkflowTests {
         try await rig.removalSeenTwice()
         #expect(try rig.item("I1").photoReason == .removedInICloud)
 
-        #expect(done(try await rig.workflows.applyPhoto(try await rig.detail("I1"), choice: .keepGoogle)))
+        #expect(
+            done(
+                try await rig.workflows.applyPhoto(try await rig.detail("I1"), choice: .keepGoogle))
+        )
         let onICloud = try await rig.photos.icloudPhoto("I1")
         let onGoogle = await rig.photos.googlePhoto(1)
         #expect(onICloud != nil && onICloud == onGoogle)
@@ -200,14 +258,19 @@ struct PhotoReviewWorkflowTests {
         try await rig.photos.setICloudPhoto("I1", nil)
         try await rig.removalSeenTwice()
 
-        #expect(done(try await rig.workflows.applyPhoto(try await rig.detail("I1"), choice: .keepICloud)))
+        #expect(
+            done(
+                try await rig.workflows.applyPhoto(try await rig.detail("I1"), choice: .keepICloud))
+        )
         let onGoogle = await rig.photos.googlePhoto(1)
         let saved = try rig.photos.photoHistory.entries().last?.photo
         #expect(onGoogle == nil && saved == old)
         try await rig.expectSettled()
     }
 
-    @Test("Removed in iCloud: doing nothing records the state, and the question only comes back when a photo changes")
+    @Test(
+        "Removed in iCloud: doing nothing records the state, and the question only comes back when a photo changes"
+    )
     func removedInICloudDoNothing() async throws {
         let rig = try await PhotoReviewRig.linked()
         defer { rig.photos.cleanUp() }
@@ -216,7 +279,9 @@ struct PhotoReviewWorkflowTests {
         try await rig.photos.setICloudPhoto("I1", nil)
         try await rig.removalSeenTwice()
 
-        #expect(done(try await rig.workflows.applyPhoto(try await rig.detail("I1"), choice: .doNothing)))
+        #expect(
+            done(try await rig.workflows.applyPhoto(try await rig.detail("I1"), choice: .doNothing))
+        )
         let after = await rig.photos.googlePhoto(1)
         let icloud = try await rig.photos.icloudPhoto("I1")
         let left = try rig.items()
@@ -228,7 +293,10 @@ struct PhotoReviewWorkflowTests {
         // Either side changing brings the question back (here: Google's photo).
         try await rig.photos.setGooglePhoto(1, two)
         let plan = try await rig.photos.look(.syncNow, fullListing: true).plan
-        #expect(plan.photoOps.contains { $0.icloudID == "I1" && $0.kind == .copyToICloud(source: .googleContact) })
+        #expect(
+            plan.photoOps.contains {
+                $0.icloudID == "I1" && $0.kind == .copyToICloud(source: .googleContact)
+            })
     }
 
     @Test("Removed in Google, iCloud still has one: add it back to Google")
@@ -240,7 +308,10 @@ struct PhotoReviewWorkflowTests {
         try await rig.removalSeenTwice()
         #expect(try rig.item("I1").photoReason == .removedInGoogle)
 
-        #expect(done(try await rig.workflows.applyPhoto(try await rig.detail("I1"), choice: .keepICloud)))
+        #expect(
+            done(
+                try await rig.workflows.applyPhoto(try await rig.detail("I1"), choice: .keepICloud))
+        )
         let onGoogle = await rig.photos.googlePhoto(1)
         #expect(rig.similar(onGoogle, to: one))
         try await rig.expectSettled()
@@ -254,9 +325,14 @@ struct PhotoReviewWorkflowTests {
         try await rig.photos.setGooglePhoto(1, nil)
         try await rig.removalSeenTwice()
 
-        #expect(done(try await rig.workflows.applyPhoto(try await rig.detail("I1"), choice: .keepGoogle)))
+        #expect(
+            done(
+                try await rig.workflows.applyPhoto(try await rig.detail("I1"), choice: .keepGoogle))
+        )
         let onICloud = try await rig.photos.icloudPhoto("I1")
-        #expect(onICloud == nil && rig.photos.base.backupFolders() == 1 && rig.photos.store.mutationLog.last?.kind == .photo)
+        #expect(
+            onICloud == nil && rig.photos.base.backupFolders() == 1
+                && rig.photos.store.mutationLog.last?.kind == .photo)
         try await rig.expectSettled()
     }
 
@@ -268,7 +344,9 @@ struct PhotoReviewWorkflowTests {
         try await rig.photos.setGooglePhoto(1, nil)
         try await rig.removalSeenTwice()
 
-        #expect(done(try await rig.workflows.applyPhoto(try await rig.detail("I1"), choice: .doNothing)))
+        #expect(
+            done(try await rig.workflows.applyPhoto(try await rig.detail("I1"), choice: .doNothing))
+        )
         let onICloud = try await rig.photos.icloudPhoto("I1")
         let onGoogle = await rig.photos.googlePhoto(1)
         let left = try rig.items()
@@ -312,18 +390,24 @@ struct PhotoReviewWorkflowTests {
         let rig = try await profileRemovedRig()
         defer { rig.photos.cleanUp() }
 
-        #expect(done(try await rig.workflows.applyPhoto(try await rig.detail("I1"), choice: .doNothing)))
+        #expect(
+            done(try await rig.workflows.applyPhoto(try await rig.detail("I1"), choice: .doNothing))
+        )
         let optOut = try rig.photos.state.profilePhotoOptOut
         #expect(optOut == ["I1"])
         let onICloud = try await rig.photos.icloudPhoto("I1")
         #expect(onICloud == nil)
         let plan = try await rig.photos.look(.syncNow, fullListing: true).plan
-        #expect(!plan.photoOps.contains { $0.icloudID == "I1" && $0.kind != .recordBaseline }, "no profile photo comes back")
+        #expect(
+            !plan.photoOps.contains { $0.icloudID == "I1" && $0.kind != .recordBaseline },
+            "no profile photo comes back")
     }
 
     // MARK: moved since shown
 
-    @Test("A photo that changed after the item was opened: nothing is written, and the item is refreshed")
+    @Test(
+        "A photo that changed after the item was opened: nothing is written, and the item is refreshed"
+    )
     func changedSinceShown() async throws {
         let rig = try await PhotoReviewRig.linked()
         defer { rig.photos.cleanUp() }
@@ -357,7 +441,9 @@ struct PhotoReviewWorkflowTests {
         let detail = try await rig.detail("I1")
         try await rig.photos.store.delete(ids: ["I1"], backup: .forTesting())
 
-        #expect(try await rig.workflows.applyPhoto(detail, choice: .keepICloud) == .changedSinceShown(nil))
+        #expect(
+            try await rig.workflows.applyPhoto(detail, choice: .keepICloud)
+                == .changedSinceShown(nil))
         #expect(try rig.items().isEmpty)
         let writes = await rig.photos.google.photoWrites
         #expect(writes.isEmpty)
@@ -371,9 +457,13 @@ struct PhotoReviewWorkflowTests {
         try await rig.photos.setGooglePhoto(1, two)
         try await rig.ask()
         try rig.photos.base.stateStore.update {
-            $0.baselines["I1"]?.photo = PhotoBaseline(syncedAt: SyncFixtures.t0, failure: PhotoBaseline.Failure(stamp: "x", message: "bad", at: SyncFixtures.t0))
+            $0.baselines["I1"]?.photo = PhotoBaseline(
+                syncedAt: SyncFixtures.t0,
+                failure: PhotoBaseline.Failure(stamp: "x", message: "bad", at: SyncFixtures.t0))
         }
-        #expect(done(try await rig.workflows.applyPhoto(try await rig.detail("I1"), choice: .doNothing)))
+        #expect(
+            done(try await rig.workflows.applyPhoto(try await rig.detail("I1"), choice: .doNothing))
+        )
         #expect(try rig.photos.photoBaseline("I1")?.failure == nil)
     }
 
@@ -387,7 +477,9 @@ struct PhotoReviewWorkflowTests {
         let detail = try await rig.detail("I1")
         await rig.photos.google.inject(.rateLimited(), on: .updateContactPhoto)
 
-        await #expect(throws: ReviewWorkflowError.self) { try await rig.workflows.applyPhoto(detail, choice: .keepICloud) }
+        await #expect(throws: ReviewWorkflowError.self) {
+            try await rig.workflows.applyPhoto(detail, choice: .keepICloud)
+        }
         #expect(try rig.items().count == 1)
     }
 
@@ -398,15 +490,17 @@ struct PhotoReviewWorkflowTests {
         let rig = try await PhotoReviewRig.linked()
         defer { rig.photos.cleanUp() }
         try await rig.photos.setICloudPhoto("I1", one)
-        try await rig.photos.setGooglePhoto(1, two)           // first sight, different
+        try await rig.photos.setGooglePhoto(1, two)  // first sight, different
         try await rig.settled("I2", picture: three)
-        try await rig.photos.setICloudPhoto("I2", nil)       // removed in iCloud: iCloud's "no photo" wins
+        try await rig.photos.setICloudPhoto("I2", nil)  // removed in iCloud: iCloud's "no photo" wins
         try await rig.removalSeenTwice()
         let items = try rig.items()
         try #require(items.count == 2)
 
         let report = try await rig.workflows.keepICloudPhotosForAll(items)
-        #expect(report.applied.sorted() == items.map(\.id).sorted() && report.needsConfirmation == nil && report.failed.isEmpty)
+        #expect(
+            report.applied.sorted() == items.map(\.id).sorted() && report.needsConfirmation == nil
+                && report.failed.isEmpty)
         let first = await rig.photos.googlePhoto(1)
         let second = await rig.photos.googlePhoto(2)
         let left = try rig.items()
@@ -445,11 +539,15 @@ struct PhotoReviewWorkflowTests {
         try await rig.photos.setGooglePhoto(2, three)
 
         let report = try await rig.workflows.keepICloudPhotosForAll(items)
-        #expect(report.applied == ["photoConflict|I1|people/c1"] && report.changedSinceShown == ["photoConflict|I2|people/c2"])
+        #expect(
+            report.applied == ["photoConflict|I1|people/c1"]
+                && report.changedSinceShown == ["photoConflict|I2|people/c2"])
         #expect(try rig.items().map(\.icloudID) == ["I2"])
     }
 
-    @Test("A bulk action that would write more photos than the limit allows asks first, and does nothing until confirmed")
+    @Test(
+        "A bulk action that would write more photos than the limit allows asks first, and does nothing until confirmed"
+    )
     func bulkGuard() async throws {
         let rig = try await PhotoReviewRig.linked(count: 30)
         defer { rig.photos.cleanUp() }
@@ -461,7 +559,9 @@ struct PhotoReviewWorkflowTests {
         try #require(items.count == 21)
 
         let asked = try await rig.workflows.keepICloudPhotosForAll(items)
-        #expect(asked.needsConfirmation?.contains("write 21 of 30 contact photos to Google") == true && asked.applied.isEmpty)
+        #expect(
+            asked.needsConfirmation?.contains("write 21 of 30 contact photos to Google") == true
+                && asked.applied.isEmpty)
         let writes = await rig.photos.google.photoWrites
         let left = try rig.items().count
         #expect(writes.isEmpty && left == 21)
@@ -482,7 +582,8 @@ struct PhotoReviewWorkflowTests {
         try #require(items.count == 6)
 
         let asked = try await rig.workflows.keepICloudPhotosForAll(items)
-        #expect(asked.needsConfirmation?.contains("remove 6 of 30 contact photos from Google") == true)
+        #expect(
+            asked.needsConfirmation?.contains("remove 6 of 30 contact photos from Google") == true)
         let stillThere = await rig.photos.googlePhoto(1)
         #expect(stillThere != nil)
         let confirmed = try await rig.workflows.keepICloudPhotosForAll(items, confirmed: true)
@@ -507,18 +608,23 @@ struct PhotoReviewWorkflowTests {
 
     // MARK: the engine's list
 
-    @Test("The list names the kind of photo question, and hides them all while photo sync is off (without deleting them)")
+    @Test(
+        "The list names the kind of photo question, and hides them all while photo sync is off (without deleting them)"
+    )
     func listHidesWhenOff() async throws {
         let photos = try await PhotoRig.linked(count: 2)
         defer { photos.cleanUp() }
-        let support = SyncPhotoSupport(fetcher: photos.fetcher, history: photos.photoHistory, sleep: { _ in })
+        let support = SyncPhotoSupport(
+            fetcher: photos.fetcher, history: photos.photoHistory, sleep: { _ in })
         let engine = EngineRig(photos.base, photos: support)
         try await photos.setICloudPhoto("I1", one)
         try await photos.setGooglePhoto(1, two)
         _ = await engine.startAndRun()
 
         var snapshot = await engine.snapshot
-        #expect(snapshot.reviewItems.map(\.kind) == [.photoConflict] && snapshot.reviewItems.first?.photoReason == .firstSightDiffers)
+        #expect(
+            snapshot.reviewItems.map(\.kind) == [.photoConflict]
+                && snapshot.reviewItems.first?.photoReason == .firstSightDiffers)
 
         try photos.base.stateStore.update { $0.syncPhotos = false }
         await engine.engine.syncNow()

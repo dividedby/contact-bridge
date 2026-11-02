@@ -20,7 +20,8 @@ public enum LoopbackRequestParser {
     /// The request line once it is complete (terminated by a newline); nil while incomplete or malformed.
     public static func requestLine(from data: Data) -> (method: String, target: String)? {
         guard let newline = data.firstIndex(of: UInt8(ascii: "\n")) else { return nil }
-        let line = String(decoding: data[data.startIndex..<newline], as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        let line = String(decoding: data[data.startIndex..<newline], as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         let parts = line.split(separator: " ", omittingEmptySubsequences: true)
         guard parts.count == 3, parts[2].hasPrefix("HTTP/") else { return nil }
         return (String(parts[0]), String(parts[1]))
@@ -81,7 +82,8 @@ public actor LoopbackRedirectListener {
 
     public init(
         expectedState: String, redirectPath: String = "/", timeout: Duration = .seconds(300),
-        maxConnections: Int = 8, readTimeout: Duration = .seconds(10), startTimeout: Duration = .seconds(5)
+        maxConnections: Int = 8, readTimeout: Duration = .seconds(10),
+        startTimeout: Duration = .seconds(5)
     ) {
         self.expectedState = expectedState
         self.path = redirectPath
@@ -93,11 +95,15 @@ public actor LoopbackRedirectListener {
 
     /// Starts listening and returns the redirect URI (`http://127.0.0.1:PORT`).
     public func start() async throws -> URL {
-        guard listener == nil, outcome == nil else { throw GoogleAuthError.listenerFailed("listener already used") }
+        guard listener == nil, outcome == nil else {
+            throw GoogleAuthError.listenerFailed("listener already used")
+        }
         let parameters = NWParameters.tcp
         parameters.requiredLocalEndpoint = .hostPort(host: .ipv4(.loopback), port: .any)
         let listener: NWListener
-        do { listener = try NWListener(using: parameters) } catch { throw GoogleAuthError.listenerFailed(error.localizedDescription) }
+        do { listener = try NWListener(using: parameters) } catch {
+            throw GoogleAuthError.listenerFailed(error.localizedDescription)
+        }
 
         let (states, stateSink) = AsyncStream.makeStream(of: NWListener.State.self)
         listener.stateUpdateHandler = { stateSink.yield($0) }
@@ -138,14 +144,18 @@ public actor LoopbackRedirectListener {
 
     /// Waits for `.ready`. A listener that sits in `.waiting` (no usable network path) never becomes ready on its own, so
     /// anything other than ready within `timeout` is a failure.
-    static func awaitReady(_ states: AsyncStream<NWListener.State>, timeout: Duration) async throws {
+    static func awaitReady(_ states: AsyncStream<NWListener.State>, timeout: Duration) async throws
+    {
         try await withThrowingTaskGroup(of: Void.self) { group in
             group.addTask {
                 for await state in states {
                     switch state {
                     case .ready: return
-                    case .failed(let error): throw GoogleAuthError.listenerFailed(error.localizedDescription)
-                    case .cancelled: throw GoogleAuthError.listenerFailed("listener cancelled before it was ready")
+                    case .failed(let error):
+                        throw GoogleAuthError.listenerFailed(error.localizedDescription)
+                    case .cancelled:
+                        throw GoogleAuthError.listenerFailed(
+                            "listener cancelled before it was ready")
                     default: continue
                     }
                 }
@@ -153,7 +163,9 @@ public actor LoopbackRedirectListener {
             }
             group.addTask {
                 try await Task.sleep(for: timeout)
-                throw GoogleAuthError.listenerFailed("the local listener did not become ready in time (still waiting for the network stack)")
+                throw GoogleAuthError.listenerFailed(
+                    "the local listener did not become ready in time (still waiting for the network stack)"
+                )
             }
             defer { group.cancelAll() }
             try await group.next()
@@ -218,19 +230,29 @@ public actor LoopbackRedirectListener {
             await respond(to: connection, status: 400, body: Self.page("Bad request."))
             return
         }
-        switch LoopbackRequestParser.classify(method: line.method, target: line.target, path: path) {
+        switch LoopbackRequestParser.classify(method: line.method, target: line.target, path: path)
+        {
         case .ignored:
             await respond(to: connection, status: 404, body: Self.page("Not found."))
         case .redirect(let redirect):
             guard redirect.state == expectedState else {
-                await respond(to: connection, status: 400, body: Self.page("This sign-in response did not match the request."))
+                await respond(
+                    to: connection, status: 400,
+                    body: Self.page("This sign-in response did not match the request."))
                 return
             }
             if let error = redirect.error {
-                await respond(to: connection, status: 200, body: Self.page("Sign-in was not completed. You can close this window and return to Contact Bridge."))
+                await respond(
+                    to: connection, status: 200,
+                    body: Self.page(
+                        "Sign-in was not completed. You can close this window and return to Contact Bridge."
+                    ))
                 finish(.failure(.authorizationDenied(error)))
             } else if let code = redirect.code {
-                await respond(to: connection, status: 200, body: Self.page("Signed in. You can close this window and return to Contact Bridge."))
+                await respond(
+                    to: connection, status: 200,
+                    body: Self.page(
+                        "Signed in. You can close this window and return to Contact Bridge."))
                 finish(.success(code))
             }
         }
@@ -240,19 +262,25 @@ public actor LoopbackRedirectListener {
         connections[ObjectIdentifier(connection)] = nil
         let reason = status == 200 ? "OK" : status == 404 ? "Not Found" : "Bad Request"
         let payload = Data(body.utf8)
-        var response = Data("HTTP/1.1 \(status) \(reason)\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: \(payload.count)\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n".utf8)
+        var response = Data(
+            "HTTP/1.1 \(status) \(reason)\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: \(payload.count)\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n"
+                .utf8)
         response.append(payload)
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            connection.send(content: response, contentContext: .finalMessage, isComplete: true, completion: .contentProcessed { _ in
-                continuation.resume()
-            })
+            connection.send(
+                content: response, contentContext: .finalMessage, isComplete: true,
+                completion: .contentProcessed { _ in
+                    continuation.resume()
+                })
         }
         connection.cancel()
     }
 
     /// Reads until the blank line that ends the request head (GETs have no body), so closing never resets unread data.
     /// Gives up, closing the connection, if the head is not complete within `timeout`.
-    private static func readRequestHead(_ connection: NWConnection, timeout: Duration) async -> Data? {
+    private static func readRequestHead(_ connection: NWConnection, timeout: Duration) async
+        -> Data?
+    {
         await withTaskGroup(of: Data?.self) { group in
             group.addTask { await readUntilBlankLine(connection) }
             group.addTask {
@@ -270,8 +298,10 @@ public actor LoopbackRedirectListener {
         var buffer = Data()
         let terminator = Data("\r\n\r\n".utf8)
         while buffer.count < 16 * 1024 {
-            let (data, finished) = await withCheckedContinuation { (continuation: CheckedContinuation<(Data?, Bool), Never>) in
-                connection.receive(minimumIncompleteLength: 1, maximumLength: 16 * 1024) { data, _, isComplete, error in
+            let (data, finished) = await withCheckedContinuation {
+                (continuation: CheckedContinuation<(Data?, Bool), Never>) in
+                connection.receive(minimumIncompleteLength: 1, maximumLength: 16 * 1024) {
+                    data, _, isComplete, error in
                     continuation.resume(returning: (data, isComplete || error != nil))
                 }
             }

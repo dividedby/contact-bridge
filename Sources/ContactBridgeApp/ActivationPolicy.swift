@@ -34,25 +34,30 @@ final class ActivationPolicyController {
         guard observers.isEmpty else { return }
         let center = NotificationCenter.default
         let names: [Notification.Name] = [
-            NSWindow.didBecomeMainNotification, NSWindow.didBecomeKeyNotification, NSWindow.didDeminiaturizeNotification,
+            NSWindow.didBecomeMainNotification, NSWindow.didBecomeKeyNotification,
+            NSWindow.didDeminiaturizeNotification,
             NSWindow.willCloseNotification, NSWindow.didMiniaturizeNotification,
             // A window of an app that is not active may never become key; these still say when it reaches the screen.
             NSWindow.didChangeOcclusionStateNotification, NSWindow.didExposeNotification,
         ]
         for name in names {
-            observers.append(center.addObserver(forName: name, object: nil, queue: .main) { note in
-                // Delivered on the main queue (see `queue`), so reading the window there is safe.
-                nonisolated(unsafe) let note = note
-                MainActor.assumeIsolated {
-                    guard let window = note.object as? NSWindow, Self.isAppWindowKind(window) else { return }
-                    ActivationPolicyController.shared.windowEvent(note.name, window)
-                }
-            })
+            observers.append(
+                center.addObserver(forName: name, object: nil, queue: .main) { note in
+                    // Delivered on the main queue (see `queue`), so reading the window there is safe.
+                    nonisolated(unsafe) let note = note
+                    MainActor.assumeIsolated {
+                        guard let window = note.object as? NSWindow, Self.isAppWindowKind(window)
+                        else { return }
+                        ActivationPolicyController.shared.windowEvent(note.name, window)
+                    }
+                })
         }
     }
 
     private func windowEvent(_ name: Notification.Name, _ window: NSWindow) {
-        if name == NSWindow.didChangeOcclusionStateNotification || name == NSWindow.didExposeNotification {
+        if name == NSWindow.didChangeOcclusionStateNotification
+            || name == NSWindow.didExposeNotification
+        {
             if suppressingLaunchWindow { hideVisibleAppWindows() }
             return
         }
@@ -70,7 +75,8 @@ final class ActivationPolicyController {
     /// Dock icon with a window, menu bar only without.
     func refresh() {
         let traits = NSApp.windows.map(traits)
-        let target: NSApplication.ActivationPolicy = ActivationRules.presence(for: traits) == .regular ? .regular : .accessory
+        let target: NSApplication.ActivationPolicy =
+            ActivationRules.presence(for: traits) == .regular ? .regular : .accessory
         if NSApp.activationPolicy() != target { NSApp.setActivationPolicy(target) }
     }
 
@@ -93,8 +99,12 @@ final class ActivationPolicyController {
 
     private func hideVisibleAppWindows() {
         for window in NSApp.windows {
-            let basic = WindowTraits(isTitled: window.styleMask.contains(.titled), isPanel: window is NSPanel, isShownOrParked: true)
-            if ActivationRules.shouldHideForLaunch(basic, isOnScreen: window.isVisible, suppressing: suppressingLaunchWindow) {
+            let basic = WindowTraits(
+                isTitled: window.styleMask.contains(.titled), isPanel: window is NSPanel,
+                isShownOrParked: true)
+            if ActivationRules.shouldHideForLaunch(
+                basic, isOnScreen: window.isVisible, suppressing: suppressingLaunchWindow)
+            {
                 hideForLaunch(window)
             }
         }
@@ -111,7 +121,8 @@ final class ActivationPolicyController {
         suppressingLaunchWindow = false
         NSApp.setActivationPolicy(.regular)
         NSApp.activate()
-        if let window = NSApp.windows.first(where: { ActivationRules.countsAsAppWindow(traits($0)) }) {
+        if let window = NSApp.windows.first(where: { ActivationRules.countsAsAppWindow(traits($0)) }
+        ) {
             if window.isMiniaturized { window.deminiaturize(nil) }
             window.makeKeyAndOrderFront(nil)
         } else if let window = launchHiddenWindow {
@@ -136,7 +147,8 @@ final class ActivationPolicyController {
     private func traits(_ window: NSWindow) -> WindowTraits {
         WindowTraits(
             isTitled: window.styleMask.contains(.titled), isPanel: window is NSPanel,
-            isShownOrParked: !closed.contains(window) && (window.isVisible || window.isMiniaturized || NSApp.isHidden)
+            isShownOrParked: !closed.contains(window)
+                && (window.isVisible || window.isMiniaturized || NSApp.isHidden)
         )
     }
 }
@@ -151,8 +163,12 @@ enum LaunchContext {
     static func launchedAtLogin() -> Bool {
         let event = NSAppleEventManager.shared().currentAppleEvent
         let flag = event?.paramDescriptor(forKeyword: AEKeyword(keyAEPropData))?.enumCodeValue
-        let atLogin = event?.eventID == AEEventID(kAEOpenApplication) && flag == OSType(keyAELaunchedAsLogInItem)
-        log.info("launch event \(event?.eventID ?? 0, privacy: .public), property \(flag ?? 0, privacy: .public), launched at login: \(atLogin, privacy: .public)")
+        let atLogin =
+            event?.eventID == AEEventID(kAEOpenApplication)
+            && flag == OSType(keyAELaunchedAsLogInItem)
+        log.info(
+            "launch event \(event?.eventID ?? 0, privacy: .public), property \(flag ?? 0, privacy: .public), launched at login: \(atLogin, privacy: .public)"
+        )
         return atLogin
     }
 }

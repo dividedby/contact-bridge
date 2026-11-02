@@ -63,8 +63,10 @@ public struct PhotoBaseline: Sendable, Hashable, Codable {
     public var failure: Failure?
 
     public init(
-        icloud: PhotoFingerprint? = nil, google: PhotoFingerprint? = nil, googleProfile: PhotoFingerprint? = nil,
-        icloudHint: String? = nil, googleURLKey: String? = nil, googleProfileKey: String? = nil, icloudOrigin: PhotoOrigin = .user,
+        icloud: PhotoFingerprint? = nil, google: PhotoFingerprint? = nil,
+        googleProfile: PhotoFingerprint? = nil,
+        icloudHint: String? = nil, googleURLKey: String? = nil, googleProfileKey: String? = nil,
+        icloudOrigin: PhotoOrigin = .user,
         syncedAt: Date, pendingRemoval: PendingRemoval? = nil, failure: Failure? = nil
     ) {
         self.icloud = icloud

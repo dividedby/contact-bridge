@@ -17,7 +17,9 @@ public enum MatchFlag: String, Sendable, Hashable, Codable, CaseIterable {
     /// Conflict flags mean the two records are probably different people, so the pair never joins a cluster.
     public var isConflict: Bool {
         switch self {
-        case .sharedPhoneDifferentNames, .sharedEmailDifferentNames, .conflictingContactInfo, .memberNameConflict: true
+        case .sharedPhoneDifferentNames, .sharedEmailDifferentNames, .conflictingContactInfo,
+            .memberNameConflict:
+            true
         case .sharedIdentifierUnnamedRecord, .nameSpellingVariant: false
         }
     }
@@ -71,7 +73,8 @@ public struct ClusterEdge: Sendable, Hashable {
 
     /// Strong enough to join a cluster: medium confidence or better and no conflict flag.
     public var joinsCluster: Bool {
-        match.confidence >= ConfidenceLevel.mediumThreshold && !match.flags.contains(where: \.isConflict)
+        match.confidence >= ConfidenceLevel.mediumThreshold
+            && !match.flags.contains(where: \.isConflict)
     }
 }
 

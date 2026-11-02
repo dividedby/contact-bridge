@@ -14,7 +14,8 @@ public final class CNContactStoreAdapter: ContactStoring, @unchecked Sendable {
     private let store: CNContactStore
     private let explicitContainerID: String?
     /// CN calls block (and can take seconds on large books), so they run here rather than on the cooperative pool.
-    private let queue = DispatchQueue(label: "ContactBridge.CNContactStoreAdapter", qos: .userInitiated)
+    private let queue = DispatchQueue(
+        label: "ContactBridge.CNContactStoreAdapter", qos: .userInitiated)
 
     public init(store: CNContactStore = CNContactStore(), containerID: String? = nil) {
         self.store = store
@@ -43,7 +44,9 @@ public final class CNContactStoreAdapter: ContactStoring, @unchecked Sendable {
     }
 
     private func requireAccess() async throws {
-        guard await authorizationStatus() == .authorized else { throw ContactStoreError.accessDenied }
+        guard await authorizationStatus() == .authorized else {
+            throw ContactStoreError.accessDenied
+        }
     }
 
     // MARK: containers
@@ -80,7 +83,11 @@ public final class CNContactStoreAdapter: ContactStoring, @unchecked Sendable {
     private func resolveContainer() throws -> ContactContainer {
         let all = try allContainers()
         if let explicitContainerID {
-            guard let chosen = all.first(where: { $0.id == explicitContainerID && $0.kind == .cardDAV }) else {
+            guard
+                let chosen = all.first(where: {
+                    $0.id == explicitContainerID && $0.kind == .cardDAV
+                })
+            else {
                 throw ContactStoreError.noICloudContainer
             }
             return chosen
@@ -99,7 +106,8 @@ public final class CNContactStoreAdapter: ContactStoring, @unchecked Sendable {
         return try await onQueue {
             let container = try self.resolveContainer()
             let predicate = CNContact.predicateForContactsInContainer(withIdentifier: container.id)
-            return try self.fetch(predicate: predicate, keys: CNContactMapper.requiredKeys).map(CNContactMapper.record(from:))
+            return try self.fetch(predicate: predicate, keys: CNContactMapper.requiredKeys).map(
+                CNContactMapper.record(from:))
         }
     }
 
@@ -110,16 +118,27 @@ public final class CNContactStoreAdapter: ContactStoring, @unchecked Sendable {
         try await requireAccess()
         return try await onQueue {
             let container = try self.resolveContainer()
-            try self.requireInContainer(try self.fetchContacts(ids: ids, keys: [CNContactIdentifierKey as NSString]), container)
-            let photoKeys = [CNContactImageDataKey, CNContactImageDataAvailableKey, CNContactThumbnailImageDataKey].map { $0 as NSString }
+            try self.requireInContainer(
+                try self.fetchContacts(ids: ids, keys: [CNContactIdentifierKey as NSString]),
+                container)
+            let photoKeys = [
+                CNContactImageDataKey, CNContactImageDataAvailableKey,
+                CNContactThumbnailImageDataKey,
+            ].map { $0 as NSString }
             do {
-                let contacts = try self.fetchContacts(ids: ids, keys: [CNContactVCardSerialization.descriptorForRequiredKeys()] + photoKeys)
+                let contacts = try self.fetchContacts(
+                    ids: ids,
+                    keys: [CNContactVCardSerialization.descriptorForRequiredKeys()] + photoKeys)
                 // Apple's export leaves photos out, whatever is fetched: they are added card by card.
                 return VCardWriter.addingPhotos(
-                    contacts.map { ICloudPhotoRead.withPictureForExport($0).imageData }, to: try CNContactVCardSerialization.data(with: contacts)
+                    contacts.map { ICloudPhotoRead.withPictureForExport($0).imageData },
+                    to: try CNContactVCardSerialization.data(with: contacts)
                 )
-            } catch where CNContactMapper.isUnauthorizedKeys(error) {
-                return VCardWriter.data(for: try self.fetchContacts(ids: ids, keys: CNContactMapper.mergeKeys + photoKeys).map(ICloudPhotoRead.withPictureForExport))
+            } catch  where CNContactMapper.isUnauthorizedKeys(error) {
+                return VCardWriter.data(
+                    for: try self.fetchContacts(
+                        ids: ids, keys: CNContactMapper.mergeKeys + photoKeys
+                    ).map(ICloudPhotoRead.withPictureForExport))
             }
         }
     }
@@ -127,7 +146,8 @@ public final class CNContactStoreAdapter: ContactStoring, @unchecked Sendable {
     // MARK: writes
 
     /// Saves, then refetches the new contact and returns what the store actually holds.
-    public func create(_ record: ContactRecord, backup: BackupReceipt) async throws -> ContactRecord {
+    public func create(_ record: ContactRecord, backup: BackupReceipt) async throws -> ContactRecord
+    {
         try await requireAccess()
         return try await onQueue {
             let container = try self.resolveContainer()
@@ -136,7 +156,8 @@ public final class CNContactStoreAdapter: ContactStoring, @unchecked Sendable {
             request.add(contact, toContainerWithIdentifier: container.id)
             try self.store.execute(request)
 
-            let stored = try self.fetchContacts(ids: [contact.identifier], keys: CNContactMapper.requiredKeys)
+            let stored = try self.fetchContacts(
+                ids: [contact.identifier], keys: CNContactMapper.requiredKeys)
             try self.requireInContainer(stored, container)
             return CNContactMapper.record(from: stored[0])
         }
@@ -146,7 +167,8 @@ public final class CNContactStoreAdapter: ContactStoring, @unchecked Sendable {
         try await requireAccess()
         try await onQueue {
             let container = try self.resolveContainer()
-            let contacts = try self.fetchContacts(ids: [record.sourceIdentifier], keys: CNContactMapper.requiredKeys)
+            let contacts = try self.fetchContacts(
+                ids: [record.sourceIdentifier], keys: CNContactMapper.requiredKeys)
             try self.requireInContainer(contacts, container)
             guard let working = contacts[0].mutableCopy() as? CNMutableContact else {
                 throw ContactStoreError.notFound([record.sourceIdentifier])
@@ -161,14 +183,17 @@ public final class CNContactStoreAdapter: ContactStoring, @unchecked Sendable {
     /// One CNSaveRequest: update the survivor (record fields plus what the duplicates carry that ContactRecord cannot
     /// express) and delete the duplicates. Never requests notes:
     /// `MergeExecutor` combines and writes them separately, after this call succeeds.
-    public func merge(survivor: ContactRecord, absorbing ids: [String], backup: BackupReceipt) async throws {
+    public func merge(survivor: ContactRecord, absorbing ids: [String], backup: BackupReceipt)
+        async throws
+    {
         try await requireAccess()
         try await onQueue {
             let container = try self.resolveContainer()
             var seen: Set<String> = [survivor.sourceIdentifier]
             let duplicateIDs = ids.filter { seen.insert($0).inserted }
 
-            let contacts = try self.fetchContacts(ids: [survivor.sourceIdentifier] + duplicateIDs, keys: CNContactMapper.mergeKeys)
+            let contacts = try self.fetchContacts(
+                ids: [survivor.sourceIdentifier] + duplicateIDs, keys: CNContactMapper.mergeKeys)
             try self.requireInContainer(contacts, container)
             guard let working = contacts[0].mutableCopy() as? CNMutableContact else {
                 throw ContactStoreError.notFound([survivor.sourceIdentifier])
@@ -181,7 +206,9 @@ public final class CNContactStoreAdapter: ContactStoring, @unchecked Sendable {
             let request = CNSaveRequest()
             request.update(working)
             for duplicate in duplicates {
-                if let doomed = duplicate.mutableCopy() as? CNMutableContact { request.delete(doomed) }
+                if let doomed = duplicate.mutableCopy() as? CNMutableContact {
+                    request.delete(doomed)
+                }
             }
             try self.store.execute(request)
         }
@@ -191,11 +218,14 @@ public final class CNContactStoreAdapter: ContactStoring, @unchecked Sendable {
         try await requireAccess()
         try await onQueue {
             let container = try self.resolveContainer()
-            let contacts = try self.fetchContacts(ids: ids, keys: [CNContactIdentifierKey as NSString])
+            let contacts = try self.fetchContacts(
+                ids: ids, keys: [CNContactIdentifierKey as NSString])
             try self.requireInContainer(contacts, container)
             let request = CNSaveRequest()
             for contact in contacts {
-                if let doomed = contact.mutableCopy() as? CNMutableContact { request.delete(doomed) }
+                if let doomed = contact.mutableCopy() as? CNMutableContact {
+                    request.delete(doomed)
+                }
             }
             try self.store.execute(request)
         }
@@ -207,7 +237,8 @@ public final class CNContactStoreAdapter: ContactStoring, @unchecked Sendable {
     private static let photoPredicateChunk = 100
 
     private static var photoSignatureKeys: [CNKeyDescriptor] {
-        [CNContactIdentifierKey, CNContactImageDataAvailableKey, CNContactThumbnailImageDataKey].map { $0 as NSString }
+        [CNContactIdentifierKey, CNContactImageDataAvailableKey, CNContactThumbnailImageDataKey].map
+        { $0 as NSString }
     }
 
     /// Reads only the availability flag and the small thumbnail, in chunks. Contacts outside the container are left out, as
@@ -217,15 +248,22 @@ public final class CNContactStoreAdapter: ContactStoring, @unchecked Sendable {
         return try await onQueue {
             let container = try self.resolveContainer()
             let inContainer = Set(
-                try self.fetch(predicate: CNContact.predicateForContactsInContainer(withIdentifier: container.id), keys: [CNContactIdentifierKey as NSString])
-                    .map(\.identifier)
+                try self.fetch(
+                    predicate: CNContact.predicateForContactsInContainer(
+                        withIdentifier: container.id), keys: [CNContactIdentifierKey as NSString]
+                )
+                .map(\.identifier)
             )
             let wanted = Array(Set(ids)).filter(inContainer.contains).sorted()
             var signatures: [String: PhotoSignature] = [:]
             for chunk in wanted.chunked(into: Self.photoPredicateChunk) {
-                for contact in try self.fetch(predicate: CNContact.predicateForContacts(withIdentifiers: chunk), keys: Self.photoSignatureKeys) {
+                for contact in try self.fetch(
+                    predicate: CNContact.predicateForContacts(withIdentifiers: chunk),
+                    keys: Self.photoSignatureKeys)
+                {
                     signatures[contact.identifier] = ICloudPhotoRead.signature(
-                        imageDataAvailable: contact.imageDataAvailable, thumbnail: contact.thumbnailImageData
+                        imageDataAvailable: contact.imageDataAvailable,
+                        thumbnail: contact.thumbnailImageData
                     )
                 }
             }
@@ -237,11 +275,15 @@ public final class CNContactStoreAdapter: ContactStoring, @unchecked Sendable {
         try await requireAccess()
         return try await onQueue {
             let container = try self.resolveContainer()
-            let keys = [CNContactIdentifierKey, CNContactImageDataAvailableKey, CNContactImageDataKey, CNContactThumbnailImageDataKey]
+            let keys = [
+                CNContactIdentifierKey, CNContactImageDataAvailableKey, CNContactImageDataKey,
+                CNContactThumbnailImageDataKey,
+            ]
             let contacts = try self.fetchContacts(ids: [id], keys: keys.map { $0 as NSString })
             try self.requireInContainer(contacts, container)
             return ICloudPhotoRead.picture(
-                imageDataAvailable: contacts[0].imageDataAvailable, image: contacts[0].imageData, thumbnail: contacts[0].thumbnailImageData
+                imageDataAvailable: contacts[0].imageDataAvailable, image: contacts[0].imageData,
+                thumbnail: contacts[0].thumbnailImageData
             )
         }
     }
@@ -250,15 +292,22 @@ public final class CNContactStoreAdapter: ContactStoring, @unchecked Sendable {
         try await requireAccess()
         try await onQueue {
             let container = try self.resolveContainer()
-            let contacts = try self.fetchContacts(ids: [id], keys: [CNContactIdentifierKey, CNContactImageDataKey].map { $0 as NSString })
+            let contacts = try self.fetchContacts(
+                ids: [id],
+                keys: [CNContactIdentifierKey, CNContactImageDataKey].map { $0 as NSString })
             try self.requireInContainer(contacts, container)
-            guard let working = contacts[0].mutableCopy() as? CNMutableContact else { throw ContactStoreError.notFound([id]) }
+            guard let working = contacts[0].mutableCopy() as? CNMutableContact else {
+                throw ContactStoreError.notFound([id])
+            }
             working.imageData = data
             let request = CNSaveRequest()
             request.update(working)
             do {
                 try self.store.execute(request)
-            } catch let error as NSError where error.domain == NSCocoaErrorDomain && error.code == ICloudPhotoRead.lostPictureFileCode {
+            } catch let error as NSError
+                where error.domain == NSCocoaErrorDomain
+                && error.code == ICloudPhotoRead.lostPictureFileCode
+            {
                 throw ContactStoreError.photoNotSaved
             }
         }
@@ -283,11 +332,15 @@ public final class CNContactStoreAdapter: ContactStoring, @unchecked Sendable {
     public func changes() -> AsyncStream<Void> {
         AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
             let token = ObserverToken(
-                NotificationCenter.default.addObserver(forName: .CNContactStoreDidChange, object: nil, queue: nil) { _ in
+                NotificationCenter.default.addObserver(
+                    forName: .CNContactStoreDidChange, object: nil, queue: nil
+                ) { _ in
                     continuation.yield()
                 }
             )
-            continuation.onTermination = { _ in NotificationCenter.default.removeObserver(token.observer) }
+            continuation.onTermination = { _ in
+                NotificationCenter.default.removeObserver(token.observer)
+            }
         }
     }
 
@@ -298,7 +351,8 @@ public final class CNContactStoreAdapter: ContactStoring, @unchecked Sendable {
 
     // MARK: helpers
 
-    private func onQueue<T: Sendable>(_ work: @escaping @Sendable () throws -> T) async throws -> T {
+    private func onQueue<T: Sendable>(_ work: @escaping @Sendable () throws -> T) async throws -> T
+    {
         try await withCheckedThrowingContinuation { continuation in
             queue.async { continuation.resume(with: Result { try work() }) }
         }
@@ -316,8 +370,10 @@ public final class CNContactStoreAdapter: ContactStoring, @unchecked Sendable {
 
     /// In the order requested; throws `notFound` if any id is missing.
     private func fetchContacts(ids: [String], keys: [CNKeyDescriptor]) throws -> [CNContact] {
-        let fetched = try fetch(predicate: CNContact.predicateForContacts(withIdentifiers: ids), keys: keys)
-        let byID = Dictionary(fetched.map { ($0.identifier, $0) }, uniquingKeysWith: { first, _ in first })
+        let fetched = try fetch(
+            predicate: CNContact.predicateForContacts(withIdentifiers: ids), keys: keys)
+        let byID = Dictionary(
+            fetched.map { ($0.identifier, $0) }, uniquingKeysWith: { first, _ in first })
         let missing = ids.filter { byID[$0] == nil }
         guard missing.isEmpty else { throw ContactStoreError.notFound(missing) }
         return ids.compactMap { byID[$0] }
@@ -326,7 +382,9 @@ public final class CNContactStoreAdapter: ContactStoring, @unchecked Sendable {
     private func requireInContainer(_ contacts: [CNContact], _ container: ContactContainer) throws {
         var outside: [String] = []
         for contact in contacts {
-            let owners = try store.containers(matching: CNContainer.predicateForContainerOfContact(withIdentifier: contact.identifier))
+            let owners = try store.containers(
+                matching: CNContainer.predicateForContainerOfContact(
+                    withIdentifier: contact.identifier))
             if owners.first?.identifier != container.id { outside.append(contact.identifier) }
         }
         guard outside.isEmpty else { throw ContactStoreError.outsideSelectedContainer(outside) }
@@ -341,7 +399,9 @@ enum ICloudPhotoRead {
     static let lostPictureFileCode = 134092
 
     static func signature(imageDataAvailable: Bool, thumbnail: Data?) -> PhotoSignature {
-        PhotoSignature(hasPhoto: imageDataAvailable || thumbnail != nil, thumbnailHash: thumbnail.map(PhotoHash.sha256Hex))
+        PhotoSignature(
+            hasPhoto: imageDataAvailable || thumbnail != nil,
+            thumbnailHash: thumbnail.map(PhotoHash.sha256Hex))
     }
 
     /// The full picture when there is one, otherwise the thumbnail.
@@ -353,10 +413,14 @@ enum ICloudPhotoRead {
     /// in-memory copy for exporting; it is never saved. Needs the image, availability and thumbnail keys fetched.
     static func withPictureForExport(_ contact: CNContact) -> CNContact {
         let image = contact.isKeyAvailable(CNContactImageDataKey) ? contact.imageData : nil
-        let available = contact.isKeyAvailable(CNContactImageDataAvailableKey) && contact.imageDataAvailable
-        let thumbnail = contact.isKeyAvailable(CNContactThumbnailImageDataKey) ? contact.thumbnailImageData : nil
-        guard let best = picture(imageDataAvailable: available, image: image, thumbnail: thumbnail), best != image,
-              let copy = contact.mutableCopy() as? CNMutableContact
+        let available =
+            contact.isKeyAvailable(CNContactImageDataAvailableKey) && contact.imageDataAvailable
+        let thumbnail =
+            contact.isKeyAvailable(CNContactThumbnailImageDataKey)
+            ? contact.thumbnailImageData : nil
+        guard let best = picture(imageDataAvailable: available, image: image, thumbnail: thumbnail),
+            best != image,
+            let copy = contact.mutableCopy() as? CNMutableContact
         else { return contact }
         copy.imageData = best
         return copy

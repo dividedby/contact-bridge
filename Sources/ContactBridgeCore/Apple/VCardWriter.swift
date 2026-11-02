@@ -9,7 +9,9 @@ import Foundation
 /// custom labels use `itemN.X-ABLabel`, year-less birthdays use `X-APPLE-OMIT-YEAR=1604`.
 enum VCardWriter {
     static func data(for contacts: [CNContact]) -> Data {
-        Data(contacts.flatMap(card).map(fold).joined(separator: "\r\n").utf8 + (contacts.isEmpty ? [] : Array("\r\n".utf8)))
+        Data(
+            contacts.flatMap(card).map(fold).joined(separator: "\r\n").utf8
+                + (contacts.isEmpty ? [] : Array("\r\n".utf8)))
     }
 
     // MARK: card
@@ -26,14 +28,20 @@ enum VCardWriter {
         let prefix = has(CNContactNamePrefixKey) ? contact.namePrefix : ""
         let suffix = has(CNContactNameSuffixKey) ? contact.nameSuffix : ""
         let name = [contact.givenName, contact.middleName, contact.familyName]
-        lines.append("N:" + [contact.familyName, contact.givenName, contact.middleName, prefix, suffix].map(escape).joined(separator: ";"))
+        lines.append(
+            "N:"
+                + [contact.familyName, contact.givenName, contact.middleName, prefix, suffix].map(
+                    escape
+                ).joined(separator: ";"))
         let display = ([prefix] + name + [suffix]).filter { !$0.isBlank }.joined(separator: " ")
         lines.append("FN:" + escape(display.isEmpty ? contact.organizationName : display))
 
         if !contact.nickname.isBlank { lines.append("NICKNAME:" + escape(contact.nickname)) }
         let department = has(CNContactDepartmentNameKey) ? contact.departmentName : ""
         if !contact.organizationName.isBlank || !department.isBlank {
-            let parts = department.isBlank ? [contact.organizationName] : [contact.organizationName, department]
+            let parts =
+                department.isBlank
+                ? [contact.organizationName] : [contact.organizationName, department]
             lines.append("ORG:" + parts.map(escape).joined(separator: ";"))
         }
         if !contact.jobTitle.isBlank { lines.append("TITLE:" + escape(contact.jobTitle)) }
@@ -66,23 +74,32 @@ enum VCardWriter {
         }
 
         if has(CNContactPhoneNumbersKey) {
-            for phone in contact.phoneNumbers { labeled("TEL", label: phone.label, value: escape(phone.value.stringValue)) }
+            for phone in contact.phoneNumbers {
+                labeled("TEL", label: phone.label, value: escape(phone.value.stringValue))
+            }
         }
         if has(CNContactEmailAddressesKey) {
-            for email in contact.emailAddresses { labeled("EMAIL", label: email.label, value: escape(email.value as String)) }
+            for email in contact.emailAddresses {
+                labeled("EMAIL", label: email.label, value: escape(email.value as String))
+            }
         }
         if has(CNContactPostalAddressesKey) {
             for entry in contact.postalAddresses {
                 let a = entry.value
-                let value = ["", "", a.street, a.city, a.state, a.postalCode, a.country].map(escape).joined(separator: ";")
+                let value = ["", "", a.street, a.city, a.state, a.postalCode, a.country].map(escape)
+                    .joined(separator: ";")
                 labeled("ADR", label: entry.label, value: value)
             }
         }
         if has(CNContactUrlAddressesKey) {
-            for url in contact.urlAddresses { labeled("URL", label: url.label, value: singleLine(url.value as String)) }
+            for url in contact.urlAddresses {
+                labeled("URL", label: url.label, value: singleLine(url.value as String))
+            }
         }
-        if has(CNContactBirthdayKey), let birthday = contact.birthday, let month = birthday.month, let day = birthday.day,
-           month != NSDateComponentUndefined, day != NSDateComponentUndefined {
+        if has(CNContactBirthdayKey), let birthday = contact.birthday, let month = birthday.month,
+            let day = birthday.day,
+            month != NSDateComponentUndefined, day != NSDateComponentUndefined
+        {
             lines.append(dateLine("BDAY", year: birthday.year, month: month, day: day))
         }
         if has(CNContactInstantMessageAddressesKey) {
@@ -97,10 +114,14 @@ enum VCardWriter {
         if has(CNContactSocialProfilesKey) {
             for social in contact.socialProfiles {
                 let p = social.value
-                let value = p.urlString.isBlank ? "x-apple:\(singleLine(p.username))" : singleLine(p.urlString)
+                let value =
+                    p.urlString.isBlank
+                    ? "x-apple:\(singleLine(p.username))" : singleLine(p.urlString)
                 labeled(
                     "X-SOCIALPROFILE", label: social.label,
-                    params: ["TYPE=\(escape(p.service.lowercased()))", "x-user=\(escape(p.username))"], value: value
+                    params: [
+                        "TYPE=\(escape(p.service.lowercased()))", "x-user=\(escape(p.username))",
+                    ], value: value
                 )
             }
         }
@@ -108,17 +129,25 @@ enum VCardWriter {
             for relation in contact.contactRelations {
                 let group = nextGroup()
                 lines.append("\(group).X-ABRELATEDNAMES:\(escape(relation.value.name))")
-                if let label = relation.label, !label.isBlank { lines.append("\(group).X-ABLabel:\(escape(label))") }
+                if let label = relation.label, !label.isBlank {
+                    lines.append("\(group).X-ABLabel:\(escape(label))")
+                }
             }
         }
         if has(CNContactDatesKey) {
             for date in contact.dates {
                 let value = date.value
                 let group = nextGroup()
-                lines.append(group + "." + dateLine(
-                    "X-ABDATE", year: value.year == NSDateComponentUndefined ? nil : value.year, month: value.month, day: value.day
-                ))
-                if let label = date.label, !label.isBlank { lines.append("\(group).X-ABLabel:\(escape(label))") }
+                lines.append(
+                    group + "."
+                        + dateLine(
+                            "X-ABDATE",
+                            year: value.year == NSDateComponentUndefined ? nil : value.year,
+                            month: value.month, day: value.day
+                        ))
+                if let label = date.label, !label.isBlank {
+                    lines.append("\(group).X-ABLabel:\(escape(label))")
+                }
             }
         }
         if has(CNContactImageDataKey), let image = contact.imageData, !image.isEmpty {
@@ -132,7 +161,9 @@ enum VCardWriter {
     // MARK: pieces
 
     /// Standard TYPE values where vCard has them; otherwise the raw CN label goes in an `X-ABLabel` group.
-    private static func typeParameters(property: String, label: String?) -> (types: [String], custom: String?) {
+    private static func typeParameters(property: String, label: String?) -> (
+        types: [String], custom: String?
+    ) {
         guard let label, !label.isBlank else { return ([], nil) }
         switch (property, label) {
         case (_, CNLabelHome): return (["HOME"], nil)
@@ -149,7 +180,9 @@ enum VCardWriter {
 
     private static func dateLine(_ name: String, year: Int?, month: Int, day: Int) -> String {
         let monthDay = String(format: "%02d-%02d", month, day)
-        guard let year, year > 0, year != 1604 else { return "\(name);X-APPLE-OMIT-YEAR=1604:1604-\(monthDay)" }
+        guard let year, year > 0, year != 1604 else {
+            return "\(name);X-APPLE-OMIT-YEAR=1604:1604-\(monthDay)"
+        }
         return "\(name):\(String(format: "%04d", year))-\(monthDay)"
     }
 
@@ -190,7 +223,8 @@ enum VCardWriter {
     /// vCard text escaping: backslash, semicolon, comma and newlines.
     private static func escape(_ text: String) -> String {
         text.replacing("\\", with: "\\\\").replacing(";", with: "\\;").replacing(",", with: "\\,")
-            .replacing("\r\n", with: "\\n").replacing("\n", with: "\\n").replacing("\r", with: "\\n")
+            .replacing("\r\n", with: "\\n").replacing("\n", with: "\\n").replacing(
+                "\r", with: "\\n")
     }
 
     private static func singleLine(_ text: String) -> String {

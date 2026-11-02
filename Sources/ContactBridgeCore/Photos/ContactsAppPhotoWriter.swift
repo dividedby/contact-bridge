@@ -54,7 +54,8 @@ public struct ContactsAppPhotoWriter: ContactsAppPhotoWriting {
     }
 
     public init(
-        runner: any AppleScriptRunning = NSAppleScriptRunner(), launcher: (any ContactsAppLaunching)? = nil, retryDelay: Duration = .seconds(1)
+        runner: any AppleScriptRunning = NSAppleScriptRunner(),
+        launcher: (any ContactsAppLaunching)? = nil, retryDelay: Duration = .seconds(1)
     ) {
         self.runner = runner
         self.launcher = launcher
@@ -99,10 +100,17 @@ public struct ContactsAppPhotoWriter: ContactsAppPhotoWriting {
 
     public func setPhoto(_ data: Data?, forID id: String) async throws {
         // An empty UUID part would make `begins with ""` match every contact.
-        guard !ContactsAppIDs.uuidPart(of: id).isEmpty else { throw NotesAccessError.contactNotFound(id) }
-        var arguments = [id, ContactsAppIDs.uuidPart(of: id)].map { NSAppleEventDescriptor(string: $0) }
+        guard !ContactsAppIDs.uuidPart(of: id).isEmpty else {
+            throw NotesAccessError.contactNotFound(id)
+        }
+        var arguments = [id, ContactsAppIDs.uuidPart(of: id)].map {
+            NSAppleEventDescriptor(string: $0)
+        }
         if let data {
-            guard let picture = NSAppleEventDescriptor(descriptorType: Self.tiffType, data: try Self.tiff(data)) else {
+            guard
+                let picture = NSAppleEventDescriptor(
+                    descriptorType: Self.tiffType, data: try Self.tiff(data))
+            else {
                 throw PhotoEncodingError.undecodable
             }
             arguments.append(picture)
@@ -127,10 +135,13 @@ public struct ContactsAppPhotoWriter: ContactsAppPhotoWriting {
             do {
                 try await openContactsIfNeeded()
                 _ = try await ContactsAppScript.retryingLaunch(after: retryDelay) {
-                    try await ContactsAppScript.call(handler: handler, in: Self.script, arguments: arguments, runner: runner)
+                    try await ContactsAppScript.call(
+                        handler: handler, in: Self.script, arguments: arguments, runner: runner)
                 }
                 return
-            } catch let error as AppleScriptError where Self.contactsGone.contains(error.number) && attempt < Self.attempts {
+            } catch let error as AppleScriptError
+                where Self.contactsGone.contains(error.number) && attempt < Self.attempts
+            {
                 attempt += 1
                 try await Task.sleep(for: retryDelay)
             } catch let error as AppleScriptError {
@@ -143,7 +154,9 @@ public struct ContactsAppPhotoWriter: ContactsAppPhotoWriting {
     /// Times a write is tried when Contacts goes away under it.
     static let attempts = 3
     /// The Contacts app is not there (any more).
-    static let contactsGone: Set<Int> = [AppleScriptError.appNotRunning, AppleScriptError.connectionInvalid]
+    static let contactsGone: Set<Int> = [
+        AppleScriptError.appNotRunning, AppleScriptError.connectionInvalid,
+    ]
 
     public func finish() async {
         let opened = run.values.withLock { values in
@@ -163,7 +176,8 @@ public struct ContactsAppPhotoWriter: ContactsAppPhotoWriting {
         do {
             try await launcher.openHidden()
         } catch {
-            throw ContactsAppUnavailable(reason: "it is not running and could not be opened (\(error.localizedDescription))")
+            throw ContactsAppUnavailable(
+                reason: "it is not running and could not be opened (\(error.localizedDescription))")
         }
         run.values.withLock { $0.openedContacts = true }
     }
@@ -182,9 +196,13 @@ public struct ContactsAppPhotoWriter: ContactsAppPhotoWriting {
             do {
                 _ = try await runner.run(source: ContactsAppScript.wakeScript)
                 return
-            } catch let error as AppleScriptError where error.number == AppleScriptError.appNotRunning {
+            } catch let error as AppleScriptError
+                where error.number == AppleScriptError.appNotRunning
+            {
                 try await Task.sleep(for: retryDelay)
-            } catch let error as AppleScriptError where error.number == AppleScriptError.connectionInvalid {
+            } catch let error as AppleScriptError
+                where error.number == AppleScriptError.connectionInvalid
+            {
                 // Quit again while starting up: open it once more.
                 try await reopen()
                 try await Task.sleep(for: retryDelay)
@@ -199,7 +217,8 @@ public struct ContactsAppPhotoWriter: ContactsAppPhotoWriting {
     /// AppleScript errors that mean Contacts was not reached, rather than that it refused the photo.
     static let unreachable: [Int: String] = [
         AppleScriptError.appNotRunning: "it is not running",
-        AppleScriptError.notAuthorized: "Contact Bridge is not allowed to control it (System Settings > Privacy & Security > Automation)",
+        AppleScriptError.notAuthorized:
+            "Contact Bridge is not allowed to control it (System Settings > Privacy & Security > Automation)",
         AppleScriptError.connectionInvalid: "it quit while the photo was being written",
         AppleScriptError.timedOut: "it did not answer in time",
     ]
@@ -213,10 +232,13 @@ public struct ContactsAppPhotoWriter: ContactsAppPhotoWriting {
     static let tiffType: DescType = 0x5449_4646
 
     static func tiff(_ data: Data) throws -> Data {
-        guard let source = CGImageSourceCreateWithData(data as CFData, nil), let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+            let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
         else { throw PhotoEncodingError.undecodable }
         let out = NSMutableData()
-        guard let destination = CGImageDestinationCreateWithData(out, UTType.tiff.identifier as CFString, 1, nil)
+        guard
+            let destination = CGImageDestinationCreateWithData(
+                out, UTType.tiff.identifier as CFString, 1, nil)
         else { throw PhotoEncodingError.undecodable }
         CGImageDestinationAddImage(destination, image, nil)
         guard CGImageDestinationFinalize(destination) else { throw PhotoEncodingError.undecodable }

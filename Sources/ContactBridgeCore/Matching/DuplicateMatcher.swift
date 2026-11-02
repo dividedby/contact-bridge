@@ -71,19 +71,23 @@ public struct DuplicateMatcher: Sendable {
 
         var edges: [Edge] = []
         var seen = Set<PairKey>()
-        for (_, indices) in blocks(of: profiles, diagnostics: &diagnostics) where indices.count > 1 {
+        for (_, indices) in blocks(of: profiles, diagnostics: &diagnostics) where indices.count > 1
+        {
             for x in 0..<indices.count {
                 for y in (x + 1)..<indices.count {
                     let key = PairKey(indices[x], indices[y])
                     guard seen.insert(key).inserted else { continue }
-                    guard let match = evaluate(profiles[key.low], profiles[key.high]) else { continue }
+                    guard let match = evaluate(profiles[key.low], profiles[key.high]) else {
+                        continue
+                    }
                     edges.append(Edge(low: key.low, high: key.high, match: match))
                 }
             }
         }
 
         // Sub-threshold edges are kept: they cannot link or relate records but still cap a cluster they sit inside.
-        let clusters = buildClusters(from: edges, records: sorted, profiles: profiles, diagnostics: &diagnostics)
+        let clusters = buildClusters(
+            from: edges, records: sorted, profiles: profiles, diagnostics: &diagnostics)
         return MatchResult(clusters: clusters, diagnostics: diagnostics)
     }
 
@@ -102,7 +106,8 @@ public struct DuplicateMatcher: Sendable {
 
         if !sharedPhones.isEmpty || !sharedEmails.isEmpty || !sharedShortCodes.isEmpty {
             return identifierMatch(
-                a, b, sharedPhones: sharedPhones, sharedEmails: sharedEmails, sharedShortCodes: sharedShortCodes, relation: relation
+                a, b, sharedPhones: sharedPhones, sharedEmails: sharedEmails,
+                sharedShortCodes: sharedShortCodes, relation: relation
             )
         }
         let byName = nameOnlyMatch(a, b, relation: relation)
@@ -113,23 +118,31 @@ public struct DuplicateMatcher: Sendable {
     /// A short code is only meaningful inside one sender: it is evidence only when both records name the same company and
     /// their person names (if any) do not contradict.
     private func sharedShortCodes(_ a: Profile, _ b: Profile, relation: NameRelation) -> [String] {
-        guard !a.organization.isEmpty, a.organization == b.organization, !relation.conflictsOnIdentifier else { return [] }
+        guard !a.organization.isEmpty, a.organization == b.organization,
+            !relation.conflictsOnIdentifier
+        else { return [] }
         return a.shortCodes.intersection(b.shortCodes).sorted()
     }
 
     /// A shared website, medium only: the given names must be equal (single names allowed) with no family-name conflict.
     private func websiteMatch(_ a: Profile, _ b: Profile) -> PairMatch? {
         let shared = a.websites.intersection(b.websites).sorted()
-        guard !shared.isEmpty, !a.name.given.isEmpty, a.name.given == b.name.given else { return nil }
-        if !a.name.family.isEmpty, !b.name.family.isEmpty, a.name.family != b.name.family,
-           StringSimilarity.jaroWinkler(a.name.family, b.name.family) < Score.spellingVariantSimilarity {
+        guard !shared.isEmpty, !a.name.given.isEmpty, a.name.given == b.name.given else {
             return nil
         }
-        return PairMatch(confidence: Score.website, reasons: shared.map { "same website \($0)" }, flags: [])
+        if !a.name.family.isEmpty, !b.name.family.isEmpty, a.name.family != b.name.family,
+            StringSimilarity.jaroWinkler(a.name.family, b.name.family)
+                < Score.spellingVariantSimilarity
+        {
+            return nil
+        }
+        return PairMatch(
+            confidence: Score.website, reasons: shared.map { "same website \($0)" }, flags: [])
     }
 
     private func identifierMatch(
-        _ a: Profile, _ b: Profile, sharedPhones: [String], sharedEmails: [String], sharedShortCodes: [String],
+        _ a: Profile, _ b: Profile, sharedPhones: [String], sharedEmails: [String],
+        sharedShortCodes: [String],
         relation: NameRelation
     ) -> PairMatch {
         // A near-identical given name is tolerated only on a shared email, never a shared phone.
@@ -145,7 +158,10 @@ public struct DuplicateMatcher: Sendable {
             if conflicts { flags.append(.sharedPhoneDifferentNames) }
         }
         if !sharedEmails.isEmpty {
-            let strength = conflicts ? Score.emailConflictingNames : (spellingVariant ? Score.emailSpellingVariant : Score.email)
+            let strength =
+                conflicts
+                ? Score.emailConflictingNames
+                : (spellingVariant ? Score.emailSpellingVariant : Score.email)
             miss *= 1 - strength
             reasons += sharedEmails.map { "same email \($0)" }
             if conflicts { flags.append(.sharedEmailDifferentNames) }
@@ -171,7 +187,9 @@ public struct DuplicateMatcher: Sendable {
     }
 
     private func nameOnlyMatch(_ a: Profile, _ b: Profile, relation: NameRelation) -> PairMatch? {
-        guard case .similar(let score, let full, _, _) = relation, full, score >= options.nameOnlyMinimumSimilarity else {
+        guard case .similar(let score, let full, _, _) = relation, full,
+            score >= options.nameOnlyMinimumSimilarity
+        else {
             return nil
         }
         let exact = score >= 0.999
@@ -182,30 +200,40 @@ public struct DuplicateMatcher: Sendable {
             confidence *= Score.conflictingContactInfoFactor
             flags.append(.conflictingContactInfo)
         }
-        return PairMatch(confidence: confidence, reasons: [exact ? "same name" : "similar name"], flags: flags)
+        return PairMatch(
+            confidence: confidence, reasons: [exact ? "same name" : "similar name"], flags: flags)
     }
 
     // MARK: blocking
 
-    private func blocks(of profiles: [Profile], diagnostics: inout MatchDiagnostics) -> [String: [Int]] {
+    private func blocks(of profiles: [Profile], diagnostics: inout MatchDiagnostics) -> [String:
+        [Int]]
+    {
         var blocks: [String: [Int]] = [:]
         for (index, profile) in profiles.enumerated() {
             for key in profile.phones.keys { blocks["p|" + key, default: []].append(index) }
             for email in profile.emails { blocks["e|" + email, default: []].append(index) }
             if !profile.organization.isEmpty {
-                for code in profile.shortCodes { blocks["s|" + profile.organization + "|" + code, default: []].append(index) }
+                for code in profile.shortCodes {
+                    blocks["s|" + profile.organization + "|" + code, default: []].append(index)
+                }
             }
             if !profile.name.given.isEmpty {
                 for site in profile.websites { blocks["u|" + site, default: []].append(index) }
             }
-            if let nameKey = profile.name.blockKey { blocks["n|" + nameKey, default: []].append(index) }
+            if let nameKey = profile.name.blockKey {
+                blocks["n|" + nameKey, default: []].append(index)
+            }
         }
         // Oversized name blocks degrade to exact-name groups, which are skipped in turn if still oversized.
-        for (key, indices) in blocks where key.hasPrefix("n|") && indices.count > options.maxNameBlockSize {
+        for (key, indices) in blocks
+        where key.hasPrefix("n|") && indices.count > options.maxNameBlockSize {
             blocks[key] = nil
             diagnostics.oversizedNameBlocks += 1
             var exact: [String: [Int]] = [:]
-            for index in indices { exact["x|" + profiles[index].name.exactKey, default: []].append(index) }
+            for index in indices {
+                exact["x|" + profiles[index].name.exactKey, default: []].append(index)
+            }
             for (exactKey, group) in exact where group.count > 1 {
                 if group.count <= options.maxNameBlockSize {
                     blocks[exactKey] = group
@@ -219,7 +247,9 @@ public struct DuplicateMatcher: Sendable {
 
     /// Drops phones, emails, short codes and websites held by more than `maxIdentifierBlockSize` records, so they neither
     /// block nor score.
-    private func withoutSwitchboards(_ profiles: [Profile], diagnostics: inout MatchDiagnostics) -> [Profile] {
+    private func withoutSwitchboards(_ profiles: [Profile], diagnostics: inout MatchDiagnostics)
+        -> [Profile]
+    {
         var phoneCounts: [String: Int] = [:]
         var emailCounts: [String: Int] = [:]
         var shortCodeCounts: [String: Int] = [:]
@@ -232,8 +262,12 @@ public struct DuplicateMatcher: Sendable {
         }
         let limit = options.maxIdentifierBlockSize
         let counts = [phoneCounts, emailCounts, shortCodeCounts, websiteCounts]
-        diagnostics.droppedSwitchboardIdentifiers = counts.reduce(0) { $0 + $1.values.filter { $0 > limit }.count }
-        guard counts.contains(where: { $0.values.contains(where: { $0 > limit }) }) else { return profiles }
+        diagnostics.droppedSwitchboardIdentifiers = counts.reduce(0) {
+            $0 + $1.values.filter { $0 > limit }.count
+        }
+        guard counts.contains(where: { $0.values.contains(where: { $0 > limit }) }) else {
+            return profiles
+        }
         return profiles.map { profile in
             var copy = profile
             copy.phones = profile.phones.filter { phoneCounts[$0.key, default: 0] <= limit }
@@ -247,7 +281,8 @@ public struct DuplicateMatcher: Sendable {
     // MARK: clustering
 
     private func buildClusters(
-        from edges: [Edge], records: [ContactRecord], profiles: [Profile], diagnostics: inout MatchDiagnostics
+        from edges: [Edge], records: [ContactRecord], profiles: [Profile],
+        diagnostics: inout MatchDiagnostics
     ) -> [DuplicateCluster] {
         let candidates = edges.filter { $0.match.confidence >= options.minimumConfidence }
         let joining = candidates.filter { $0.joinsCluster }
@@ -292,7 +327,8 @@ public struct DuplicateMatcher: Sendable {
         }
 
         func clusterEdge(_ edge: Edge) -> ClusterEdge {
-            ClusterEdge(firstID: records[edge.low].id, secondID: records[edge.high].id, match: edge.match)
+            ClusterEdge(
+                firstID: records[edge.low].id, secondID: records[edge.high].id, match: edge.match)
         }
 
         // Members joined through a third record may still contradict each other without any scored pair saying so.
@@ -306,12 +342,16 @@ public struct DuplicateMatcher: Sendable {
             for x in 0..<indices.count {
                 for y in (x + 1)..<indices.count {
                     let key = PairKey(indices[x], indices[y])
-                    guard !scored.contains(key), case .conflict = NameRelation(profiles[key.low].name, profiles[key.high].name)
+                    guard !scored.contains(key),
+                        case .conflict = NameRelation(
+                            profiles[key.low].name, profiles[key.high].name)
                     else { continue }
                     let match = PairMatch(
-                        confidence: Score.memberNameConflict, reasons: ["different names"], flags: [.memberNameConflict]
+                        confidence: Score.memberNameConflict, reasons: ["different names"],
+                        flags: [.memberNameConflict]
                     )
-                    internalEdges[root, default: []].append(Edge(low: key.low, high: key.high, match: match))
+                    internalEdges[root, default: []].append(
+                        Edge(low: key.low, high: key.high, match: match))
                 }
             }
             internalEdges[root]?.sort(by: Self.strongerFirst)
@@ -322,7 +362,9 @@ public struct DuplicateMatcher: Sendable {
             guard indices.count > 1 else { return nil }
             let inside = internalEdges[root] ?? []
             var reasons: [String] = []
-            for reason in inside.flatMap(\.match.reasons) where !reasons.contains(reason) { reasons.append(reason) }
+            for reason in inside.flatMap(\.match.reasons) where !reasons.contains(reason) {
+                reasons.append(reason)
+            }
             let flagSet = Set(inside.flatMap(\.match.flags))
             let contradictions = inside.filter { !$0.joinsCluster }.map(\.match.confidence)
             let clusterMembers = indices.map { records[$0] }
@@ -348,7 +390,9 @@ public struct DuplicateMatcher: Sendable {
     }
 
     private static func recordOrder(_ a: ContactRecord, _ b: ContactRecord) -> Bool {
-        (a.id, a.sourceIdentifier, a.source.rawValue) < (b.id, b.sourceIdentifier, b.source.rawValue)
+        (a.id, a.sourceIdentifier, a.source.rawValue) < (
+            b.id, b.sourceIdentifier, b.source.rawValue
+        )
     }
 }
 
@@ -360,7 +404,8 @@ private struct Edge {
     var match: PairMatch
 
     var joinsCluster: Bool {
-        match.confidence >= ConfidenceLevel.mediumThreshold && !match.flags.contains(where: \.isConflict)
+        match.confidence >= ConfidenceLevel.mediumThreshold
+            && !match.flags.contains(where: \.isConflict)
     }
 }
 
@@ -404,11 +449,14 @@ private struct Profile {
 extension Profile {
     /// Hosts that serve millions of people: a bare root or generic page on one says nothing about who owns the link.
     private static let sharedHosts: Set<String> = [
-        "facebook.com", "instagram.com", "linkedin.com", "twitter.com", "x.com", "tiktok.com", "youtube.com", "google.com",
-        "gmail.com", "apple.com", "icloud.com", "github.com", "medium.com", "wordpress.com", "blogspot.com",
+        "facebook.com", "instagram.com", "linkedin.com", "twitter.com", "x.com", "tiktok.com",
+        "youtube.com", "google.com",
+        "gmail.com", "apple.com", "icloud.com", "github.com", "medium.com", "wordpress.com",
+        "blogspot.com",
     ]
     private static let genericPaths: Set<String> = [
-        "home", "index", "index.html", "index.php", "login", "signin", "signup", "about", "explore", "help", "search", "feed",
+        "home", "index", "index.html", "index.php", "login", "signin", "signup", "about", "explore",
+        "help", "search", "feed",
         "discover", "welcome", "main",
     ]
 
@@ -417,7 +465,8 @@ extension Profile {
         guard let key = MergePlan.urlKey(raw) else { return nil }
         let hostEnd = key.firstIndex(where: { "/?#".contains($0) }) ?? key.endIndex
         guard sharedHosts.contains(String(key[..<hostEnd])) else { return key }
-        let path = key[hostEnd...].prefix { $0 != "?" && $0 != "#" }.split(separator: "/", omittingEmptySubsequences: true)
+        let path = key[hostEnd...].prefix { $0 != "?" && $0 != "#" }.split(
+            separator: "/", omittingEmptySubsequences: true)
         if path.isEmpty { return nil }
         if path.count == 1, genericPaths.contains(path[0].lowercased()) { return nil }
         return key
@@ -474,21 +523,32 @@ private enum NameRelation {
             return
         }
         if a.isFull, b.isFull {
-            let givenAgrees = a.given == b.given || Self.isInitial(a.given, of: b.given) || Self.isInitial(b.given, of: a.given)
-            let g = a.given == b.given ? 1 : (givenAgrees ? 0.9 : StringSimilarity.jaroWinkler(a.given, b.given))
+            let givenAgrees =
+                a.given == b.given || Self.isInitial(a.given, of: b.given)
+                || Self.isInitial(b.given, of: a.given)
+            let g =
+                a.given == b.given
+                ? 1 : (givenAgrees ? 0.9 : StringSimilarity.jaroWinkler(a.given, b.given))
             let f = StringSimilarity.jaroWinkler(a.family, b.family)
             // One badly-off part (John/Jane Smith) must not be averaged away by the other.
             let score = (g >= 0.85 && f >= 0.9) ? (g + f) / 2 : min(g, f)
-            let variant = !givenAgrees && a.family == b.family && g >= DuplicateMatcher.Score.spellingVariantSimilarity
-            self = score >= 0.8
-                ? .similar(score: score, full: true, givenAgrees: givenAgrees, spellingVariant: variant)
+            let variant =
+                !givenAgrees && a.family == b.family
+                && g >= DuplicateMatcher.Score.spellingVariantSimilarity
+            self =
+                score >= 0.8
+                ? .similar(
+                    score: score, full: true, givenAgrees: givenAgrees, spellingVariant: variant)
                 : .conflict
             return
         }
         // At least one side has a single name part: agree only if some part is shared.
         let tokensA = Set([a.given, a.family].filter { !$0.isEmpty })
         let tokensB = Set([b.given, b.family].filter { !$0.isEmpty })
-        self = tokensA.isDisjoint(with: tokensB) ? .conflict : .similar(score: 0.85, full: false, givenAgrees: true, spellingVariant: false)
+        self =
+            tokensA.isDisjoint(with: tokensB)
+            ? .conflict
+            : .similar(score: 0.85, full: false, givenAgrees: true, spellingVariant: false)
     }
 
     private static func isInitial(_ initial: String, of name: String) -> Bool {

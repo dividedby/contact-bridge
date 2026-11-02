@@ -9,7 +9,9 @@ extension Array {
     /// Consecutive slices of at most `size` elements (empty for an empty array).
     func chunked(into size: Int) -> [[Element]] {
         guard size > 0 else { return [self] }
-        return stride(from: 0, to: count, by: size).map { Array(self[$0..<Swift.min($0 + size, count)]) }
+        return stride(from: 0, to: count, by: size).map {
+            Array(self[$0..<Swift.min($0 + size, count)])
+        }
     }
 }
 
@@ -92,8 +94,12 @@ extension GoogleOwnership {
         var tags: [String] = []
         var seen = Set<String>()
         for (index, person) in people.enumerated() {
-            guard let tag = sourceID(of: person), !tag.isEmpty else { throw GoogleBatchError.missingOwnershipTag(index: index) }
-            guard seen.insert(tag).inserted else { throw GoogleBatchError.duplicateOwnershipTag(tag) }
+            guard let tag = sourceID(of: person), !tag.isEmpty else {
+                throw GoogleBatchError.missingOwnershipTag(index: index)
+            }
+            guard seen.insert(tag).inserted else {
+                throw GoogleBatchError.duplicateOwnershipTag(tag)
+            }
             tags.append(tag)
         }
         return tags
@@ -158,17 +164,23 @@ struct GoogleBatchRun {
     private var stopReason: String?
 
     nonisolated(nonsending) mutating func run<Item>(
-        _ items: [Item], resourceName: (Item) -> String?, call: nonisolated(nonsending) ([Item]) async throws -> [GoogleBatchResult]
+        _ items: [Item], resourceName: (Item) -> String?,
+        call: nonisolated(nonsending) ([Item]) async throws -> [GoogleBatchResult]
     ) async -> [GoogleBatchResult] {
         if let stopReason {
-            return items.map { GoogleBatchResult(resourceName: resourceName($0), outcome: .notAttempted(reason: stopReason)) }
+            return items.map {
+                GoogleBatchResult(
+                    resourceName: resourceName($0), outcome: .notAttempted(reason: stopReason))
+            }
         }
         do {
             return try await call(items)
         } catch {
             let failure = GoogleBatchFailure.classify(error)
             stopReason = failure.stopReason
-            return items.map { GoogleBatchResult(resourceName: resourceName($0), outcome: failure.outcome) }
+            return items.map {
+                GoogleBatchResult(resourceName: resourceName($0), outcome: failure.outcome)
+            }
         }
     }
 }
@@ -200,7 +212,9 @@ public protocol GoogleContactsClient: Sendable {
 
     func createContact(_ person: GooglePerson) async throws -> GooglePerson
     /// Replaces only the fields in `updatePersonFields` (comma-separated), guarded by `etag`.
-    func updateContact(resourceName: String, etag: String, person: GooglePerson, updatePersonFields: String) async throws -> GooglePerson
+    func updateContact(
+        resourceName: String, etag: String, person: GooglePerson, updatePersonFields: String
+    ) async throws -> GooglePerson
     func deleteContact(resourceName: String) async throws
 
     /// Every person must carry the ownership tag (`GoogleOwnership`): the real endpoint answers in no guaranteed order,
@@ -227,11 +241,15 @@ public protocol GoogleContactsClient: Sendable {
 
 /// Clients that do not deal in photos (test doubles) refuse them.
 extension GoogleContactsClient {
-    public func updateContactPhoto(resourceName: String, photoBytes: Data) async throws -> GooglePerson {
-        throw GoogleAPIError.other(status: 501, message: "This client does not support contact photos")
+    public func updateContactPhoto(resourceName: String, photoBytes: Data) async throws
+        -> GooglePerson
+    {
+        throw GoogleAPIError.other(
+            status: 501, message: "This client does not support contact photos")
     }
 
     public func deleteContactPhoto(resourceName: String) async throws -> GooglePerson {
-        throw GoogleAPIError.other(status: 501, message: "This client does not support contact photos")
+        throw GoogleAPIError.other(
+            status: 501, message: "This client does not support contact photos")
     }
 }

@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+
 @testable import ContactBridgeCore
 
 /// Alerts show `localizedDescription`, so every Core error that can reach the UI must say what happened and what to do.
@@ -19,7 +20,9 @@ struct ErrorDescriptionTests {
     func backupErrors() {
         #expect(text(BackupError.verificationFailed("icloud.vcf")).contains("icloud.vcf"))
         #expect(text(BackupError.verificationFailed("icloud.vcf")).contains("Nothing was changed"))
-        #expect(text(BackupError.pagingDidNotTerminate("google-connections")).contains("google-connections"))
+        #expect(
+            text(BackupError.pagingDidNotTerminate("google-connections")).contains(
+                "google-connections"))
         #expect(!text(BackupError.noFreeFolderName).isEmpty)
     }
 
@@ -48,14 +51,17 @@ struct ErrorDescriptionTests {
         #expect(text(GoogleAPIError.unauthorized).contains("sign in"))
         #expect(text(GoogleAPIError.rateLimited(retryAfter: nil)).contains("wait"))
         #expect(text(GoogleAPIError.other(status: 503, message: "try later")).contains("503"))
-        #expect(text(GoogleListingError.pagingDidNotTerminate("connections")).contains("connections"))
+        #expect(
+            text(GoogleListingError.pagingDidNotTerminate("connections")).contains("connections"))
     }
 
     @Test("No message falls back to Swift's generic wording")
     func nothingGeneric() {
         let errors: [any Error] = [
-            ContactStoreError.accessDenied, BackupError.noFreeFolderName, MergeExecutor.Failure.staleBackup,
-            LinkStoreError.unreadable("x"), GoogleAPIError.notFound, GoogleAPIError.syncTokenExpired, GoogleAPIError.etagMismatch,
+            ContactStoreError.accessDenied, BackupError.noFreeFolderName,
+            MergeExecutor.Failure.staleBackup,
+            LinkStoreError.unreadable("x"), GoogleAPIError.notFound,
+            GoogleAPIError.syncTokenExpired, GoogleAPIError.etagMismatch,
             GoogleListingError.pagingDidNotTerminate("x"),
         ]
         for error in errors { #expect(!text(error).contains("couldn’t be completed"), "\(error)") }

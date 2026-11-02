@@ -43,7 +43,8 @@ public struct ReviewItem: Sendable, Hashable, Codable, Identifiable {
 
     /// Whether the item is about this contact on either side.
     func concerns(icloudID: String?, resourceName: String?) -> Bool {
-        (icloudID != nil && self.icloudID == icloudID) || (resourceName != nil && self.resourceName == resourceName)
+        (icloudID != nil && self.icloudID == icloudID)
+            || (resourceName != nil && self.resourceName == resourceName)
     }
 }
 
@@ -70,9 +71,13 @@ public struct ReviewList: Sendable, Hashable, Codable, VersionedFileContents {
     }
 
     /// Adds new candidates and refreshes known ones in place (same id, new etag, fingerprint, fields or photo stamp; `createdAt` stays).
-    mutating func upsert(_ candidates: [ReviewCandidate], pinned: Set<String> = [], at now: Date, into result: inout ReviewReconciliation) {
+    mutating func upsert(
+        _ candidates: [ReviewCandidate], pinned: Set<String> = [], at now: Date,
+        into result: inout ReviewReconciliation
+    ) {
         for candidate in candidates {
-            let isPinned = candidate.kind == .bothEdited && candidate.icloudID.map(pinned.contains) == true
+            let isPinned =
+                candidate.kind == .bothEdited && candidate.icloudID.map(pinned.contains) == true
             guard let index = items.firstIndex(where: { $0.id == candidate.id }) else {
                 items.append(ReviewItem(candidate: candidate, pinned: isPinned, at: now))
                 result.added.append(candidate.id)
@@ -80,8 +85,11 @@ public struct ReviewList: Sendable, Hashable, Codable, VersionedFileContents {
             }
             let item = items[index]
             if isPinned { items[index].pinned = true }
-            guard item.googleEtag != candidate.googleEtag || item.icloudFingerprint != candidate.icloudFingerprint
-                || item.fields != candidate.fields || item.photoStamp != candidate.photoStamp || item.photoReason != candidate.photoReason
+            guard
+                item.googleEtag != candidate.googleEtag
+                    || item.icloudFingerprint != candidate.icloudFingerprint
+                    || item.fields != candidate.fields || item.photoStamp != candidate.photoStamp
+                    || item.photoReason != candidate.photoReason
             else { continue }
             items[index].googleEtag = candidate.googleEtag
             items[index].icloudFingerprint = candidate.icloudFingerprint
@@ -94,33 +102,51 @@ public struct ReviewList: Sendable, Hashable, Codable, VersionedFileContents {
         items.sort { ($0.createdAt, $0.id) < ($1.createdAt, $1.id) }
     }
 
-    mutating func remove(where shouldRemove: (ReviewItem) -> Bool, into result: inout ReviewReconciliation) {
+    mutating func remove(
+        where shouldRemove: (ReviewItem) -> Bool, into result: inout ReviewReconciliation
+    ) {
         result.removed += items.filter(shouldRemove).map(\.id)
         items.removeAll(where: shouldRemove)
     }
 
-    mutating func reconcile(with plan: SyncPlan, ignoredGoogle: Set<String>, at now: Date) -> ReviewReconciliation {
+    mutating func reconcile(with plan: SyncPlan, ignoredGoogle: Set<String>, at now: Date)
+        -> ReviewReconciliation
+    {
         var result = ReviewReconciliation()
         // An ignored Google contact stays ignored, whatever else the plan says.
-        remove(where: { $0.kind == .newInGoogle && $0.resourceName.map(ignoredGoogle.contains) == true }, into: &result)
-        let candidates = plan.review.filter { !($0.kind == .newInGoogle && $0.resourceName.map(ignoredGoogle.contains) == true) }
+        remove(
+            where: {
+                $0.kind == .newInGoogle && $0.resourceName.map(ignoredGoogle.contains) == true
+            }, into: &result)
+        let candidates = plan.review.filter {
+            !($0.kind == .newInGoogle && $0.resourceName.map(ignoredGoogle.contains) == true)
+        }
         upsert(candidates, pinned: Set(plan.links.map(\.icloudID)), at: now, into: &result)
         // A conflict about a contact that is gone from either side is moot, and a pinned one would never be derived away.
         let gone = Set(plan.droppedLinks).union(plan.deletes.map(\.icloudID)).union(
-            plan.review.filter { $0.kind == .deletedInGoogle || $0.kind == .deletedInICloudEditedInGoogle }.compactMap(\.icloudID)
+            plan.review.filter {
+                $0.kind == .deletedInGoogle || $0.kind == .deletedInICloudEditedInGoogle
+            }.compactMap(\.icloudID)
         )
         remove(
-            where: { ($0.kind == .googleEdited || $0.kind == .bothEdited) && $0.icloudID.map(gone.contains) == true }, into: &result
+            where: {
+                ($0.kind == .googleEdited || $0.kind == .bothEdited)
+                    && $0.icloudID.map(gone.contains) == true
+            }, into: &result
         )
         // A photo question about a gone contact too, whether or not photo sync is on: nothing is left to ask it about.
-        remove(where: { $0.kind == .photoConflict && $0.icloudID.map(gone.contains) == true }, into: &result)
+        remove(
+            where: { $0.kind == .photoConflict && $0.icloudID.map(gone.contains) == true },
+            into: &result)
         // A first-link conflict whose two sides were found to agree: what Save would record, without anything to choose.
         let settled = Set(plan.settledReviews)
         remove(where: { $0.pinned && settled.contains($0.id) }, into: &result)
         // A conflict missing from a plan that did not look at everything is unseen, not resolved.
         if plan.reviewIsComplete {
             let current = Set(plan.review.map(\.id))
-            remove(where: { !current.contains($0.id) && !$0.pinned && $0.kind != .photoConflict }, into: &result)
+            remove(
+                where: { !current.contains($0.id) && !$0.pinned && $0.kind != .photoConflict },
+                into: &result)
         }
         // Photo questions have their own completeness: with photo sync off the plan looked at none of them, and the stored
         // ones are kept (hidden by the screen), never deleted.
@@ -128,7 +154,10 @@ public struct ReviewList: Sendable, Hashable, Codable, VersionedFileContents {
             let current = Set(plan.review.map(\.id))
             // ...except for a pair that was skipped or unreadable this run: not looking is not resolving.
             remove(
-                where: { $0.kind == .photoConflict && !current.contains($0.id) && $0.icloudID.map(plan.photosUnjudged.contains) != true },
+                where: {
+                    $0.kind == .photoConflict && !current.contains($0.id)
+                        && $0.icloudID.map(plan.photosUnjudged.contains) != true
+                },
                 into: &result
             )
         }
@@ -144,7 +173,8 @@ public protocol ReviewStoring: Sendable {
     /// `plan.photoReviewIsComplete`). Stored `newInGoogle` items
     /// for contacts in `ignoredGoogle` are removed regardless, and so are pinned conflicts in `plan.settledReviews`.
     @discardableResult
-    func reconcile(with plan: SyncPlan, ignoredGoogle: Set<String>, at now: Date) throws -> ReviewReconciliation
+    func reconcile(with plan: SyncPlan, ignoredGoogle: Set<String>, at now: Date) throws
+        -> ReviewReconciliation
     /// Adds or refreshes candidates the executor found while writing (a delete turned into a review).
     @discardableResult
     func add(_ candidates: [ReviewCandidate], at now: Date) throws -> ReviewReconciliation
@@ -166,7 +196,9 @@ extension ReviewStoring {
 
 /// `review.json` next to `links.json`, rewritten atomically on every change.
 public final class ReviewStore: ReviewStoring, Sendable {
-    public static var defaultURL: URL { VersionedJSONFile<ReviewList>.inSupportFolder("review.json") }
+    public static var defaultURL: URL {
+        VersionedJSONFile<ReviewList>.inSupportFolder("review.json")
+    }
 
     private let file: VersionedJSONFile<ReviewList>
     /// Serializes read-modify-write within this process.
@@ -176,9 +208,13 @@ public final class ReviewStore: ReviewStoring, Sendable {
         file = VersionedJSONFile(url: url)
     }
 
-    public func load() throws -> [ReviewItem] { try lock.withLock { _ in try file.read()?.items ?? [] } }
+    public func load() throws -> [ReviewItem] {
+        try lock.withLock { _ in try file.read()?.items ?? [] }
+    }
 
-    public func reconcile(with plan: SyncPlan, ignoredGoogle: Set<String>, at now: Date) throws -> ReviewReconciliation {
+    public func reconcile(with plan: SyncPlan, ignoredGoogle: Set<String>, at now: Date) throws
+        -> ReviewReconciliation
+    {
         try change { $0.reconcile(with: plan, ignoredGoogle: ignoredGoogle, at: now) }
     }
 
@@ -199,7 +235,9 @@ public final class ReviewStore: ReviewStoring, Sendable {
         }
     }
 
-    private func change(_ body: (inout ReviewList) -> ReviewReconciliation) throws -> ReviewReconciliation {
+    private func change(_ body: (inout ReviewList) -> ReviewReconciliation) throws
+        -> ReviewReconciliation
+    {
         try lock.withLock { _ in
             var list = try file.read() ?? ReviewList()
             let before = list
@@ -220,7 +258,9 @@ public final class InMemoryReviewStore: ReviewStoring, Sendable {
 
     public func load() throws -> [ReviewItem] { list.withLock { $0.items } }
 
-    public func reconcile(with plan: SyncPlan, ignoredGoogle: Set<String>, at now: Date) throws -> ReviewReconciliation {
+    public func reconcile(with plan: SyncPlan, ignoredGoogle: Set<String>, at now: Date) throws
+        -> ReviewReconciliation
+    {
         list.withLock { $0.reconcile(with: plan, ignoredGoogle: ignoredGoogle, at: now) }
     }
 

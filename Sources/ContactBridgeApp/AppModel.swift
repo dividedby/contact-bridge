@@ -54,15 +54,19 @@ final class AppModel {
     @ObservationIgnored let notifier: SyncNotifier
     @ObservationIgnored private var started = false
     @ObservationIgnored private var cachedStore: (id: String, store: any ContactStoring)?
-    @ObservationIgnored private(set) lazy var backupCoordinator = BackupCoordinator(makeSetup: { [self] in try await makeBackupSetup() })
+    @ObservationIgnored private(set) lazy var backupCoordinator = BackupCoordinator(makeSetup: {
+        [self] in try await makeBackupSetup()
+    })
 
     init(dependencies: AppDependencies) {
         deps = dependencies
         loginItem = LoginItemSettings(service: dependencies.loginItem)
         shell = ShellSettings(defaults: dependencies.defaults)
         notifier = SyncNotifier(
-            delivery: dependencies.notifications, unavailableReason: dependencies.notificationsUnavailableReason,
-            defaults: dependencies.defaults, knownReviewIDs: Set((try? dependencies.reviews.load())?.map(\.id) ?? [])
+            delivery: dependencies.notifications,
+            unavailableReason: dependencies.notificationsUnavailableReason,
+            defaults: dependencies.defaults,
+            knownReviewIDs: Set((try? dependencies.reviews.load())?.map(\.id) ?? [])
         )
         setup = SetupModel(app: self)
         backup = BackupModel(app: self)
@@ -96,7 +100,9 @@ final class AppModel {
         await setup.refresh()
         // The probe can raise the Automation prompt, so on a live launch it only runs on its own once the user has
         // granted access before; then macOS answers silently (or reports a revoke). Demo has no permission to ask for.
-        if deps.isDemo || deps.defaults.bool(forKey: SetupModel.notesGrantedKey) { await setup.checkNotes() }
+        if deps.isDemo || deps.defaults.bool(forKey: SetupModel.notesGrantedKey) {
+            await setup.checkNotes()
+        }
         await backup.refresh()
         await sync.start()
     }
@@ -105,8 +111,12 @@ final class AppModel {
 
     /// The store for the selected container, or nil until permission is granted and a container is chosen.
     var store: (any ContactStoring)? {
-        guard setup.contactsStatus == .authorized, let container = setup.selectedContainer else { return nil }
-        if cachedStore?.id != container.id { cachedStore = (container.id, deps.makeStore(container.id)) }
+        guard setup.contactsStatus == .authorized, let container = setup.selectedContainer else {
+            return nil
+        }
+        if cachedStore?.id != container.id {
+            cachedStore = (container.id, deps.makeStore(container.id))
+        }
         return cachedStore?.store
     }
 
@@ -116,12 +126,16 @@ final class AppModel {
         case .authorized: break
         case .notDetermined: return "Allow access to Contacts in Setup first."
         case .denied, .restricted:
-            return "Contacts access is off. Turn it on in System Settings > Privacy & Security > Contacts, then reopen Setup."
+            return
+                "Contacts access is off. Turn it on in System Settings > Privacy & Security > Contacts, then reopen Setup."
         }
         if case .savedChoiceUnavailable = setup.resolution {
-            return "Your saved contacts account is no longer available. Pick one in Setup first; nothing is changed until you do."
+            return
+                "Your saved contacts account is no longer available. Pick one in Setup first; nothing is changed until you do."
         }
-        if setup.selectedContainer == nil { return "Choose which contacts account is iCloud in Setup first." }
+        if setup.selectedContainer == nil {
+            return "Choose which contacts account is iCloud in Setup first."
+        }
         return nil
     }
 
@@ -131,8 +145,10 @@ final class AppModel {
     func makeWorkflows() throws -> ContactWorkflows {
         guard let store else { throw ContactStoreError.accessDenied }
         return ContactWorkflows(
-            store: store, google: googleClient, notes: notesAreAccessible ? deps.notes : nil, backups: backupCoordinator,
-            links: deps.links, syncState: deps.syncState, gate: deps.writeGate, dismissals: deps.dismissals,
+            store: store, google: googleClient, notes: notesAreAccessible ? deps.notes : nil,
+            backups: backupCoordinator,
+            links: deps.links, syncState: deps.syncState, gate: deps.writeGate,
+            dismissals: deps.dismissals,
             containerID: setup.selectedContainer?.id
         )
     }
@@ -142,8 +158,10 @@ final class AppModel {
         guard let store else { throw ContactStoreError.accessDenied }
         guard let google = googleClient else { throw GoogleAuthError.notSignedIn }
         return ReviewWorkflows(
-            store: store, google: google, notes: notesAreAccessible ? deps.notes : nil, backups: backupCoordinator, links: deps.links,
-            state: deps.syncState, reviews: deps.reviews, journal: deps.syncJournal, history: deps.syncHistory, gate: deps.writeGate,
+            store: store, google: google, notes: notesAreAccessible ? deps.notes : nil,
+            backups: backupCoordinator, links: deps.links,
+            state: deps.syncState, reviews: deps.reviews, journal: deps.syncJournal,
+            history: deps.syncHistory, gate: deps.writeGate,
             containerID: setup.selectedContainer?.id, photos: deps.photoSupport
         )
     }
@@ -154,16 +172,19 @@ final class AppModel {
         guard case .signedIn(let email) = signIn.status, let store, let google = googleClient else {
             return .notReady("Sign in with Google in Setup first.")
         }
-        return .ready(SyncEnvironment(
-            store: store, notes: notesAreAccessible ? deps.notes : nil, google: google, accountEmail: email,
-            containerID: setup.selectedContainer?.id
-        ))
+        return .ready(
+            SyncEnvironment(
+                store: store, notes: notesAreAccessible ? deps.notes : nil, google: google,
+                accountEmail: email,
+                containerID: setup.selectedContainer?.id
+            ))
     }
 
     private func makeBackupSetup() throws -> BackupSetup {
         guard let store else { throw ContactStoreError.accessDenied }
         let writer = BackupWriter(
-            store: store, google: googleClient, notes: notesAreAccessible ? deps.notes : nil, photoFetcher: deps.photoSupport?.fetcher,
+            store: store, google: googleClient, notes: notesAreAccessible ? deps.notes : nil,
+            photoFetcher: deps.photoSupport?.fetcher,
             baseDirectory: deps.backupDirectory
         )
         return BackupSetup(writer: writer, containerID: setup.selectedContainer?.id)
@@ -222,7 +243,9 @@ final class SetupModel {
     }
 
     func requestContactsAccess() async {
-        do { contactsStatus = try await statusStore.requestAccess() } catch { app.present(error, title: "Contacts access") }
+        do { contactsStatus = try await statusStore.requestAccess() } catch {
+            app.present(error, title: "Contacts access")
+        }
         if contactsStatus == .authorized { await loadContainers() }
     }
 
@@ -241,7 +264,8 @@ final class SetupModel {
     }
 
     private func resolve() {
-        resolution = ContainerResolver.resolve(containers: containers, savedID: app.deps.defaults.string(forKey: Self.containerKey))
+        resolution = ContainerResolver.resolve(
+            containers: containers, savedID: app.deps.defaults.string(forKey: Self.containerKey))
         app.servicesChanged()
     }
 
@@ -252,7 +276,7 @@ final class SetupModel {
         switch notesStatus {
         case .authorized: app.deps.defaults.set(true, forKey: Self.notesGrantedKey)
         case .notAuthorized: app.deps.defaults.set(false, forKey: Self.notesGrantedKey)
-        case .unknown, .unavailable: break // Contacts not reachable right now says nothing about the permission.
+        case .unknown, .unavailable: break  // Contacts not reachable right now says nothing about the permission.
         }
         app.servicesChanged()
     }
@@ -291,9 +315,14 @@ final class BackupModel {
             let receipt = try await app.backupCoordinator.backUpNow()
             let counts = receipt.manifest.counts
             var message = "Backed up \(counts.icloud ?? 0) iCloud contacts"
-            if let connections = counts.googleConnections { message += ", \(connections) Google contacts" }
+            if let connections = counts.googleConnections {
+                message += ", \(connections) Google contacts"
+            }
             if let others = counts.googleOther { message += ", \(others) other contacts" }
-            message += receipt.manifest.notesIncluded ? ", with notes." : ". Notes were not included: check notes access in Setup, then back up again."
+            message +=
+                receipt.manifest.notesIncluded
+                ? ", with notes."
+                : ". Notes were not included: check notes access in Setup, then back up again."
             lastMessage = message
         } catch {
             app.present(error, title: "Backup failed")
@@ -307,7 +336,8 @@ final class BackupModel {
             try await Task.detached { try BackupCatalog.moveToTrash(entry, in: directory) }.value
             // The cached receipt may point at this folder; never let a trashed backup stand behind a later write.
             await app.backupCoordinator.invalidate()
-            lastMessage = "Moved the backup from \(entry.createdAt.formatted(date: .abbreviated, time: .shortened)) to the Trash."
+            lastMessage =
+                "Moved the backup from \(entry.createdAt.formatted(date: .abbreviated, time: .shortened)) to the Trash."
         } catch {
             app.present(error, title: "Could not move the backup to the Trash")
         }
@@ -345,18 +375,36 @@ final class ImportModel {
         guard let plan else { return [] }
         let forced = plan.links.compactMap { link in
             importAnyway.contains(link.googleResourceName) ? link.importAnywayCandidate : nil
-        }.map { var c = $0; c.isSelected = true; return c }
-        return plan.toImport.filter { selectedConnections.contains($0.id) }.map { var c = $0; c.isSelected = true; return c }
+        }.map {
+            var c = $0
+            c.isSelected = true
+            return c
+        }
+        return plan.toImport.filter { selectedConnections.contains($0.id) }.map {
+            var c = $0
+            c.isSelected = true
+            return c
+        }
             + forced
-            + plan.otherContactCandidates.filter { selectedOthers.contains($0.id) }.map { var c = $0; c.isSelected = true; return c }
+            + plan.otherContactCandidates.filter { selectedOthers.contains($0.id) }.map {
+                var c = $0
+                c.isSelected = true
+                return c
+            }
     }
 
-    var selectedConnectionCount: Int { selectedCandidates.filter { $0.record.source == .google }.count }
-    var selectedOtherCount: Int { selectedCandidates.filter { $0.record.source == .googleOther }.count }
+    var selectedConnectionCount: Int {
+        selectedCandidates.filter { $0.record.source == .google }.count
+    }
+    var selectedOtherCount: Int {
+        selectedCandidates.filter { $0.record.source == .googleOther }.count
+    }
 
     var blockReason: String? {
         if let reason = app.notReadyReason { return reason }
-        if app.googleClient == nil { return "Sign in with Google in Setup to see what can be imported." }
+        if app.googleClient == nil {
+            return "Sign in with Google in Setup to see what can be imported."
+        }
         return nil
     }
 
@@ -418,7 +466,11 @@ final class DedupeModel {
     var notesIssue: String?
     var isLoading = false
     var selectedClusterID: String? {
-        didSet { if oldValue != selectedClusterID { draft = scan?.clusters.first { $0.id == selectedClusterID }.map(MergeDraft.init) } }
+        didSet {
+            if oldValue != selectedClusterID {
+                draft = scan?.clusters.first { $0.id == selectedClusterID }.map(MergeDraft.init)
+            }
+        }
     }
     var draft: MergeDraft?
     var showingConfirmation = false
@@ -455,9 +507,15 @@ final class DedupeModel {
 
     // MARK: bulk selection
 
-    var safeClusterIDs: [String] { (scan?.clusters ?? []).map(\.id).filter { eligibility[$0] == .safe } }
+    var safeClusterIDs: [String] {
+        (scan?.clusters ?? []).map(\.id).filter { eligibility[$0] == .safe }
+    }
     /// The ticked groups in list order, as the matcher suggests merging them.
-    var checkedDrafts: [MergeDraft] { (scan?.clusters ?? []).compactMap { checkedClusterIDs.contains($0.id) ? suggestedDrafts[$0.id] : nil } }
+    var checkedDrafts: [MergeDraft] {
+        (scan?.clusters ?? []).compactMap {
+            checkedClusterIDs.contains($0.id) ? suggestedDrafts[$0.id] : nil
+        }
+    }
     var checkedDeleteCount: Int { checkedDrafts.reduce(0) { $0 + $1.others.count } }
 
     func isChecked(_ clusterID: String) -> Bool { checkedClusterIDs.contains(clusterID) }
@@ -474,7 +532,8 @@ final class DedupeModel {
     var bulkMergeBlockReason: String? {
         if let reason = app.notReadyReason { return reason }
         if !app.notesAreAccessible {
-            return "Grant notes access in Setup first, so notes on the contacts that get deleted are kept."
+            return
+                "Grant notes access in Setup first, so notes on the contacts that get deleted are kept."
         }
         return nil
     }
@@ -484,7 +543,8 @@ final class DedupeModel {
         if let reason = app.notReadyReason { return reason }
         guard let draft, draft.canMerge else { return "A merge needs at least two contacts." }
         if !app.notesAreAccessible {
-            return "Grant notes access in Setup first, so notes on the contacts that get deleted are kept."
+            return
+                "Grant notes access in Setup first, so notes on the contacts that get deleted are kept."
         }
         return nil
     }
@@ -501,13 +561,19 @@ final class DedupeModel {
             let workflows = try app.makeWorkflows()
             let loaded = try await workflows.loadDuplicates()
             scan = loaded
-            suggestedDrafts = Dictionary(loaded.clusters.map { ($0.id, MergeDraft(cluster: $0)) }, uniquingKeysWith: { first, _ in first })
+            suggestedDrafts = Dictionary(
+                loaded.clusters.map { ($0.id, MergeDraft(cluster: $0)) },
+                uniquingKeysWith: { first, _ in first })
             eligibility = suggestedDrafts.mapValues(\.bulkEligibility)
-            checkedClusterIDs = checkedClusterIDs.filter { eligibility[$0] != nil && eligibility[$0] != .needsReview }
-            recordsByID = Dictionary(loaded.records.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            checkedClusterIDs = checkedClusterIDs.filter {
+                eligibility[$0] != nil && eligibility[$0] != .needsReview
+            }
+            recordsByID = Dictionary(
+                loaded.records.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
             if app.notesAreAccessible {
                 do {
-                    notes = try await workflows.loadNotes(ids: loaded.records.map(\.sourceIdentifier))
+                    notes = try await workflows.loadNotes(
+                        ids: loaded.records.map(\.sourceIdentifier))
                     notesIssue = nil
                 } catch {
                     notes = [:]
@@ -515,7 +581,8 @@ final class DedupeModel {
                 }
             } else {
                 notes = [:]
-                notesIssue = "Notes are not shown because notes access has not been granted (see Setup)."
+                notesIssue =
+                    "Notes are not shown because notes access has not been granted (see Setup)."
             }
             let keep = selectedClusterID
             selectedClusterID = nil
@@ -594,7 +661,11 @@ final class DedupeModel {
         do {
             let report = try await app.makeWorkflows().runBulkMerge(
                 drafts,
-                progress: { [weak self] update in Task { @MainActor in if self?.isBulkMerging == true { self?.bulkProgress = update } } },
+                progress: { [weak self] update in
+                    Task { @MainActor in
+                        if self?.isBulkMerging == true { self?.bulkProgress = update }
+                    }
+                },
                 isCancelled: { signal.isRequested }
             )
             bulkReport = report
@@ -658,7 +729,8 @@ final class CleanupModel {
     var deleteBlockReason: String? {
         if let reason = app.notReadyReason { return reason }
         if !app.notesAreAccessible {
-            return "Grant notes access in Setup first, so notes on the contacts that get deleted are kept in the backup."
+            return
+                "Grant notes access in Setup first, so notes on the contacts that get deleted are kept in the backup."
         }
         return nil
     }
@@ -676,7 +748,9 @@ final class CleanupModel {
     func selectNone() { selection = [] }
 
     func confirmDelete() {
-        googleRemovalsPending = (try? app.makeWorkflows().googleRemovalsPending(ifDeleting: selectedRows.map(\.id))) ?? 0
+        googleRemovalsPending =
+            (try? app.makeWorkflows().googleRemovalsPending(ifDeleting: selectedRows.map(\.id)))
+            ?? 0
         syncIsOn = (try? app.deps.syncState.load().firstSyncApproved) == true
         showingConfirmation = true
     }
@@ -710,7 +784,10 @@ final class CleanupModel {
         }
         do {
             run = try await app.makeWorkflows().deleteContacts(
-                ids: ids, progress: { [weak self] update in Task { @MainActor in if self?.isDeleting == true { self?.phase = update } } }
+                ids: ids,
+                progress: { [weak self] update in
+                    Task { @MainActor in if self?.isDeleting == true { self?.phase = update } }
+                }
             )
             selection = []
             await app.backup.refresh()
@@ -746,9 +823,13 @@ final class SyncModel {
         self.app = app
         let deps = app.deps
         engine = SyncEngine(
-            environment: { [weak app] in await app?.syncEnvironment() ?? .notReady("Contact Bridge is closing.") },
-            links: deps.links, state: deps.syncState, reviews: deps.reviews, journal: deps.syncJournal, history: deps.syncHistory,
-            backups: app.backupCoordinator, gate: deps.writeGate, contactsAppRunning: deps.contactsAppRunning,
+            environment: { [weak app] in
+                await app?.syncEnvironment() ?? .notReady("Contact Bridge is closing.")
+            },
+            links: deps.links, state: deps.syncState, reviews: deps.reviews,
+            journal: deps.syncJournal, history: deps.syncHistory,
+            backups: app.backupCoordinator, gate: deps.writeGate,
+            contactsAppRunning: deps.contactsAppRunning,
             acquireLock: deps.acquireSyncLock, photos: deps.photoSupport
         )
     }
@@ -756,7 +837,8 @@ final class SyncModel {
     /// Changes when something that decides whether sync can run changes, so the screen builds its preview again.
     var readyKey: String {
         [
-            String(describing: snapshot.status == .notStarted), app.notReadyReason ?? "", String(describing: app.signIn.status),
+            String(describing: snapshot.status == .notStarted), app.notReadyReason ?? "",
+            String(describing: app.signIn.status),
             app.setup.selectedContainer?.id ?? "", String(app.notesAreAccessible),
         ].joined(separator: "|")
     }
@@ -828,7 +910,8 @@ final class SyncModel {
         switch await engine.approveFirstSync() {
         case .started, .alreadyApproved: break
         case .previewChanged:
-            notice = "Your contacts changed while you were looking, so the numbers above are new. Check them, then press Start syncing again."
+            notice =
+                "Your contacts changed while you were looking, so the numbers above are new. Check them, then press Start syncing again."
         case .noPreview:
             notice = "The preview is not ready yet."
         case .unavailable(let reason):
@@ -956,11 +1039,15 @@ final class ReviewModel {
     var isOpen: Bool { detail != nil || isLoading }
 
     /// The engine's list without what was just decided.
-    var items: [SyncReviewSummary] { app.sync.snapshot.reviewItems.filter { !hidden.contains($0.id) } }
+    var items: [SyncReviewSummary] {
+        app.sync.snapshot.reviewItems.filter { !hidden.contains($0.id) }
+    }
     /// The photo questions (the engine leaves them out while photo sync is off).
     var photoItems: [SyncReviewSummary] { items.filter { $0.kind == .photoConflict } }
     /// First-link conflicts, which "Keep iCloud for all" settles together.
-    var firstLinkItems: [SyncReviewSummary] { items.filter { $0.kind == .bothEdited && $0.isFirstLink } }
+    var firstLinkItems: [SyncReviewSummary] {
+        items.filter { $0.kind == .bothEdited && $0.isFirstLink }
+    }
 
     // MARK: what is possible
 
@@ -969,7 +1056,8 @@ final class ReviewModel {
         if let reason = app.notReadyReason { return reason }
         if app.googleClient == nil { return "Sign in with Google in Setup first." }
         switch app.sync.snapshot.status {
-        case .paused: return "Syncing is paused. Resume it, or clear the pause, before deciding on these."
+        case .paused:
+            return "Syncing is paused. Resume it, or clear the pause, before deciding on these."
         case .disabled: return "Syncing is off in this copy of Contact Bridge."
         default: return nil
         }
@@ -1035,48 +1123,92 @@ final class ReviewModel {
     // MARK: the draft
 
     func pick(_ field: SyncField, _ side: SyncReviewDraft.Side) { detail?.draft?.pick(field, side) }
-    func setAction(_ action: SyncReviewDraft.EntryAction, forEntry id: String) { detail?.draft?.setAction(action, forEntry: id) }
+    func setAction(_ action: SyncReviewDraft.EntryAction, forEntry id: String) {
+        detail?.draft?.setAction(action, forEntry: id)
+    }
     func pickNote(_ pick: SyncReviewDraft.NotePick) { detail?.draft?.pickNote(pick) }
     func chooseICloudEverywhere() { detail?.draft?.chooseICloudEverywhere() }
 
     // MARK: deciding
 
-    func save() async { await decide(.save, done: "Saved to iCloud and Google.") { try await $0.apply($1) } }
-    func importContact() async { await decide(.importContact, done: "Imported to iCloud.") { try await $0.importToICloud($1) } }
-    func deleteFromICloud() async { await decide(.deleteFromICloud, done: "Deleted from iCloud.") { try await $0.deleteFromICloud($1) } }
-    func putBack() async { await decide(.putBack, done: "Put back in Google.") { try await $0.putBackInGoogle($1) } }
-    func keepDeleted() async { await decide(.keepDeleted, done: "Deleted from Google too.") { try await $0.keepDeleted($1) } }
-    func restore() async { await decide(.restore, done: "Restored to iCloud.") { try await $0.restoreToICloud($1) } }
-    func deleteFromGoogle() async { await decide(.deleteFromGoogle, done: "Deleted from Google.") { try await $0.deleteFromGoogle($1) } }
-    func deleteFromBoth() async { await decide(.deleteFromBoth, done: "Deleted from iCloud and Google.") { try await $0.deleteFromBoth($1) } }
-    func link() async { await decide(.link, done: "Linked. The next sync compares the two and asks about anything that differs.") { try await $0.link($1) } }
+    func save() async {
+        await decide(.save, done: "Saved to iCloud and Google.") { try await $0.apply($1) }
+    }
+    func importContact() async {
+        await decide(.importContact, done: "Imported to iCloud.") {
+            try await $0.importToICloud($1)
+        }
+    }
+    func deleteFromICloud() async {
+        await decide(.deleteFromICloud, done: "Deleted from iCloud.") {
+            try await $0.deleteFromICloud($1)
+        }
+    }
+    func putBack() async {
+        await decide(.putBack, done: "Put back in Google.") { try await $0.putBackInGoogle($1) }
+    }
+    func keepDeleted() async {
+        await decide(.keepDeleted, done: "Deleted from Google too.") {
+            try await $0.keepDeleted($1)
+        }
+    }
+    func restore() async {
+        await decide(.restore, done: "Restored to iCloud.") { try await $0.restoreToICloud($1) }
+    }
+    func deleteFromGoogle() async {
+        await decide(.deleteFromGoogle, done: "Deleted from Google.") {
+            try await $0.deleteFromGoogle($1)
+        }
+    }
+    func deleteFromBoth() async {
+        await decide(.deleteFromBoth, done: "Deleted from iCloud and Google.") {
+            try await $0.deleteFromBoth($1)
+        }
+    }
+    func link() async {
+        await decide(
+            .link,
+            done: "Linked. The next sync compares the two and asks about anything that differs."
+        ) { try await $0.link($1) }
+    }
 
     /// Deciding a photo question. A choice that removes a photo is confirmed first (`confirmingPhoto`).
     func choosePhoto(_ option: PhotoReviewDraft.Option) {
-        if option.isDestructive { confirmingPhoto = option } else { Task { await applyPhoto(option) } }
+        if option.isDestructive {
+            confirmingPhoto = option
+        } else {
+            Task { await applyPhoto(option) }
+        }
     }
 
     func applyPhoto(_ option: PhotoReviewDraft.Option) async {
         confirmingPhoto = nil
-        await decide(.photo, done: "Photo decided.") { try await $0.applyPhoto($1, choice: option.choice) }
+        await decide(.photo, done: "Photo decided.") {
+            try await $0.applyPhoto($1, choice: option.choice)
+        }
     }
 
     func ignore() async {
-        await decide(.ignore, done: "Ignored. Use Show ignored to bring it back.") { workflows, detail in
+        await decide(.ignore, done: "Ignored. Use Show ignored to bring it back.") {
+            workflows, detail in
             try await workflows.ignore(detail.item)
             return .done(warnings: [])
         }
     }
 
     func keepSeparate() async {
-        await decide(.keepSeparate, done: "Kept separate. The iCloud contact is created in Google on the next sync.") { workflows, detail in
+        await decide(
+            .keepSeparate,
+            done: "Kept separate. The iCloud contact is created in Google on the next sync."
+        ) { workflows, detail in
             try await workflows.keepSeparate(detail.item)
             return .done(warnings: [])
         }
     }
 
     private func decide(
-        _ action: ReviewAction, done message: String, _ run: (ReviewWorkflows, ReviewDetail) async throws -> ReviewOutcome
+        _ action: ReviewAction, done message: String,
+        _ run: (ReviewWorkflows, ReviewDetail) async throws -> ReviewOutcome
     ) async {
         guard let current = detail, !isWorking, block(for: action) == nil else { return }
         isWorking = true
@@ -1088,7 +1220,10 @@ final class ReviewModel {
                 detail = nil
                 notice = nil
                 resultMessage = message
-                if !warnings.isEmpty { app.alert = AlertInfo(title: "Done, with a note", message: warnings.joined(separator: "\n")) }
+                if !warnings.isEmpty {
+                    app.alert = AlertInfo(
+                        title: "Done, with a note", message: warnings.joined(separator: "\n"))
+                }
                 settle(revealing: [current.id])
             case .changedSinceShown(let fresh):
                 notice = "This changed since you looked, so nothing was done. Check it again."
@@ -1153,14 +1288,17 @@ final class ReviewModel {
     /// "Keep iCloud/Google photos for all". A change bigger than the photo limits comes back as a question first
     /// (`photoBulkReport.needsConfirmation`); `confirmed` goes ahead with it.
     func runPhotoBulk(confirmed: Bool) async {
-        guard !isPhotoBulkWorking, let side = photoBulkSide, block(for: .photo) == nil else { return }
+        guard !isPhotoBulkWorking, let side = photoBulkSide, block(for: .photo) == nil else {
+            return
+        }
         let ids = Set(photoItems.map(\.id))
         isPhotoBulkWorking = true
         defer { isPhotoBulkWorking = false }
         do {
             let items = try app.deps.reviews.load().filter { ids.contains($0.id) }
             let workflows = try app.makeReviewWorkflows()
-            let report = side == .icloud
+            let report =
+                side == .icloud
                 ? try await workflows.keepICloudPhotosForAll(items, confirmed: confirmed)
                 : try await workflows.keepGooglePhotosForAll(items, confirmed: confirmed)
             photoBulkReport = report
@@ -1207,6 +1345,7 @@ final class ReviewModel {
 
 /// What the buttons on an open item do.
 enum ReviewAction {
-    case save, importContact, ignore, deleteFromICloud, putBack, keepDeleted, restore, link, keepSeparate, photo, deleteFromGoogle,
-         deleteFromBoth
+    case save, importContact, ignore, deleteFromICloud, putBack, keepDeleted, restore, link,
+        keepSeparate, photo, deleteFromGoogle,
+        deleteFromBoth
 }

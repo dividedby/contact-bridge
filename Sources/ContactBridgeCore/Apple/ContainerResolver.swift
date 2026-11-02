@@ -14,8 +14,12 @@ public enum ContainerResolution: Sendable, Equatable {
 /// CardDAV. If it does not, the automatic policy is NOT applied in its place: the user is asked again, because silently
 /// switching accounts could send a merge or import to the wrong one. Without a saved id the automatic policy applies.
 public enum ContainerResolver {
-    public static func resolve(containers: [ContactContainer], savedID: String?) -> ContainerResolution {
-        if let savedID, let saved = containers.first(where: { $0.id == savedID && $0.kind == .cardDAV }) {
+    public static func resolve(containers: [ContactContainer], savedID: String?)
+        -> ContainerResolution
+    {
+        if let savedID,
+            let saved = containers.first(where: { $0.id == savedID && $0.kind == .cardDAV })
+        {
             return .selected(saved, viaSavedChoice: true)
         }
         let automatic = ContainerSelection.choose(from: containers)

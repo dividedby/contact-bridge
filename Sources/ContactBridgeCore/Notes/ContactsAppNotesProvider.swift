@@ -16,7 +16,9 @@ public struct ContactsAppNotesProvider: NotesStoring {
     private let runner: any AppleScriptRunning
     private let retryDelay: Duration
 
-    public init(runner: any AppleScriptRunning = NSAppleScriptRunner(), retryDelay: Duration = .seconds(1)) {
+    public init(
+        runner: any AppleScriptRunning = NSAppleScriptRunner(), retryDelay: Duration = .seconds(1)
+    ) {
         self.runner = runner
         self.retryDelay = retryDelay
     }
@@ -24,7 +26,8 @@ public struct ContactsAppNotesProvider: NotesStoring {
     // MARK: scripts (constant text: nothing from callers or from parsing is ever interpolated into them)
 
     /// One round trip for the whole address book: two parallel lists, ids and notes (`missing value` for no note).
-    static let bulkScript = #"tell application id "com.apple.AddressBook" to get {id, note} of every person"#
+    static let bulkScript =
+        #"tell application id "com.apple.AddressBook" to get {id, note} of every person"#
 
     static let setNoteHandler = "setNote"
     /// `pid` is the exact id, `pidUUID` the part before ":" for the fallback. Contacts only persists after `save`.
@@ -54,11 +57,17 @@ public struct ContactsAppNotesProvider: NotesStoring {
 
     public func setNote(_ note: String?, forID id: String) async throws {
         // An empty UUID part would make `begins with ""` match every contact.
-        guard !ContactsAppIDs.uuidPart(of: id).isEmpty else { throw NotesAccessError.contactNotFound(id) }
-        let arguments = [id, ContactsAppIDs.uuidPart(of: id), note ?? ""].map { NSAppleEventDescriptor(string: $0) }
+        guard !ContactsAppIDs.uuidPart(of: id).isEmpty else {
+            throw NotesAccessError.contactNotFound(id)
+        }
+        let arguments = [id, ContactsAppIDs.uuidPart(of: id), note ?? ""].map {
+            NSAppleEventDescriptor(string: $0)
+        }
         do {
             _ = try await perform {
-                try await ContactsAppScript.call(handler: Self.setNoteHandler, in: Self.setNoteScript, arguments: arguments, runner: runner)
+                try await ContactsAppScript.call(
+                    handler: Self.setNoteHandler, in: Self.setNoteScript, arguments: arguments,
+                    runner: runner)
             }
         } catch NotesAccessError.scriptFailed(-1728, _) {
             throw NotesAccessError.contactNotFound(id)
@@ -84,12 +93,18 @@ public struct ContactsAppNotesProvider: NotesStoring {
     }
 
     /// `{{id, ...}, {note-or-missing-value, ...}}` into id/note pairs. Empty notes are `nil`.
-    private static func parseBulk(_ result: NSAppleEventDescriptor) throws -> [(id: String, note: String?)] {
-        guard result.numberOfItems == 2, let idList = result.atIndex(1), let noteList = result.atIndex(2) else {
-            throw NotesAccessError.unexpectedResult("expected two lists, got \(result.numberOfItems) item(s)")
+    private static func parseBulk(_ result: NSAppleEventDescriptor) throws -> [(
+        id: String, note: String?
+    )] {
+        guard result.numberOfItems == 2, let idList = result.atIndex(1),
+            let noteList = result.atIndex(2)
+        else {
+            throw NotesAccessError.unexpectedResult(
+                "expected two lists, got \(result.numberOfItems) item(s)")
         }
         guard idList.numberOfItems == noteList.numberOfItems else {
-            throw NotesAccessError.unexpectedResult("\(idList.numberOfItems) ids but \(noteList.numberOfItems) notes")
+            throw NotesAccessError.unexpectedResult(
+                "\(idList.numberOfItems) ids but \(noteList.numberOfItems) notes")
         }
         return try (1...max(idList.numberOfItems, 1)).compactMap { position in
             guard position <= idList.numberOfItems else { return nil }
@@ -101,7 +116,8 @@ public struct ContactsAppNotesProvider: NotesStoring {
             }
             if ContactsAppIDs.isMissingValue(noteItem) { return (id, nil) }
             guard let note = noteItem.stringValue else {
-                throw NotesAccessError.unexpectedResult("the note of person \(position) is not text")
+                throw NotesAccessError.unexpectedResult(
+                    "the note of person \(position) is not text")
             }
             return (id, note.isEmpty ? nil : note)
         }
@@ -111,7 +127,9 @@ public struct ContactsAppNotesProvider: NotesStoring {
 /// Running a script against the Contacts app.
 enum ContactsAppScript {
     /// Runs once; on -600 (Contacts not running yet, it launches on demand) waits and runs once more.
-    static func retryingLaunch<T>(after delay: Duration, _ operation: () async throws -> T) async throws -> T {
+    static func retryingLaunch<T>(after delay: Duration, _ operation: () async throws -> T)
+        async throws -> T
+    {
         do {
             return try await operation()
         } catch let error as AppleScriptError where error.number == AppleScriptError.appNotRunning {
@@ -127,7 +145,8 @@ enum ContactsAppScript {
     /// answering, this and every later call (seen on macOS 27: minutes with no reply, until Contacts was quit), while the
     /// same call after a plain script returned in under a second.
     static func call(
-        handler: String, in source: String, arguments: [NSAppleEventDescriptor], runner: any AppleScriptRunning
+        handler: String, in source: String, arguments: [NSAppleEventDescriptor],
+        runner: any AppleScriptRunning
     ) async throws -> NSAppleEventDescriptor {
         _ = try await runner.run(source: wakeScript)
         return try await runner.call(handler: handler, in: source, arguments: arguments)
@@ -150,7 +169,9 @@ enum ContactsAppIDs {
 
     /// Notes for `requested`, keyed by the requested id. Exact id match first, then UUID-part match. A matched person
     /// without a note is `""`; an id that matches nobody is omitted (unknown, not empty).
-    static func notes(for requested: [String], in people: [(id: String, note: String?)]) -> [String: String] {
+    static func notes(for requested: [String], in people: [(id: String, note: String?)]) -> [String:
+        String]
+    {
         var exact: [String: String?] = [:]
         var byUUID: [String: String?] = [:]
         for person in people {

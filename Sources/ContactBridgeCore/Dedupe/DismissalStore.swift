@@ -104,7 +104,8 @@ public protocol DismissalStoring: Sendable {
 /// `dismissed-clusters.json` next to `links.json`, rewritten atomically on every change.
 public final class DismissalStore: DismissalStoring, Sendable {
     public static var defaultURL: URL {
-        LinkStore.defaultURL.deletingLastPathComponent().appendingPathComponent("dismissed-clusters.json")
+        LinkStore.defaultURL.deletingLastPathComponent().appendingPathComponent(
+            "dismissed-clusters.json")
     }
 
     private let url: URL
@@ -159,7 +160,9 @@ public final class DismissalStore: DismissalStoring, Sendable {
         let data: Data
         do {
             data = try Data(contentsOf: url)
-        } catch let error as CocoaError where error.code == .fileReadNoSuchFile || error.code == .fileNoSuchFile {
+        } catch let error as CocoaError
+            where error.code == .fileReadNoSuchFile || error.code == .fileNoSuchFile
+        {
             return DismissalTable()
         } catch {
             throw DismissalStoreError.unreadable(error.localizedDescription)
@@ -168,7 +171,9 @@ public final class DismissalStore: DismissalStoring, Sendable {
         decoder.dateDecodingStrategy = .iso8601
         do {
             let header = try decoder.decode(Header.self, from: data)
-            guard header.version == DismissalTable.currentVersion else { throw DismissalStoreError.unsupportedVersion(header.version) }
+            guard header.version == DismissalTable.currentVersion else {
+                throw DismissalStoreError.unsupportedVersion(header.version)
+            }
             return try decoder.decode(DismissalTable.self, from: data)
         } catch let error as DismissalStoreError {
             throw error
@@ -181,7 +186,8 @@ public final class DismissalStore: DismissalStoring, Sendable {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try encoder.encode(table).write(to: url, options: .atomic)
     }
 }
@@ -192,7 +198,9 @@ public final class InMemoryDismissalStore: DismissalStoring, Sendable {
     public init() {}
 
     public func load() throws -> DismissalTable { table.withLock { $0 } }
-    public func dismiss(memberIDs: [String], at date: Date) throws { table.withLock { $0.dismiss(memberIDs, at: date) } }
+    public func dismiss(memberIDs: [String], at date: Date) throws {
+        table.withLock { $0.dismiss(memberIDs, at: date) }
+    }
     public func dismiss(groups: [[String]], at date: Date) throws {
         table.withLock { table in for ids in groups { table.dismiss(ids, at: date) } }
     }

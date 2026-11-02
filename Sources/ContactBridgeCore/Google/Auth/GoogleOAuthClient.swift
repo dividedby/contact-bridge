@@ -1,13 +1,17 @@
 import Foundation
 
-public struct GoogleTokenResponse: Sendable, Equatable, CustomStringConvertible, CustomDebugStringConvertible {
+public struct GoogleTokenResponse: Sendable, Equatable, CustomStringConvertible,
+    CustomDebugStringConvertible
+{
     public var accessToken: String
     /// Absent on refresh responses: keep the refresh token you already have.
     public var refreshToken: String?
     public var expiresIn: TimeInterval
     public var scopes: [String]
 
-    public var description: String { "GoogleTokenResponse(tokens: <redacted>, expiresIn: \(Int(expiresIn)), scopes: \(scopes.count))" }
+    public var description: String {
+        "GoogleTokenResponse(tokens: <redacted>, expiresIn: \(Int(expiresIn)), scopes: \(scopes.count))"
+    }
     public var debugDescription: String { description }
 }
 
@@ -27,7 +31,9 @@ public struct GoogleOAuthClient: Sendable {
         self.transport = transport
     }
 
-    public func authorizationURL(redirectURI: URL, challenge: String, state: String, scopes: [String]) -> URL {
+    public func authorizationURL(
+        redirectURI: URL, challenge: String, state: String, scopes: [String]
+    ) -> URL {
         let query: [(String, String)] = [
             ("client_id", config.clientID),
             ("redirect_uri", redirectURI.absoluteString),
@@ -43,7 +49,9 @@ public struct GoogleOAuthClient: Sendable {
         return URL(string: "\(Self.authorizationEndpoint)?\(FormEncoding.encode(query))")!
     }
 
-    public func exchangeCode(_ code: String, verifier: String, redirectURI: URL) async throws -> GoogleTokenResponse {
+    public func exchangeCode(_ code: String, verifier: String, redirectURI: URL) async throws
+        -> GoogleTokenResponse
+    {
         try await tokenRequest([
             ("grant_type", "authorization_code"),
             ("code", code),
@@ -77,7 +85,9 @@ public struct GoogleOAuthClient: Sendable {
 
     static func accountEmail(fromUserInfo body: Data) -> String? {
         struct UserInfo: Decodable { var email: String? }
-        guard let email = (try? JSONDecoder().decode(UserInfo.self, from: body))?.email, !email.isEmpty else { return nil }
+        guard let email = (try? JSONDecoder().decode(UserInfo.self, from: body))?.email,
+            !email.isEmpty
+        else { return nil }
         return email
     }
 
@@ -92,15 +102,20 @@ public struct GoogleOAuthClient: Sendable {
     }
 
     private func tokenRequest(_ grant: [(String, String)]) async throws -> GoogleTokenResponse {
-        var request = formRequest(Self.tokenEndpoint, grant + [("client_id", config.clientID), ("client_secret", config.clientSecret)])
+        var request = formRequest(
+            Self.tokenEndpoint,
+            grant + [("client_id", config.clientID), ("client_secret", config.clientSecret)])
         request.timeoutInterval = 30
         let result = try await transport.send(request)
         guard result.isSuccess else { throw Self.tokenError(result) }
-        guard let body = try? JSONDecoder().decode(TokenBody.self, from: result.body), !body.access_token.isEmpty else {
+        guard let body = try? JSONDecoder().decode(TokenBody.self, from: result.body),
+            !body.access_token.isEmpty
+        else {
             throw GoogleAuthError.invalidResponse
         }
         return GoogleTokenResponse(
-            accessToken: body.access_token, refreshToken: body.refresh_token, expiresIn: body.expires_in ?? 3600,
+            accessToken: body.access_token, refreshToken: body.refresh_token,
+            expiresIn: body.expires_in ?? 3600,
             scopes: (body.scope ?? "").split(separator: " ").map(String.init)
         )
     }
@@ -108,7 +123,9 @@ public struct GoogleOAuthClient: Sendable {
     private static func tokenError(_ result: HTTPResult) -> GoogleAuthError {
         let body = try? JSONDecoder().decode(ErrorBody.self, from: result.body)
         if body?.error == "invalid_grant" { return .needsReauthorization }
-        return .tokenEndpoint(status: result.status, error: body?.error ?? "unknown_error", description: body?.error_description)
+        return .tokenEndpoint(
+            status: result.status, error: body?.error ?? "unknown_error",
+            description: body?.error_description)
     }
 
     private struct TokenBody: Decodable {

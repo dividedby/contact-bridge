@@ -7,7 +7,10 @@ public struct ImportedLink: Sendable, Hashable {
     /// Stored with the link (`LinkEntry.displayName`) so a screen can name the contact after it is gone from iCloud.
     public var displayName: String?
 
-    public init(icloudID: String, googleResourceName: String, origin: LinkOrigin = .imported, displayName: String? = nil) {
+    public init(
+        icloudID: String, googleResourceName: String, origin: LinkOrigin = .imported,
+        displayName: String? = nil
+    ) {
         self.icloudID = icloudID
         self.googleResourceName = googleResourceName
         self.origin = origin
@@ -60,14 +63,19 @@ public struct ImportExecutor: Sendable {
     private let links: (any LinkStoring)?
     private let maxBackupAge: TimeInterval
 
-    public init(store: any ContactStoring, receipt: BackupReceipt, links: (any LinkStoring)? = nil, maxBackupAge: TimeInterval = 3600) {
+    public init(
+        store: any ContactStoring, receipt: BackupReceipt, links: (any LinkStoring)? = nil,
+        maxBackupAge: TimeInterval = 3600
+    ) {
         self.store = store
         self.receipt = receipt
         self.links = links
         self.maxBackupAge = maxBackupAge
     }
 
-    public func execute(_ candidates: [ImportCandidate], now: Date = Date()) async throws -> ImportResult {
+    public func execute(_ candidates: [ImportCandidate], now: Date = Date()) async throws
+        -> ImportResult
+    {
         guard receipt.isFresh(maxAge: maxBackupAge, now: now) else { throw Failure.staleBackup }
 
         let selected = candidates.filter(\.isSelected)
@@ -80,22 +88,28 @@ public struct ImportExecutor: Sendable {
             }
             do {
                 let stored = try await store.create(candidate.record, backup: receipt)
-                result.created.append(ImportResult.Created(candidateID: candidate.id, record: stored))
+                result.created.append(
+                    ImportResult.Created(candidateID: candidate.id, record: stored))
                 if candidate.record.source == .google {
-                    result.links.append(ImportedLink(
-                        icloudID: stored.sourceIdentifier, googleResourceName: candidate.googleResourceName, origin: .imported,
-                        displayName: stored.displayName
-                    ))
+                    result.links.append(
+                        ImportedLink(
+                            icloudID: stored.sourceIdentifier,
+                            googleResourceName: candidate.googleResourceName, origin: .imported,
+                            displayName: stored.displayName
+                        ))
                 }
             } catch {
-                result.stopped = .failed(candidateID: candidate.id, reason: error.localizedDescription)
+                result.stopped = .failed(
+                    candidateID: candidate.id, reason: error.localizedDescription)
                 result.notAttempted = selected[(index + 1)...].map(\.id)
                 break
             }
         }
 
         if let links, !result.links.isEmpty {
-            do { try links.add(result.links, at: now) } catch { result.linkSaveError = error.localizedDescription }
+            do { try links.add(result.links, at: now) } catch {
+                result.linkSaveError = error.localizedDescription
+            }
         }
         return result
     }

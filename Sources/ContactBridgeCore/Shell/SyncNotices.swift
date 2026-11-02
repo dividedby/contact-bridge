@@ -69,7 +69,9 @@ public struct SyncNoticeTracker: Sendable {
         return update
     }
 
-    private mutating func observeReviews(_ snapshot: SyncSnapshot, into update: inout SyncNoticeUpdate) {
+    private mutating func observeReviews(
+        _ snapshot: SyncSnapshot, into update: inout SyncNoticeUpdate
+    ) {
         // The list is only filled by a finished run; before the first one it is empty without meaning "all settled".
         guard snapshot.lastRunAt != nil else { return }
         let ids = Set(snapshot.reviewItems.map(\.id))
@@ -78,17 +80,22 @@ public struct SyncNoticeTracker: Sendable {
         if appeared {
             reviewNoticeShown = true
             let count = ids.count
-            update.post.append(SyncNotice(
-                kind: .reviews, title: "Contact Bridge",
-                body: count == 1 ? "1 contact needs your review" : "\(count) contacts need your review", destination: .reviewList
-            ))
+            update.post.append(
+                SyncNotice(
+                    kind: .reviews, title: "Contact Bridge",
+                    body: count == 1
+                        ? "1 contact needs your review" : "\(count) contacts need your review",
+                    destination: .reviewList
+                ))
         } else if ids.isEmpty, reviewNoticeShown {
             reviewNoticeShown = false
             update.retract.append(.reviews)
         }
     }
 
-    private mutating func observePause(_ snapshot: SyncSnapshot, into update: inout SyncNoticeUpdate) {
+    private mutating func observePause(
+        _ snapshot: SyncSnapshot, into update: inout SyncNoticeUpdate
+    ) {
         switch snapshot.status {
         case .paused(.user), .paused(.notesUnavailable), .idle:
             // `.notesUnavailable` skips one field and syncing goes on, so it is not a stop.
@@ -100,16 +107,24 @@ public struct SyncNoticeTracker: Sendable {
             guard announcedPause != reason else { return }
             announcedPause = reason
             if case .needsConfirmation(let summary) = reason {
-                update.post.append(SyncNotice(kind: .pause, title: "Syncing is waiting for your OK", body: summary, destination: .confirmation))
+                update.post.append(
+                    SyncNotice(
+                        kind: .pause, title: "Syncing is waiting for your OK", body: summary,
+                        destination: .confirmation))
             } else {
-                update.post.append(SyncNotice(kind: .pause, title: "Syncing is paused", body: reason.explanation, destination: .status))
+                update.post.append(
+                    SyncNotice(
+                        kind: .pause, title: "Syncing is paused", body: reason.explanation,
+                        destination: .status))
             }
         default:
             break
         }
     }
 
-    private mutating func observeFailures(_ snapshot: SyncSnapshot, into update: inout SyncNoticeUpdate) {
+    private mutating func observeFailures(
+        _ snapshot: SyncSnapshot, into update: inout SyncNoticeUpdate
+    ) {
         switch snapshot.status {
         case .failed(let message):
             if case .failed? = previousStatus { return }
@@ -135,6 +150,9 @@ public struct SyncNoticeTracker: Sendable {
         failureStreak += 1
         guard failureStreak == Self.failureStreakThreshold else { return }
         failureNoticeShown = true
-        update.post.append(SyncNotice(kind: .failing, title: "Syncing keeps failing", body: message, destination: .status))
+        update.post.append(
+            SyncNotice(
+                kind: .failing, title: "Syncing keeps failing", body: message, destination: .status)
+        )
     }
 }

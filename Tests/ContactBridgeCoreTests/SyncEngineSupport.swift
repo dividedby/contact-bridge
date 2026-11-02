@@ -1,6 +1,7 @@
 import Foundation
 import Synchronization
 import Testing
+
 @testable import ContactBridgeCore
 
 /// A clock that only moves when a test says so. Sleepers wait for an absolute deadline, so time passing before a sleeper
@@ -31,10 +32,13 @@ final class ManualSyncClock: SyncClock, Sendable {
         try Task.checkCancellation()
         let id = UUID()
         try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
-                let (due, watching) = state.withLock { state -> (Bool, [CheckedContinuation<Void, Never>]) in
+            try await withCheckedThrowingContinuation {
+                (continuation: CheckedContinuation<Void, any Error>) in
+                let (due, watching) = state.withLock {
+                    state -> (Bool, [CheckedContinuation<Void, Never>]) in
                     if deadline <= state.now { return (true, []) }
-                    state.sleepers.append(Sleeper(id: id, due: deadline, continuation: continuation))
+                    state.sleepers.append(
+                        Sleeper(id: id, due: deadline, continuation: continuation))
                     return (false, Self.ready(&state))
                 }
                 for watcher in watching { watcher.resume() }
@@ -57,8 +61,11 @@ final class ManualSyncClock: SyncClock, Sendable {
     }
 
     private func cancel(_ id: UUID) {
-        let (sleeper, watching) = state.withLock { state -> (Sleeper?, [CheckedContinuation<Void, Never>]) in
-            guard let index = state.sleepers.firstIndex(where: { $0.id == id }) else { return (nil, []) }
+        let (sleeper, watching) = state.withLock {
+            state -> (Sleeper?, [CheckedContinuation<Void, Never>]) in
+            guard let index = state.sleepers.firstIndex(where: { $0.id == id }) else {
+                return (nil, [])
+            }
             let removed = state.sleepers.remove(at: index)
             return (removed, Self.ready(&state))
         }
@@ -82,7 +89,8 @@ final class ManualSyncClock: SyncClock, Sendable {
     /// Moves time and wakes the sleepers it reaches. Returns how many woke.
     @discardableResult
     func advance(by seconds: TimeInterval) -> Int {
-        let (woken, watching) = state.withLock { state -> ([Sleeper], [CheckedContinuation<Void, Never>]) in
+        let (woken, watching) = state.withLock {
+            state -> ([Sleeper], [CheckedContinuation<Void, Never>]) in
             state.now = state.now.addingTimeInterval(seconds)
             let due = state.sleepers.filter { $0.due <= state.now }
             state.sleepers.removeAll { $0.due <= state.now }
@@ -99,7 +107,9 @@ final class CountingGoogle: GoogleContactsClient, Sendable {
     private let inner: any GoogleContactsClient
     private let counts = Mutex((listings: 0, gets: 0))
     private let listingFailure = Mutex<GoogleAPIError?>(nil)
-    private let blocker = Mutex<(entered: AsyncStream<Void>.Continuation, release: AsyncStream<Void>)?>(nil)
+    private let blocker = Mutex<
+        (entered: AsyncStream<Void>.Continuation, release: AsyncStream<Void>)?
+    >(nil)
 
     init(_ inner: any GoogleContactsClient) {
         self.inner = inner
@@ -109,7 +119,8 @@ final class CountingGoogle: GoogleContactsClient, Sendable {
     func failListings(with error: GoogleAPIError?) { listingFailure.withLock { $0 = error } }
 
     /// Holds the next listing until `release` is signalled. `entered` yields once that listing has started.
-    func blockNextListing() -> (entered: AsyncStream<Void>, release: AsyncStream<Void>.Continuation) {
+    func blockNextListing() -> (entered: AsyncStream<Void>, release: AsyncStream<Void>.Continuation)
+    {
         let (entered, enteredContinuation) = AsyncStream<Void>.makeStream()
         let (release, releaseContinuation) = AsyncStream<Void>.makeStream()
         blocker.withLock { $0 = (enteredContinuation, release) }
@@ -118,7 +129,8 @@ final class CountingGoogle: GoogleContactsClient, Sendable {
 
     func listConnections(syncToken: String?, pageToken: String?) async throws -> GooglePeoplePage {
         counts.withLock { $0.listings += 1 }
-        if let held = blocker.withLock({ state -> (entered: AsyncStream<Void>.Continuation, release: AsyncStream<Void>)? in
+        if let held = blocker.withLock({
+            state -> (entered: AsyncStream<Void>.Continuation, release: AsyncStream<Void>)? in
             defer { state = nil }
             return state
         }) {
@@ -128,24 +140,47 @@ final class CountingGoogle: GoogleContactsClient, Sendable {
         if let error = listingFailure.withLock({ $0 }) { throw error }
         return try await inner.listConnections(syncToken: syncToken, pageToken: pageToken)
     }
-    func listOtherContacts(pageToken: String?) async throws -> GooglePeoplePage { try await inner.listOtherContacts(pageToken: pageToken) }
-    func getPerson(resourceName: String) async throws -> GooglePerson { try await inner.getPerson(resourceName: resourceName) }
-    func createContact(_ person: GooglePerson) async throws -> GooglePerson { try await inner.createContact(person) }
-    func updateContact(resourceName: String, etag: String, person: GooglePerson, updatePersonFields: String) async throws -> GooglePerson {
-        try await inner.updateContact(resourceName: resourceName, etag: etag, person: person, updatePersonFields: updatePersonFields)
+    func listOtherContacts(pageToken: String?) async throws -> GooglePeoplePage {
+        try await inner.listOtherContacts(pageToken: pageToken)
     }
-    func deleteContact(resourceName: String) async throws { try await inner.deleteContact(resourceName: resourceName) }
-    func batchCreate(_ people: [GooglePerson]) async throws -> [GoogleBatchResult] { try await inner.batchCreate(people) }
-    func batchUpdate(_ updates: [GoogleContactUpdate]) async throws -> [GoogleBatchResult] { try await inner.batchUpdate(updates) }
-    func batchDelete(_ resourceNames: [String]) async throws -> [GoogleBatchResult] { try await inner.batchDelete(resourceNames) }
-    func ensureGroup(named name: String) async throws -> String { try await inner.ensureGroup(named: name) }
+    func getPerson(resourceName: String) async throws -> GooglePerson {
+        try await inner.getPerson(resourceName: resourceName)
+    }
+    func createContact(_ person: GooglePerson) async throws -> GooglePerson {
+        try await inner.createContact(person)
+    }
+    func updateContact(
+        resourceName: String, etag: String, person: GooglePerson, updatePersonFields: String
+    ) async throws -> GooglePerson {
+        try await inner.updateContact(
+            resourceName: resourceName, etag: etag, person: person,
+            updatePersonFields: updatePersonFields)
+    }
+    func deleteContact(resourceName: String) async throws {
+        try await inner.deleteContact(resourceName: resourceName)
+    }
+    func batchCreate(_ people: [GooglePerson]) async throws -> [GoogleBatchResult] {
+        try await inner.batchCreate(people)
+    }
+    func batchUpdate(_ updates: [GoogleContactUpdate]) async throws -> [GoogleBatchResult] {
+        try await inner.batchUpdate(updates)
+    }
+    func batchDelete(_ resourceNames: [String]) async throws -> [GoogleBatchResult] {
+        try await inner.batchDelete(resourceNames)
+    }
+    func ensureGroup(named name: String) async throws -> String {
+        try await inner.ensureGroup(named: name)
+    }
     func addMembers(groupResourceName: String, memberResourceNames: [String]) async throws {
-        try await inner.addMembers(groupResourceName: groupResourceName, memberResourceNames: memberResourceNames)
+        try await inner.addMembers(
+            groupResourceName: groupResourceName, memberResourceNames: memberResourceNames)
     }
     func updateContactPhoto(resourceName: String, photoBytes: Data) async throws -> GooglePerson {
         try await inner.updateContactPhoto(resourceName: resourceName, photoBytes: photoBytes)
     }
-    func deleteContactPhoto(resourceName: String) async throws -> GooglePerson { try await inner.deleteContactPhoto(resourceName: resourceName) }
+    func deleteContactPhoto(resourceName: String) async throws -> GooglePerson {
+        try await inner.deleteContactPhoto(resourceName: resourceName)
+    }
 }
 
 /// Forwards to another state store and can make every write fail, to test what the engine does when saving does not work.
@@ -200,35 +235,48 @@ final class EngineRig: @unchecked Sendable {
     private let accountEmail = Reason("me@example.com")
 
     init(
-        _ base: ExecutorRig, planner: SyncPlanner = SyncPlanner(), schedule: SyncSchedule = SyncSchedule(),
-        acquireLock: (@Sendable () throws -> any SyncLockHolding)? = nil, photos: SyncPhotoSupport? = nil
+        _ base: ExecutorRig, planner: SyncPlanner = SyncPlanner(),
+        schedule: SyncSchedule = SyncSchedule(),
+        acquireLock: (@Sendable () throws -> any SyncLockHolding)? = nil,
+        photos: SyncPhotoSupport? = nil
     ) {
         self.base = base
         flakyState = FlakyStateStore(base.stateStore)
         // The engine reads Google with the real field list, so a stored token must have been issued for it.
         if (try? base.stateStore.load().googleSyncToken) != nil {
-            _ = try? base.stateStore.update { $0.fieldsVersion = GoogleChangeFeed.currentFieldsVersion }
+            _ = try? base.stateStore.update {
+                $0.fieldsVersion = GoogleChangeFeed.currentFieldsVersion
+            }
         }
         let google = CountingGoogle(base.faulty)
         self.google = google
-        let store = base.world.store, notes = base.world.notes
-        let notReady = notReady, accountEmail = accountEmail
+        let store = base.world.store
+        let notes = base.world.notes
+        let notReady = notReady
+        let accountEmail = accountEmail
         let gate = gate
         engine = SyncEngine(
             environment: {
                 if let reason = notReady.value.withLock({ $0 }) { return .notReady(reason) }
-                return .ready(SyncEnvironment(store: store, notes: notes, google: google, accountEmail: accountEmail.value.withLock { $0 }))
+                return .ready(
+                    SyncEnvironment(
+                        store: store, notes: notes, google: google,
+                        accountEmail: accountEmail.value.withLock { $0 }))
             },
-            links: base.linkStore, state: flakyState, reviews: base.reviews, journal: base.journal, history: base.history,
-            backups: base.backups, gate: gate, clock: clock, schedule: schedule, planner: planner, acquireLock: acquireLock, photos: photos
+            links: base.linkStore, state: flakyState, reviews: base.reviews, journal: base.journal,
+            history: base.history,
+            backups: base.backups, gate: gate, clock: clock, schedule: schedule, planner: planner,
+            acquireLock: acquireLock, photos: photos
         )
     }
 
     /// Six synced contacts, approved.
     static func linked(
-        count: Int = 6, planner: SyncPlanner = SyncPlanner(), acquireLock: (@Sendable () throws -> any SyncLockHolding)? = nil
+        count: Int = 6, planner: SyncPlanner = SyncPlanner(),
+        acquireLock: (@Sendable () throws -> any SyncLockHolding)? = nil
     ) async throws -> EngineRig {
-        EngineRig(try await ExecutorRig.linked(count: count), planner: planner, acquireLock: acquireLock)
+        EngineRig(
+            try await ExecutorRig.linked(count: count), planner: planner, acquireLock: acquireLock)
     }
 
     func setNotReady(_ reason: String?) { notReady.value.withLock { $0 = reason } }

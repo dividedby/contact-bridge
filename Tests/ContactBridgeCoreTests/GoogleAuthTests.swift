@@ -1,35 +1,55 @@
 import Foundation
 import Security
 import Testing
+
 @testable import ContactBridgeCore
 
-private let testConfig = OAuthConfig(clientID: "test-client.apps.googleusercontent.com", clientSecret: "test-secret-value")
+private let testConfig = OAuthConfig(
+    clientID: "test-client.apps.googleusercontent.com", clientSecret: "test-secret-value")
 private let now = Date(timeIntervalSince1970: 1_800_000_000)
 
-private func tokenJSON(access: String = "access-1", refresh: String? = "refresh-1", expiresIn: Int = 3599, scope: String? = nil) -> String {
+private func tokenJSON(
+    access: String = "access-1", refresh: String? = "refresh-1", expiresIn: Int = 3599,
+    scope: String? = nil
+) -> String {
     let scope = scope ?? GoogleScopes.all.joined(separator: " ")
     let refreshPart = refresh.map { #""refresh_token": "\#($0)","# } ?? ""
-    return #"{"access_token": "\#(access)", \#(refreshPart) "expires_in": \#(expiresIn), "scope": "\#(scope)", "token_type": "Bearer"}"#
+    return
+        #"{"access_token": "\#(access)", \#(refreshPart) "expires_in": \#(expiresIn), "scope": "\#(scope)", "token_type": "Bearer"}"#
 }
 
-private let invalidGrant = HTTPResult.json(400, #"{"error": "invalid_grant", "error_description": "Token has been expired or revoked."}"#)
+private let invalidGrant = HTTPResult.json(
+    400, #"{"error": "invalid_grant", "error_description": "Token has been expired or revoked."}"#)
 
-private func storedToken(access: String? = "access-old", expiry: Date? = now.addingTimeInterval(3600), email: String? = "me@example.com") -> StoredGoogleToken {
-    StoredGoogleToken(refreshToken: "refresh-1", accessToken: access, expiry: expiry, grantedScopes: GoogleScopes.all, email: email)
+private func storedToken(
+    access: String? = "access-old", expiry: Date? = now.addingTimeInterval(3600),
+    email: String? = "me@example.com"
+) -> StoredGoogleToken {
+    StoredGoogleToken(
+        refreshToken: "refresh-1", accessToken: access, expiry: expiry,
+        grantedScopes: GoogleScopes.all, email: email)
 }
 
 struct GoogleOAuthClientTests {
     @Test("The authorization URL carries every required parameter and never the secret")
     func authorizationURL() throws {
         let client = GoogleOAuthClient(config: testConfig, transport: FakeHTTPTransport())
-        let url = client.authorizationURL(redirectURI: try #require(URL(string: "http://127.0.0.1:54321")), challenge: "CHALLENGE", state: "STATE", scopes: GoogleScopes.all)
+        let url = client.authorizationURL(
+            redirectURI: try #require(URL(string: "http://127.0.0.1:54321")),
+            challenge: "CHALLENGE", state: "STATE", scopes: GoogleScopes.all)
         let components = try #require(URLComponents(url: url, resolvingAgainstBaseURL: false))
-        #expect(components.scheme == "https" && components.host == "accounts.google.com" && components.path == "/o/oauth2/v2/auth")
-        let query = Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value ?? "") })
+        #expect(
+            components.scheme == "https" && components.host == "accounts.google.com"
+                && components.path == "/o/oauth2/v2/auth")
+        let query = Dictionary(
+            uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value ?? "") })
         #expect(query["response_type"] == "code")
         #expect(query["client_id"] == testConfig.clientID)
         #expect(query["redirect_uri"] == "http://127.0.0.1:54321")
-        #expect(query["scope"] == "https://www.googleapis.com/auth/contacts https://www.googleapis.com/auth/contacts.other.readonly https://www.googleapis.com/auth/userinfo.email")
+        #expect(
+            query["scope"]
+                == "https://www.googleapis.com/auth/contacts https://www.googleapis.com/auth/contacts.other.readonly https://www.googleapis.com/auth/userinfo.email"
+        )
         #expect(query["code_challenge"] == "CHALLENGE" && query["code_challenge_method"] == "S256")
         #expect(query["state"] == "STATE")
         #expect(query["access_type"] == "offline" && query["prompt"] == "consent")
@@ -44,32 +64,45 @@ struct GoogleOAuthClientTests {
         let transport = FakeHTTPTransport()
         await transport.route("POST", "oauth2.googleapis.com/token", [.json(200, tokenJSON())])
         let client = GoogleOAuthClient(config: testConfig, transport: transport)
-        let response = try await client.exchangeCode("auth/code+1", verifier: "VERIFIER", redirectURI: try #require(URL(string: "http://127.0.0.1:54321")))
+        let response = try await client.exchangeCode(
+            "auth/code+1", verifier: "VERIFIER",
+            redirectURI: try #require(URL(string: "http://127.0.0.1:54321")))
 
         let request = try #require(await transport.requests.first)
-        #expect(request.method == "POST" && request.url.absoluteString == "https://oauth2.googleapis.com/token")
+        #expect(
+            request.method == "POST"
+                && request.url.absoluteString == "https://oauth2.googleapis.com/token")
         #expect(request.headers["Content-Type"] == "application/x-www-form-urlencoded")
-        #expect(request.form == [
-            "grant_type": "authorization_code", "code": "auth/code+1", "code_verifier": "VERIFIER",
-            "redirect_uri": "http://127.0.0.1:54321", "client_id": testConfig.clientID, "client_secret": "test-secret-value",
-        ])
+        #expect(
+            request.form == [
+                "grant_type": "authorization_code", "code": "auth/code+1",
+                "code_verifier": "VERIFIER",
+                "redirect_uri": "http://127.0.0.1:54321", "client_id": testConfig.clientID,
+                "client_secret": "test-secret-value",
+            ])
         // Reserved characters in values must be escaped, not sent raw.
         #expect(request.bodyString.contains("code=auth%2Fcode%2B1"))
-        #expect(response.accessToken == "access-1" && response.refreshToken == "refresh-1" && response.expiresIn == 3599)
+        #expect(
+            response.accessToken == "access-1" && response.refreshToken == "refresh-1"
+                && response.expiresIn == 3599)
         #expect(response.scopes == GoogleScopes.all)
     }
 
-    @Test("Refresh posts grant_type=refresh_token and tolerates a response without a new refresh token")
+    @Test(
+        "Refresh posts grant_type=refresh_token and tolerates a response without a new refresh token"
+    )
     func refresh() async throws {
         let transport = FakeHTTPTransport()
-        await transport.route("POST", "/token", [.json(200, tokenJSON(access: "access-2", refresh: nil))])
+        await transport.route(
+            "POST", "/token", [.json(200, tokenJSON(access: "access-2", refresh: nil))])
         let client = GoogleOAuthClient(config: testConfig, transport: transport)
         let response = try await client.refresh(refreshToken: "refresh-1")
         let request = try #require(await transport.requests.first)
-        #expect(request.form == [
-            "grant_type": "refresh_token", "refresh_token": "refresh-1",
-            "client_id": testConfig.clientID, "client_secret": "test-secret-value",
-        ])
+        #expect(
+            request.form == [
+                "grant_type": "refresh_token", "refresh_token": "refresh-1",
+                "client_id": testConfig.clientID, "client_secret": "test-secret-value",
+            ])
         #expect(response.accessToken == "access-2" && response.refreshToken == nil)
     }
 
@@ -78,23 +111,33 @@ struct GoogleOAuthClientTests {
         let transport = FakeHTTPTransport()
         await transport.route("POST", "/token", [invalidGrant])
         let client = GoogleOAuthClient(config: testConfig, transport: transport)
-        await #expect(throws: GoogleAuthError.needsReauthorization) { _ = try await client.refresh(refreshToken: "r") }
         await #expect(throws: GoogleAuthError.needsReauthorization) {
-            _ = try await client.exchangeCode("c", verifier: "v", redirectURI: URL(string: "http://127.0.0.1:1")!)
+            _ = try await client.refresh(refreshToken: "r")
+        }
+        await #expect(throws: GoogleAuthError.needsReauthorization) {
+            _ = try await client.exchangeCode(
+                "c", verifier: "v", redirectURI: URL(string: "http://127.0.0.1:1")!)
         }
     }
 
     @Test("Other token errors stay typed and their text never includes credentials")
     func otherTokenError() async throws {
         let transport = FakeHTTPTransport()
-        await transport.route("POST", "/token", [.json(401, #"{"error": "invalid_client", "error_description": "Unauthorized"}"#)])
+        await transport.route(
+            "POST", "/token",
+            [.json(401, #"{"error": "invalid_client", "error_description": "Unauthorized"}"#)])
         let client = GoogleOAuthClient(config: testConfig, transport: transport)
         do {
             _ = try await client.refresh(refreshToken: "refresh-secret-token")
             Issue.record("expected a throw")
         } catch let error as GoogleAuthError {
-            #expect(error == .tokenEndpoint(status: 401, error: "invalid_client", description: "Unauthorized"))
-            #expect(!"\(error)".contains("test-secret-value") && !"\(error)".contains("refresh-secret-token"))
+            #expect(
+                error
+                    == .tokenEndpoint(
+                        status: 401, error: "invalid_client", description: "Unauthorized"))
+            #expect(
+                !"\(error)".contains("test-secret-value")
+                    && !"\(error)".contains("refresh-secret-token"))
         }
     }
 
@@ -103,13 +146,17 @@ struct GoogleOAuthClientTests {
         let transport = FakeHTTPTransport()
         await transport.route("POST", "/token", [.json(200, #"{"nope": true}"#)])
         let client = GoogleOAuthClient(config: testConfig, transport: transport)
-        await #expect(throws: GoogleAuthError.invalidResponse) { _ = try await client.refresh(refreshToken: "r") }
+        await #expect(throws: GoogleAuthError.invalidResponse) {
+            _ = try await client.refresh(refreshToken: "r")
+        }
     }
 
     @Test("Revoke posts the token; an already-invalid token counts as revoked")
     func revoke() async throws {
         let transport = FakeHTTPTransport()
-        await transport.route("POST", "oauth2.googleapis.com/revoke", [.json(200), .json(400, #"{"error": "invalid_token"}"#), .json(500, "{}")])
+        await transport.route(
+            "POST", "oauth2.googleapis.com/revoke",
+            [.json(200), .json(400, #"{"error": "invalid_token"}"#), .json(500, "{}")])
         let client = GoogleOAuthClient(config: testConfig, transport: transport)
         try await client.revoke(token: "refresh-1")
         let request = try #require(await transport.requests.first)
@@ -121,8 +168,14 @@ struct GoogleOAuthClientTests {
 
     @Test("The account email comes from the userinfo response; missing or empty means nil")
     func emailSelection() {
-        #expect(GoogleOAuthClient.accountEmail(fromUserInfo: Data(#"{"sub": "1", "email": "me@x.com", "email_verified": true}"#.utf8)) == "me@x.com")
-        #expect(GoogleOAuthClient.accountEmail(fromUserInfo: Data(#"{"sub": "1", "email": ""}"#.utf8)) == nil)
+        #expect(
+            GoogleOAuthClient.accountEmail(
+                fromUserInfo: Data(
+                    #"{"sub": "1", "email": "me@x.com", "email_verified": true}"#.utf8))
+                == "me@x.com")
+        #expect(
+            GoogleOAuthClient.accountEmail(fromUserInfo: Data(#"{"sub": "1", "email": ""}"#.utf8))
+                == nil)
         #expect(GoogleOAuthClient.accountEmail(fromUserInfo: Data(#"{"sub": "1"}"#.utf8)) == nil)
         #expect(GoogleOAuthClient.accountEmail(fromUserInfo: Data("not json".utf8)) == nil)
     }
@@ -131,19 +184,27 @@ struct GoogleOAuthClientTests {
 struct GoogleAuthSessionTests {
     private func makeSession(
         store: InMemoryTokenStore, transport: FakeHTTPTransport,
-        openURL: @escaping @Sendable (URL) async -> Bool = { _ in false }, timeout: Duration = .seconds(10)
+        openURL: @escaping @Sendable (URL) async -> Bool = { _ in false },
+        timeout: Duration = .seconds(10)
     ) -> GoogleAuthSession {
         GoogleAuthSession(
-            oauth: GoogleOAuthClient(config: testConfig, transport: transport), store: store, openURL: openURL,
+            oauth: GoogleOAuthClient(config: testConfig, transport: transport), store: store,
+            openURL: openURL,
             now: { now }, redirectTimeout: timeout
         )
     }
 
     /// Returns once the transport has received a request to `fragment`, i.e. the call under test is in flight. Waits on that
     /// fact, not on elapsed time, so machine load cannot move the test's interleaving.
-    private func waitForRequest(_ transport: FakeHTTPTransport, containing fragment: String, body: String? = nil) async throws {
+    private func waitForRequest(
+        _ transport: FakeHTTPTransport, containing fragment: String, body: String? = nil
+    ) async throws {
         for _ in 0..<2000 {
-            if await transport.requests(containing: fragment).contains(where: { body.map($0.bodyString.contains) ?? true }) { return }
+            if await transport.requests(containing: fragment).contains(where: {
+                body.map($0.bodyString.contains) ?? true
+            }) {
+                return
+            }
             try await Task.sleep(for: .milliseconds(1))
         }
         Issue.record("The request to \(fragment) never arrived")
@@ -158,11 +219,15 @@ struct GoogleAuthSessionTests {
         #expect(await transport.requests.isEmpty)
     }
 
-    @Test("Within 60 seconds of expiry the token is refreshed and the new one persisted, keeping the refresh token")
+    @Test(
+        "Within 60 seconds of expiry the token is refreshed and the new one persisted, keeping the refresh token"
+    )
     func refreshesNearExpiry() async throws {
         let store = InMemoryTokenStore(storedToken(expiry: now.addingTimeInterval(59)))
         let transport = FakeHTTPTransport()
-        await transport.route("POST", "/token", [.json(200, tokenJSON(access: "access-new", refresh: nil, expiresIn: 3600))])
+        await transport.route(
+            "POST", "/token",
+            [.json(200, tokenJSON(access: "access-new", refresh: nil, expiresIn: 3600))])
         let session = makeSession(store: store, transport: transport)
         #expect(try await session.validAccessToken() == "access-new")
         let saved = try #require(try store.load())
@@ -174,11 +239,14 @@ struct GoogleAuthSessionTests {
         #expect(await transport.requests.count == 1)
     }
 
-    @Test("A stored token without an access token refreshes; a rotated refresh token replaces the old one")
+    @Test(
+        "A stored token without an access token refreshes; a rotated refresh token replaces the old one"
+    )
     func missingAccessToken() async throws {
         let store = InMemoryTokenStore(storedToken(access: nil, expiry: nil))
         let transport = FakeHTTPTransport()
-        await transport.route("POST", "/token", [.json(200, tokenJSON(access: "a2", refresh: "refresh-2"))])
+        await transport.route(
+            "POST", "/token", [.json(200, tokenJSON(access: "a2", refresh: "refresh-2"))])
         let session = makeSession(store: store, transport: transport)
         #expect(try await session.validAccessToken() == "a2")
         #expect(try store.load()?.refreshToken == "refresh-2")
@@ -188,7 +256,8 @@ struct GoogleAuthSessionTests {
     func coalescing() async throws {
         let store = InMemoryTokenStore(storedToken(expiry: now.addingTimeInterval(-10)))
         let transport = FakeHTTPTransport()
-        await transport.route("POST", "/token", [.json(200, tokenJSON(access: "shared"))], delay: .milliseconds(50))
+        await transport.route(
+            "POST", "/token", [.json(200, tokenJSON(access: "shared"))], delay: .milliseconds(50))
         let session = makeSession(store: store, transport: transport)
         let tokens = try await withThrowingTaskGroup(of: String.self) { group in
             for _ in 0..<8 { group.addTask { try await session.validAccessToken() } }
@@ -198,11 +267,15 @@ struct GoogleAuthSessionTests {
         #expect(await transport.requests(containing: "/token").count == 1)
     }
 
-    @Test("A rejected token is replaced once; a caller holding an already-replaced token does not refresh again")
+    @Test(
+        "A rejected token is replaced once; a caller holding an already-replaced token does not refresh again"
+    )
     func refreshedReplacing() async throws {
         let store = InMemoryTokenStore(storedToken())
         let transport = FakeHTTPTransport()
-        await transport.route("POST", "/token", [.json(200, tokenJSON(access: "access-A")), .json(200, tokenJSON(access: "access-B"))])
+        await transport.route(
+            "POST", "/token",
+            [.json(200, tokenJSON(access: "access-A")), .json(200, tokenJSON(access: "access-B"))])
         let session = makeSession(store: store, transport: transport)
         #expect(try await session.refreshedAccessToken(replacing: "access-old") == "access-A")
         #expect(try await session.refreshedAccessToken(replacing: "access-old") == "access-A")
@@ -216,10 +289,14 @@ struct GoogleAuthSessionTests {
         let transport = FakeHTTPTransport()
         await transport.route("POST", "/token", [invalidGrant])
         let session = makeSession(store: store, transport: transport)
-        await #expect(throws: GoogleAuthError.needsReauthorization) { _ = try await session.validAccessToken() }
+        await #expect(throws: GoogleAuthError.needsReauthorization) {
+            _ = try await session.validAccessToken()
+        }
         #expect(try store.load() == nil)
         // Later callers keep hearing "needs reauthorization", not "not signed in", until a new sign-in.
-        await #expect(throws: GoogleAuthError.needsReauthorization) { _ = try await session.validAccessToken() }
+        await #expect(throws: GoogleAuthError.needsReauthorization) {
+            _ = try await session.validAccessToken()
+        }
         #expect(await transport.requests.count == 1)
         #expect(try await session.currentAccount() == nil)
     }
@@ -228,11 +305,19 @@ struct GoogleAuthSessionTests {
     func signInClearsRevocation() async throws {
         let store = InMemoryTokenStore(storedToken(expiry: now.addingTimeInterval(-10)))
         let transport = FakeHTTPTransport()
-        await transport.route("POST", "/token", [invalidGrant], bodyContains: "grant_type=refresh_token")
-        await transport.route("POST", "/token", [.json(200, tokenJSON(access: "fresh-access", refresh: "fresh-refresh"))], bodyContains: "grant_type=authorization_code")
-        await transport.route("GET", "openidconnect.googleapis.com/v1/userinfo", [.json(200, #"{"sub": "1", "email": "me@example.com", "email_verified": true}"#)])
+        await transport.route(
+            "POST", "/token", [invalidGrant], bodyContains: "grant_type=refresh_token")
+        await transport.route(
+            "POST", "/token",
+            [.json(200, tokenJSON(access: "fresh-access", refresh: "fresh-refresh"))],
+            bodyContains: "grant_type=authorization_code")
+        await transport.route(
+            "GET", "openidconnect.googleapis.com/v1/userinfo",
+            [.json(200, #"{"sub": "1", "email": "me@example.com", "email_verified": true}"#)])
         let session = makeSession(store: store, transport: transport, openURL: browser())
-        await #expect(throws: GoogleAuthError.needsReauthorization) { _ = try await session.validAccessToken() }
+        await #expect(throws: GoogleAuthError.needsReauthorization) {
+            _ = try await session.validAccessToken()
+        }
         _ = try await session.signIn()
         #expect(try await session.validAccessToken() == "fresh-access")
     }
@@ -242,7 +327,8 @@ struct GoogleAuthSessionTests {
         let store = InMemoryTokenStore(storedToken(expiry: now.addingTimeInterval(-10)))
         let transport = FakeHTTPTransport()
         let (answer, answerNow) = AsyncStream<Void>.makeStream()
-        await transport.route("POST", "/token", [.json(200, tokenJSON(access: "late"))], hold: answer)
+        await transport.route(
+            "POST", "/token", [.json(200, tokenJSON(access: "late"))], hold: answer)
         await transport.route("POST", "/revoke", [.json(200)])
         let session = makeSession(store: store, transport: transport)
         let refresh = Task { try await session.validAccessToken() }
@@ -251,10 +337,14 @@ struct GoogleAuthSessionTests {
         answerNow.yield(())
         await #expect(throws: GoogleAuthError.notSignedIn) { _ = try await refresh.value }
         #expect(try store.load() == nil)
-        await #expect(throws: GoogleAuthError.notSignedIn) { _ = try await session.validAccessToken() }
+        await #expect(throws: GoogleAuthError.notSignedIn) {
+            _ = try await session.validAccessToken()
+        }
     }
 
-    @Test("A sign-out that lands after the refresh task is created but before it starts still discards the refresh")
+    @Test(
+        "A sign-out that lands after the refresh task is created but before it starts still discards the refresh"
+    )
     func signOutBeforeRefreshTaskStarts() async throws {
         let store = InMemoryTokenStore(storedToken(expiry: now.addingTimeInterval(-10)))
         let transport = FakeHTTPTransport()
@@ -277,17 +367,25 @@ struct GoogleAuthSessionTests {
         await #expect(throws: GoogleAuthError.notSignedIn) { _ = try await refresh.value }
         #expect(try store.load() == nil)
         #expect(await transport.requests(containing: "/token").isEmpty)
-        await #expect(throws: GoogleAuthError.notSignedIn) { _ = try await session.validAccessToken() }
+        await #expect(throws: GoogleAuthError.notSignedIn) {
+            _ = try await session.validAccessToken()
+        }
     }
 
-    @Test("A sign-in that completes while sign-out awaits the revocation keeps its fresh credentials")
+    @Test(
+        "A sign-in that completes while sign-out awaits the revocation keeps its fresh credentials")
     func signInDuringSignOut() async throws {
         let store = InMemoryTokenStore(storedToken())
         let transport = FakeHTTPTransport()
         let (answer, answerNow) = AsyncStream<Void>.makeStream()
         await transport.route("POST", "/revoke", [.json(200)], hold: answer)
-        await transport.route("POST", "/token", [.json(200, tokenJSON(access: "fresh-access", refresh: "fresh-refresh"))], bodyContains: "grant_type=authorization_code")
-        await transport.route("GET", "openidconnect.googleapis.com/v1/userinfo", [.json(200, #"{"sub": "1", "email": "new@example.com", "email_verified": true}"#)])
+        await transport.route(
+            "POST", "/token",
+            [.json(200, tokenJSON(access: "fresh-access", refresh: "fresh-refresh"))],
+            bodyContains: "grant_type=authorization_code")
+        await transport.route(
+            "GET", "openidconnect.googleapis.com/v1/userinfo",
+            [.json(200, #"{"sub": "1", "email": "new@example.com", "email_verified": true}"#)])
         let session = makeSession(store: store, transport: transport, openURL: browser())
 
         let signOut = Task { try await session.signOut() }
@@ -301,14 +399,24 @@ struct GoogleAuthSessionTests {
         #expect(try await session.validAccessToken() == "fresh-access")
     }
 
-    @Test("A sign-in during an in-flight refresh keeps the new credentials; the stale refresh hands out the new token")
+    @Test(
+        "A sign-in during an in-flight refresh keeps the new credentials; the stale refresh hands out the new token"
+    )
     func signInDuringRefresh() async throws {
         let store = InMemoryTokenStore(storedToken(expiry: now.addingTimeInterval(-10)))
         let transport = FakeHTTPTransport()
-        await transport.route("POST", "/token", [.json(200, tokenJSON(access: "fresh-access", refresh: "fresh-refresh"))], bodyContains: "grant_type=authorization_code")
+        await transport.route(
+            "POST", "/token",
+            [.json(200, tokenJSON(access: "fresh-access", refresh: "fresh-refresh"))],
+            bodyContains: "grant_type=authorization_code")
         let (answer, answerNow) = AsyncStream<Void>.makeStream()
-        await transport.route("POST", "/token", [.json(200, tokenJSON(access: "stale-access", refresh: "stale-refresh"))], bodyContains: "grant_type=refresh_token", hold: answer)
-        await transport.route("GET", "openidconnect.googleapis.com/v1/userinfo", [.json(200, #"{"sub": "1", "email": "new@example.com", "email_verified": true}"#)])
+        await transport.route(
+            "POST", "/token",
+            [.json(200, tokenJSON(access: "stale-access", refresh: "stale-refresh"))],
+            bodyContains: "grant_type=refresh_token", hold: answer)
+        await transport.route(
+            "GET", "openidconnect.googleapis.com/v1/userinfo",
+            [.json(200, #"{"sub": "1", "email": "new@example.com", "email_verified": true}"#)])
         let session = makeSession(store: store, transport: transport, openURL: browser())
         let refresh = Task { try await session.validAccessToken() }
         try await waitForRequest(transport, containing: "/token", body: "grant_type=refresh_token")
@@ -316,7 +424,9 @@ struct GoogleAuthSessionTests {
         answerNow.yield(())
         #expect(try await refresh.value == "fresh-access")
         let saved = try #require(try store.load())
-        #expect(saved.refreshToken == "fresh-refresh" && saved.accessToken == "fresh-access" && saved.email == "new@example.com")
+        #expect(
+            saved.refreshToken == "fresh-refresh" && saved.accessToken == "fresh-access"
+                && saved.email == "new@example.com")
         #expect(try await session.validAccessToken() == "fresh-access")
     }
 
@@ -328,14 +438,17 @@ struct GoogleAuthSessionTests {
             func delete() throws {}
         }
         let transport = FakeHTTPTransport()
-        let session = GoogleAuthSession(oauth: GoogleOAuthClient(config: testConfig, transport: transport), store: BrokenStore(), openURL: { _ in false }, now: { now })
+        let session = GoogleAuthSession(
+            oauth: GoogleOAuthClient(config: testConfig, transport: transport),
+            store: BrokenStore(), openURL: { _ in false }, now: { now })
         #expect(try await session.signOut() == false)
         #expect(await transport.requests.isEmpty)
     }
 
     @Test("Token responses never print their tokens")
     func tokenResponseRedaction() {
-        let response = GoogleTokenResponse(accessToken: "AT-secret", refreshToken: "RT-secret", expiresIn: 60, scopes: ["s"])
+        let response = GoogleTokenResponse(
+            accessToken: "AT-secret", refreshToken: "RT-secret", expiresIn: 60, scopes: ["s"])
         for text in ["\(response)", String(reflecting: response)] {
             #expect(!text.contains("AT-secret") && !text.contains("RT-secret"))
         }
@@ -344,13 +457,16 @@ struct GoogleAuthSessionTests {
     @Test("Without stored credentials the session is not signed in")
     func notSignedIn() async throws {
         let session = makeSession(store: InMemoryTokenStore(), transport: FakeHTTPTransport())
-        await #expect(throws: GoogleAuthError.notSignedIn) { _ = try await session.validAccessToken() }
+        await #expect(throws: GoogleAuthError.notSignedIn) {
+            _ = try await session.validAccessToken()
+        }
         #expect(try await session.currentAccount() == nil)
     }
 
     @Test("currentAccount reports the stored email and scopes")
     func currentAccount() async throws {
-        let session = makeSession(store: InMemoryTokenStore(storedToken()), transport: FakeHTTPTransport())
+        let session = makeSession(
+            store: InMemoryTokenStore(storedToken()), transport: FakeHTTPTransport())
         let account = try await session.currentAccount()
         #expect(account == GoogleAccount(email: "me@example.com", grantedScopes: GoogleScopes.all))
     }
@@ -362,14 +478,19 @@ struct GoogleAuthSessionTests {
         tamperState: Bool = false, error: String? = nil, captured: Capture? = nil
     ) -> @Sendable (URL) async -> Bool {
         { url in
-            let query = Dictionary(uniqueKeysWithValues: (URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []).map { ($0.name, $0.value ?? "") })
+            let query = Dictionary(
+                uniqueKeysWithValues: (URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                    .queryItems ?? []).map { ($0.name, $0.value ?? "") })
             await captured?.set(query)
             guard let redirect = query["redirect_uri"] else { return false }
             let state = tamperState ? "forged" : (query["state"] ?? "")
             let tail = error.map { "error=\($0)&state=\(state)" } ?? "code=the-code&state=\(state)"
             let configuration = URLSessionConfiguration.ephemeral
             configuration.connectionProxyDictionary = [:]
-            Task { _ = try? await URLSession(configuration: configuration).data(from: URL(string: "\(redirect)/?\(tail)")!) }
+            Task {
+                _ = try? await URLSession(configuration: configuration).data(
+                    from: URL(string: "\(redirect)/?\(tail)")!)
+            }
             return true
         }
     }
@@ -381,17 +502,24 @@ struct GoogleAuthSessionTests {
 
     private func signInTransport(scope: String? = nil) async -> FakeHTTPTransport {
         let transport = FakeHTTPTransport()
-        await transport.route("POST", "/token", [.json(200, tokenJSON(access: "fresh-access", refresh: "fresh-refresh", scope: scope))])
-        await transport.route("GET", "openidconnect.googleapis.com/v1/userinfo", [.json(200, #"{"sub": "1", "email": "me@example.com", "email_verified": true}"#)])
+        await transport.route(
+            "POST", "/token",
+            [.json(200, tokenJSON(access: "fresh-access", refresh: "fresh-refresh", scope: scope))])
+        await transport.route(
+            "GET", "openidconnect.googleapis.com/v1/userinfo",
+            [.json(200, #"{"sub": "1", "email": "me@example.com", "email_verified": true}"#)])
         return transport
     }
 
-    @Test("Sign-in opens the browser, exchanges the code with the matching verifier, and stores token and email")
+    @Test(
+        "Sign-in opens the browser, exchanges the code with the matching verifier, and stores token and email"
+    )
     func signIn() async throws {
         let store = InMemoryTokenStore()
         let transport = await signInTransport()
         let capture = Capture()
-        let session = makeSession(store: store, transport: transport, openURL: browser(captured: capture))
+        let session = makeSession(
+            store: store, transport: transport, openURL: browser(captured: capture))
         let account = try await session.signIn()
 
         #expect(account == GoogleAccount(email: "me@example.com", grantedScopes: GoogleScopes.all))
@@ -403,7 +531,8 @@ struct GoogleAuthSessionTests {
         let exchange = try #require(await transport.requests(containing: "/token").first)
         #expect(exchange.form["code"] == "the-code")
         let challenge = await capture.query["code_challenge"]
-        #expect(PKCE.challenge(forVerifier: try #require(exchange.form["code_verifier"])) == challenge)
+        #expect(
+            PKCE.challenge(forVerifier: try #require(exchange.form["code_verifier"])) == challenge)
         #expect(exchange.form["redirect_uri"] == (await capture.query["redirect_uri"]))
         let profile = try #require(await transport.requests(containing: "/userinfo").first)
         #expect(profile.headers["Authorization"] == "Bearer fresh-access")
@@ -416,7 +545,8 @@ struct GoogleAuthSessionTests {
         let store = InMemoryTokenStore()
         let transport = FakeHTTPTransport()
         await transport.route("POST", "/token", [.json(200, tokenJSON())])
-        await transport.route("GET", "/userinfo", [.json(403, #"{"error": {"code": 403, "message": "no"}}"#)])
+        await transport.route(
+            "GET", "/userinfo", [.json(403, #"{"error": {"code": 403, "message": "no"}}"#)])
         let session = makeSession(store: store, transport: transport, openURL: browser())
         let account = try await session.signIn()
         #expect(account.email == nil)
@@ -427,7 +557,9 @@ struct GoogleAuthSessionTests {
     func signInStateMismatch() async throws {
         let store = InMemoryTokenStore()
         let transport = await signInTransport()
-        let session = makeSession(store: store, transport: transport, openURL: browser(tamperState: true), timeout: .milliseconds(300))
+        let session = makeSession(
+            store: store, transport: transport, openURL: browser(tamperState: true),
+            timeout: .milliseconds(300))
         await #expect(throws: GoogleAuthError.timedOut) { _ = try await session.signIn() }
         #expect(await transport.requests.isEmpty)
         #expect(try store.load() == nil)
@@ -435,25 +567,34 @@ struct GoogleAuthSessionTests {
 
     @Test("Declining consent aborts sign-in")
     func signInDenied() async throws {
-        let session = makeSession(store: InMemoryTokenStore(), transport: await signInTransport(), openURL: browser(error: "access_denied"))
-        await #expect(throws: GoogleAuthError.authorizationDenied("access_denied")) { _ = try await session.signIn() }
+        let session = makeSession(
+            store: InMemoryTokenStore(), transport: await signInTransport(),
+            openURL: browser(error: "access_denied"))
+        await #expect(throws: GoogleAuthError.authorizationDenied("access_denied")) {
+            _ = try await session.signIn()
+        }
     }
 
     @Test("A browser that cannot be opened aborts sign-in")
     func browserFails() async throws {
-        let session = makeSession(store: InMemoryTokenStore(), transport: await signInTransport(), openURL: { _ in false })
+        let session = makeSession(
+            store: InMemoryTokenStore(), transport: await signInTransport(), openURL: { _ in false }
+        )
         await #expect(throws: GoogleAuthError.browserUnavailable) { _ = try await session.signIn() }
     }
 
     @Test("Sign-in times out if the browser never calls back")
     func signInTimeout() async throws {
-        let session = makeSession(store: InMemoryTokenStore(), transport: await signInTransport(), openURL: { _ in true }, timeout: .milliseconds(150))
+        let session = makeSession(
+            store: InMemoryTokenStore(), transport: await signInTransport(), openURL: { _ in true },
+            timeout: .milliseconds(150))
         await #expect(throws: GoogleAuthError.timedOut) { _ = try await session.signIn() }
     }
 
     @Test("Cancelling the task cancels sign-in")
     func signInCancelled() async throws {
-        let session = makeSession(store: InMemoryTokenStore(), transport: await signInTransport(), openURL: { _ in true })
+        let session = makeSession(
+            store: InMemoryTokenStore(), transport: await signInTransport(), openURL: { _ in true })
         let task = Task { try await session.signIn() }
         try await Task.sleep(for: .milliseconds(150))
         task.cancel()
@@ -465,7 +606,9 @@ struct GoogleAuthSessionTests {
         let store = InMemoryTokenStore()
         let transport = await signInTransport(scope: GoogleScopes.otherContactsReadonly)
         let session = makeSession(store: store, transport: transport, openURL: browser())
-        await #expect(throws: GoogleAuthError.missingScopes([GoogleScopes.contacts])) { _ = try await session.signIn() }
+        await #expect(throws: GoogleAuthError.missingScopes([GoogleScopes.contacts])) {
+            _ = try await session.signIn()
+        }
         #expect(try store.load() == nil)
     }
 
@@ -478,12 +621,17 @@ struct GoogleAuthSessionTests {
         await transport.route("POST", "/revoke", [.json(200)])
         let session = makeSession(store: store, transport: transport)
         #expect(try await session.signOut() == true)
-        #expect(await transport.requests(containing: "/revoke").first?.form == ["token": "refresh-1"])
+        #expect(
+            await transport.requests(containing: "/revoke").first?.form == ["token": "refresh-1"])
         #expect(try store.load() == nil)
-        await #expect(throws: GoogleAuthError.notSignedIn) { _ = try await session.validAccessToken() }
+        await #expect(throws: GoogleAuthError.notSignedIn) {
+            _ = try await session.validAccessToken()
+        }
     }
 
-    @Test("If revocation fails (offline), the local credentials are still removed and the result says so")
+    @Test(
+        "If revocation fails (offline), the local credentials are still removed and the result says so"
+    )
     func signOutOffline() async throws {
         let store = InMemoryTokenStore(storedToken())
         let session = makeSession(store: store, transport: FakeHTTPTransport())
@@ -503,7 +651,9 @@ struct KeychainTokenStoreTests {
         #expect(query[kSecAttrSynchronizable as String] as? Bool == false)
         #expect(query[kSecAttrAccessGroup as String] == nil)
         #expect(query[kSecUseDataProtectionKeychain as String] == nil)
-        #expect(KeychainTokenStore(service: "svc.test").query(account: nil)[kSecAttrAccount as String] == nil)
+        #expect(
+            KeychainTokenStore(service: "svc.test").query(account: nil)[kSecAttrAccount as String]
+                == nil)
         #expect(KeychainTokenStore.defaultService == "dev.dividedby.contactbridge.google")
     }
 }

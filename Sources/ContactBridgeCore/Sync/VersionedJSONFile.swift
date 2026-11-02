@@ -44,7 +44,9 @@ struct VersionedJSONFile<Contents: VersionedFileContents>: Sendable {
         let data: Data
         do {
             data = try Data(contentsOf: url)
-        } catch let error as CocoaError where error.code == .fileReadNoSuchFile || error.code == .fileNoSuchFile {
+        } catch let error as CocoaError
+            where error.code == .fileReadNoSuchFile || error.code == .fileNoSuchFile
+        {
             return nil
         } catch {
             throw SyncFileError.unreadable(file: name, reason: error.localizedDescription)
@@ -53,7 +55,9 @@ struct VersionedJSONFile<Contents: VersionedFileContents>: Sendable {
         decoder.dateDecodingStrategy = .iso8601
         do {
             let header = try decoder.decode(Header.self, from: data)
-            guard header.version == Contents.currentVersion else { throw SyncFileError.unsupportedVersion(file: name, version: header.version) }
+            guard header.version == Contents.currentVersion else {
+                throw SyncFileError.unsupportedVersion(file: name, version: header.version)
+            }
             return try decoder.decode(Contents.self, from: data)
         } catch let error as SyncFileError {
             throw error
@@ -66,14 +70,17 @@ struct VersionedJSONFile<Contents: VersionedFileContents>: Sendable {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try encoder.encode(contents).write(to: url, options: .atomic)
     }
 
     func remove() throws {
         do {
             try FileManager.default.removeItem(at: url)
-        } catch let error as CocoaError where error.code == .fileNoSuchFile || error.code == .fileReadNoSuchFile {
+        } catch let error as CocoaError
+            where error.code == .fileNoSuchFile || error.code == .fileReadNoSuchFile
+        {
             return
         }
     }

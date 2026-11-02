@@ -1,11 +1,15 @@
 import Foundation
 import Testing
+
 @testable import ContactBridgeCore
 
 struct MenuBarStateTests {
     private static let at = Date(timeIntervalSince1970: 1_800_000_000)
 
-    private func state(_ status: SyncStatus, approved: Bool = true, reviews: Int = 0, ran: Bool = true, halted: String? = nil) -> MenuBarState {
+    private func state(
+        _ status: SyncStatus, approved: Bool = true, reviews: Int = 0, ran: Bool = true,
+        halted: String? = nil
+    ) -> MenuBarState {
         var snapshot = SyncSnapshot()
         snapshot.status = status
         snapshot.firstSyncApproved = approved
@@ -15,7 +19,9 @@ struct MenuBarStateTests {
             report.halted = halted
             snapshot.lastRun = SyncRunSummary(finishedAt: Self.at, report: report)
         }
-        snapshot.reviewItems = (0..<reviews).map { SyncReviewSummary(id: "r\($0)", kind: .googleEdited, name: "n", detail: nil, fields: []) }
+        snapshot.reviewItems = (0..<reviews).map {
+            SyncReviewSummary(id: "r\($0)", kind: .googleEdited, name: "n", detail: nil, fields: [])
+        }
         return MenuBarState(snapshot, timeText: { _ in "3:41 PM" })
     }
 
@@ -24,12 +30,16 @@ struct MenuBarStateTests {
         #expect(state(.idle).statusLine == "Synced at 3:41 PM")
         #expect(state(.running(.readingGoogle)).statusLine == "Syncing…")
         #expect(state(.paused(.user)).statusLine == "Paused")
-        #expect(state(.paused(.needsConfirmation(summary: "x"))).statusLine == "Waiting for your OK")
+        #expect(
+            state(.paused(.needsConfirmation(summary: "x"))).statusLine == "Waiting for your OK")
         #expect(state(.paused(.accountChanged)).statusLine == "Paused: the Google account changed")
-        #expect(state(.paused(.containerChanged)).statusLine == "Paused: the iCloud account changed")
+        #expect(
+            state(.paused(.containerChanged)).statusLine == "Paused: the iCloud account changed")
         #expect(state(.disabled("another copy")).statusLine == "Syncing is off")
         #expect(state(.notStarted, approved: false, ran: false).statusLine == "Starting…")
-        #expect(state(.notReady("sign in"), approved: false, ran: false).statusLine == "Finish setup in Contact Bridge")
+        #expect(
+            state(.notReady("sign in"), approved: false, ran: false).statusLine
+                == "Finish setup in Contact Bridge")
         #expect(state(.failed("offline")).statusLine == "Last sync failed, will retry")
         #expect(state(.idle, approved: false, ran: false).statusLine == "Syncing has not started")
         #expect(state(.idle, ran: false).statusLine == "Waiting for the first sync")
@@ -67,7 +77,9 @@ struct MenuBarStateTests {
         #expect(!paused.canSyncNow && paused.pauseControl == .resume)
 
         let confirming = state(.paused(.needsConfirmation(summary: "x")))
-        #expect(!confirming.canSyncNow && confirming.needsConfirmation && confirming.pauseControl == .pause)
+        #expect(
+            !confirming.canSyncNow && confirming.needsConfirmation
+                && confirming.pauseControl == .pause)
 
         let accountPause = state(.paused(.accountChanged))
         #expect(accountPause.canSyncNow && accountPause.pauseControl == .pause)
@@ -78,7 +90,10 @@ struct MenuBarStateTests {
         let notApproved = state(.idle, approved: false, ran: false)
         #expect(!notApproved.canSyncNow && notApproved.pauseControl == .none)
 
-        for off in [state(.disabled("x"), approved: false, ran: false), state(.notStarted, approved: false, ran: false)] {
+        for off in [
+            state(.disabled("x"), approved: false, ran: false),
+            state(.notStarted, approved: false, ran: false),
+        ] {
             #expect(!off.canSyncNow && off.pauseControl == .none)
         }
     }
@@ -86,10 +101,13 @@ struct MenuBarStateTests {
     @Test("Times read as a time of day today and with the date on other days")
     func timeText() {
         let calendar = Calendar(identifier: .gregorian)
-        let today = MenuBarState.defaultTimeText(Self.at, now: Self.at.addingTimeInterval(60), calendar: calendar)
-        let earlier = MenuBarState.defaultTimeText(Self.at, now: Self.at.addingTimeInterval(3 * 86_400), calendar: calendar)
+        let today = MenuBarState.defaultTimeText(
+            Self.at, now: Self.at.addingTimeInterval(60), calendar: calendar)
+        let earlier = MenuBarState.defaultTimeText(
+            Self.at, now: Self.at.addingTimeInterval(3 * 86_400), calendar: calendar)
         #expect(today == Self.at.formatted(date: .omitted, time: .shortened))
-        #expect(earlier == Self.at.formatted(date: .abbreviated, time: .shortened) && earlier != today)
+        #expect(
+            earlier == Self.at.formatted(date: .abbreviated, time: .shortened) && earlier != today)
     }
 }
 
@@ -128,6 +146,7 @@ struct ActivationRulesTests {
         #expect(!ActivationRules.shouldHideForLaunch(window, isOnScreen: false, suppressing: true))
         #expect(!ActivationRules.shouldHideForLaunch(window, isOnScreen: true, suppressing: false))
         #expect(!ActivationRules.shouldHideForLaunch(panel, isOnScreen: true, suppressing: true))
-        #expect(!ActivationRules.shouldHideForLaunch(statusItem, isOnScreen: true, suppressing: true))
+        #expect(
+            !ActivationRules.shouldHideForLaunch(statusItem, isOnScreen: true, suppressing: true))
     }
 }

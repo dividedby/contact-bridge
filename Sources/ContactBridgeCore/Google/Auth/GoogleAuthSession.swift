@@ -45,7 +45,8 @@ public actor GoogleAuthSession: GoogleAccessTokenProviding {
 
     /// - Parameter openURL: opens the authorization URL in the user's default browser; false if it could not.
     public init(
-        oauth: GoogleOAuthClient, store: any TokenStore, openURL: @escaping @Sendable (URL) async -> Bool,
+        oauth: GoogleOAuthClient, store: any TokenStore,
+        openURL: @escaping @Sendable (URL) async -> Bool,
         now: @escaping @Sendable () -> Date = { Date() }, scopes: [String] = GoogleScopes.all,
         redirectTimeout: Duration = .seconds(300)
     ) {
@@ -93,7 +94,10 @@ public actor GoogleAuthSession: GoogleAccessTokenProviding {
             cached = try store.load()
             loaded = true
         }
-        guard let cached else { throw refreshTokenRevoked ? GoogleAuthError.needsReauthorization : GoogleAuthError.notSignedIn }
+        guard let cached else {
+            throw refreshTokenRevoked
+                ? GoogleAuthError.needsReauthorization : GoogleAuthError.notSignedIn
+        }
         return cached
     }
 
@@ -119,14 +123,18 @@ public actor GoogleAuthSession: GoogleAccessTokenProviding {
         return access
     }
 
-    private func performRefresh(_ token: StoredGoogleToken, generation started: Int) async throws -> StoredGoogleToken {
+    private func performRefresh(_ token: StoredGoogleToken, generation started: Int) async throws
+        -> StoredGoogleToken
+    {
         // Already stale before it began (sign-out or sign-in landed first): do not spend the dropped refresh token.
         guard started == generation else {
             if let cached { return cached }
             throw GoogleAuthError.notSignedIn
         }
         let result: Result<GoogleTokenResponse, Error>
-        do { result = .success(try await oauth.refresh(refreshToken: token.refreshToken)) } catch { result = .failure(error) }
+        do { result = .success(try await oauth.refresh(refreshToken: token.refreshToken)) } catch {
+            result = .failure(error)
+        }
 
         // The user signed out or in while this was in flight: whatever Google said is about credentials we dropped.
         guard started == generation else {
@@ -158,7 +166,9 @@ public actor GoogleAuthSession: GoogleAccessTokenProviding {
         return updated
     }
 
-    func setBeforeRefreshStarts(_ hook: (@Sendable () async -> Void)?) { beforeRefreshStarts = hook }
+    func setBeforeRefreshStarts(_ hook: (@Sendable () async -> Void)?) {
+        beforeRefreshStarts = hook
+    }
 
     /// Invalidates any refresh in flight and lets the next caller start a fresh one.
     private func startNewGeneration() {
@@ -170,7 +180,9 @@ public actor GoogleAuthSession: GoogleAccessTokenProviding {
 
     /// Opens the browser for consent, waits for the loopback redirect, and stores the resulting credentials.
     public func signIn() async throws -> GoogleAccount {
-        guard !signingIn else { throw GoogleAuthError.listenerFailed("sign-in is already in progress") }
+        guard !signingIn else {
+            throw GoogleAuthError.listenerFailed("sign-in is already in progress")
+        }
         signingIn = true
         defer { signingIn = false }
 
@@ -180,7 +192,8 @@ public actor GoogleAuthSession: GoogleAccessTokenProviding {
         let redirectURI = try await listener.start()
         let code: String
         do {
-            let url = oauth.authorizationURL(redirectURI: redirectURI, challenge: pkce.challenge, state: state, scopes: scopes)
+            let url = oauth.authorizationURL(
+                redirectURI: redirectURI, challenge: pkce.challenge, state: state, scopes: scopes)
             guard await openURL(url) else { throw GoogleAuthError.browserUnavailable }
             code = try await listener.waitForCode()
         } catch {
@@ -188,8 +201,11 @@ public actor GoogleAuthSession: GoogleAccessTokenProviding {
             throw error
         }
 
-        let response = try await oauth.exchangeCode(code, verifier: pkce.verifier, redirectURI: redirectURI)
-        guard let refreshToken = response.refreshToken else { throw GoogleAuthError.invalidResponse }
+        let response = try await oauth.exchangeCode(
+            code, verifier: pkce.verifier, redirectURI: redirectURI)
+        guard let refreshToken = response.refreshToken else {
+            throw GoogleAuthError.invalidResponse
+        }
         // Granular consent lets the user untick scopes; without the contacts scope nothing here works.
         guard response.scopes.contains(GoogleScopes.contacts) else {
             try? await oauth.revoke(token: refreshToken)
@@ -197,7 +213,8 @@ public actor GoogleAuthSession: GoogleAccessTokenProviding {
         }
         let email = await oauth.fetchAccountEmail(accessToken: response.accessToken)
         let token = StoredGoogleToken(
-            refreshToken: refreshToken, accessToken: response.accessToken, expiry: now().addingTimeInterval(response.expiresIn),
+            refreshToken: refreshToken, accessToken: response.accessToken,
+            expiry: now().addingTimeInterval(response.expiresIn),
             grantedScopes: response.scopes, email: email
         )
         startNewGeneration()
@@ -226,7 +243,7 @@ public actor GoogleAuthSession: GoogleAccessTokenProviding {
         case .success(let token):
             do { try await oauth.revoke(token: token.refreshToken) } catch { revoked = false }
         case .failure(GoogleAuthError.notSignedIn):
-            break // nothing stored, nothing to revoke
+            break  // nothing stored, nothing to revoke
         case .failure:
             revoked = false
         }

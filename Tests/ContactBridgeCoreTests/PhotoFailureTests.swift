@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+
 @testable import ContactBridgeCore
 
 /// What the photo phase does with failures: a halt stops the run like any other, permanent failures are remembered on the
@@ -17,26 +18,33 @@ struct PhotoFailureTests {
 
     private func engine(count: Int = 2) async throws -> (photos: PhotoRig, engine: EngineRig) {
         let photos = try await PhotoRig.linked(count: count)
-        let support = SyncPhotoSupport(fetcher: photos.fetcher, history: photos.photoHistory, sleep: { _ in })
+        let support = SyncPhotoSupport(
+            fetcher: photos.fetcher, history: photos.photoHistory, sleep: { _ in })
         return (photos, EngineRig(photos.base, photos: support))
     }
 
     // MARK: a halt in the photo phase
 
-    @Test("A rate limit or sign-in problem in the photo phase stops the run: summary, back-off, and no follow-up run", arguments: [
-        GoogleAPIError.rateLimited(retryAfter: nil), .unauthorized, .other(status: 403, message: "forbidden"),
-    ])
+    @Test(
+        "A rate limit or sign-in problem in the photo phase stops the run: summary, back-off, and no follow-up run",
+        arguments: [
+            GoogleAPIError.rateLimited(retryAfter: nil), .unauthorized,
+            .other(status: 403, message: "forbidden"),
+        ])
     func photoHaltStopsTheRun(error: GoogleAPIError) async throws {
         let rig = try await engine()
         defer { rig.photos.cleanUp() }
-        let carol = try await rig.photos.base.addICloudContact("Carol", "Newman", phone: "415-555-0100", note: "n")
+        let carol = try await rig.photos.base.addICloudContact(
+            "Carol", "Newman", phone: "415-555-0100", note: "n")
         try await rig.photos.setICloudPhoto(carol.sourceIdentifier, one)  // a new pair: a follow-up would be wanted
         try await rig.photos.setICloudPhoto("I1", two)
         await rig.photos.google.inject(.error(error), on: .updateContactPhoto)
         _ = await rig.engine.startAndRun()
 
         let snapshot = await rig.engine.snapshot
-        #expect(snapshot.lastRun?.created == 1 && snapshot.lastRun?.halted != nil, "the summary says the run stopped")
+        #expect(
+            snapshot.lastRun?.created == 1 && snapshot.lastRun?.halted != nil,
+            "the summary says the run stopped")
         #expect(snapshot.nextAttemptAt != nil, "a back-off was registered")
         let quiet = await rig.engine.clock.waitForSleepers(1, timeout: 5)
         #expect(quiet, "only the timer is asleep: no follow-up was asked for")
@@ -51,7 +59,8 @@ struct PhotoFailureTests {
         let rig = try await PhotoRig.linked(count: 2)
         defer { rig.cleanUp() }
         try await rig.setICloudPhoto("I1", one)
-        await rig.google.inject(.error(.other(status: 503, message: "busy")), on: .updateContactPhoto)
+        await rig.google.inject(
+            .error(.other(status: 503, message: "busy")), on: .updateContactPhoto)
 
         let report = try await rig.executor().execute(try await ops(rig))
         let reason = try #require(report.skipped.first { $0.icloudID == "I1" }?.reason)
@@ -75,12 +84,15 @@ struct PhotoFailureTests {
 
     // MARK: permanent failures on a write
 
-    @Test("A photo Google refuses is recorded on the pair, warned about once, and not tried again until a photo changes")
+    @Test(
+        "A photo Google refuses is recorded on the pair, warned about once, and not tried again until a photo changes"
+    )
     func permanentUploadFailure() async throws {
         let rig = try await PhotoRig.linked(count: 2)
         defer { rig.cleanUp() }
         try await rig.setICloudPhoto("I1", one)
-        await rig.google.inject(.error(.other(status: 400, message: "bad image")), on: .updateContactPhoto)
+        await rig.google.inject(
+            .error(.other(status: 400, message: "bad image")), on: .updateContactPhoto)
         let planned = try await ops(rig)
 
         let report = try await rig.executor().execute(planned)
@@ -88,12 +100,16 @@ struct PhotoFailureTests {
             Issue.record("expected a permanent failure")
             return
         }
-        #expect(report.isComplete && report.givenUp.count == 1 && report.leftForNextRun == 0 && report.googleWrites == 0)
+        #expect(
+            report.isComplete && report.givenUp.count == 1 && report.leftForNextRun == 0
+                && report.googleWrites == 0)
         let failure = try #require(try rig.photoBaseline("I1")?.failure)
         #expect(failure.stamp == planned.first { $0.icloudID == "I1" }?.failureStamp)
 
         let again = try await rig.look(.syncNow, fullListing: true).plan
-        #expect(!again.photoOps.contains { $0.icloudID == "I1" && $0.kind == .copyToGoogle }, "left alone")
+        #expect(
+            !again.photoOps.contains { $0.icloudID == "I1" && $0.kind == .copyToGoogle },
+            "left alone")
         #expect(again.checkpoint != nil)
 
         try await rig.setICloudPhoto("I1", two)
@@ -112,7 +128,8 @@ struct PhotoFailureTests {
         defer { rig.cleanUp() }
         try await rig.setICloudPhoto("I1", garbage)
         let op = PlannedPhotoOp(
-            icloudID: "I1", resourceName: "people/c1", kind: .copyToGoogle, baseline: PhotoBaseline(syncedAt: SyncFixtures.t0),
+            icloudID: "I1", resourceName: "people/c1", kind: .copyToGoogle,
+            baseline: PhotoBaseline(syncedAt: SyncFixtures.t0),
             expectedICloudHint: PhotoHash.sha256Hex(garbage), failureStamp: "stamp"
         )
         let report = try await rig.executor().execute([op])
@@ -141,7 +158,9 @@ struct PhotoFailureTests {
         #expect(try rig.photoBaseline("I1")?.failure != nil)
     }
 
-    @Test("A write that keeps failing for a moment saves the old photo to the history once, not once per attempt")
+    @Test(
+        "A write that keeps failing for a moment saves the old photo to the history once, not once per attempt"
+    )
     func historyOncePerOldPhoto() async throws {
         let rig = try await PhotoRig.linked(count: 2)
         defer { rig.cleanUp() }
@@ -149,7 +168,8 @@ struct PhotoFailureTests {
         try await rig.sync()
         try await rig.setICloudPhoto("I1", two)
         let planned = try await ops(rig)
-        await rig.google.inject(.error(.other(status: 500, message: "try later")), on: .updateContactPhoto, times: 2)
+        await rig.google.inject(
+            .error(.other(status: 500, message: "try later")), on: .updateContactPhoto, times: 2)
 
         for _ in 0..<2 {
             let report = try await rig.executor().execute(planned)
@@ -167,7 +187,8 @@ struct PhotoFailureTests {
         let rig = try await PhotoRig.linked(count: 2)
         defer { rig.cleanUp() }
         try await rig.setICloudPhoto("I1", one)
-        await rig.google.inject(.error(.other(status: 409, message: "aborted")), on: .updateContactPhoto)
+        await rig.google.inject(
+            .error(.other(status: 409, message: "aborted")), on: .updateContactPhoto)
         let planned = try await ops(rig)
 
         let report = try await rig.executor().execute(planned)
@@ -177,25 +198,44 @@ struct PhotoFailureTests {
         #expect(again.copiedToGoogle == 1)
     }
 
-    @Test("Classification: refused addresses, bad pictures and 4xx answers are permanent; timeouts, 5xx and rate limits are not")
+    @Test(
+        "Classification: refused addresses, bad pictures and 4xx answers are permanent; timeouts, 5xx and rate limits are not"
+    )
     func classification() {
-        #expect(PhotoErrors.isPermanent(PhotoEncodingError.tooLarge) && PhotoErrors.isPermanent(PhotoEncodingError.undecodable))
-        #expect(PhotoErrors.isPermanent(GooglePhotoError.notAllowed("host")) && PhotoErrors.isPermanent(GooglePhotoError.notAnImage))
-        #expect(PhotoErrors.isPermanent(GooglePhotoError.tooLarge) && PhotoErrors.isPermanent(GooglePhotoError.http(404)))
-        #expect(!PhotoErrors.isPermanent(GooglePhotoError.http(503)) && !PhotoErrors.isPermanent(GooglePhotoError.http(429)))
+        #expect(
+            PhotoErrors.isPermanent(PhotoEncodingError.tooLarge)
+                && PhotoErrors.isPermanent(PhotoEncodingError.undecodable))
+        #expect(
+            PhotoErrors.isPermanent(GooglePhotoError.notAllowed("host"))
+                && PhotoErrors.isPermanent(GooglePhotoError.notAnImage))
+        #expect(
+            PhotoErrors.isPermanent(GooglePhotoError.tooLarge)
+                && PhotoErrors.isPermanent(GooglePhotoError.http(404)))
+        #expect(
+            !PhotoErrors.isPermanent(GooglePhotoError.http(503))
+                && !PhotoErrors.isPermanent(GooglePhotoError.http(429)))
         #expect(PhotoErrors.isPermanent(GoogleAPIError.other(status: 400, message: "")))
-        #expect(!PhotoErrors.isPermanent(GoogleAPIError.other(status: 409, message: "aborted")), "Google's ABORTED is a retry, not a refusal")
-        #expect(!PhotoErrors.isPermanent(GoogleAPIError.other(status: 500, message: "")) && !PhotoErrors.isPermanent(URLError(.timedOut)))
-        #expect(PhotoErrors.isPermanent(ContactStoreError.photoNotSaved), "a contact whose picture file macOS lost fails every time")
+        #expect(
+            !PhotoErrors.isPermanent(GoogleAPIError.other(status: 409, message: "aborted")),
+            "Google's ABORTED is a retry, not a refusal")
+        #expect(
+            !PhotoErrors.isPermanent(GoogleAPIError.other(status: 500, message: ""))
+                && !PhotoErrors.isPermanent(URLError(.timedOut)))
+        #expect(
+            PhotoErrors.isPermanent(ContactStoreError.photoNotSaved),
+            "a contact whose picture file macOS lost fails every time")
     }
 
-    @Test("Through the engine a permanent failure does not hold the tokens back, so nothing is re-read or retried every run")
+    @Test(
+        "Through the engine a permanent failure does not hold the tokens back, so nothing is re-read or retried every run"
+    )
     func permanentFailureThroughEngine() async throws {
         let rig = try await engine()
         defer { rig.photos.cleanUp() }
         let before = try rig.engine.state
         try await rig.photos.setICloudPhoto("I1", one)
-        await rig.photos.google.inject(.error(.other(status: 400, message: "bad image")), on: .updateContactPhoto)
+        await rig.photos.google.inject(
+            .error(.other(status: 400, message: "bad image")), on: .updateContactPhoto)
         _ = await rig.engine.startAndRun()
 
         let first = await rig.engine.snapshot
@@ -206,28 +246,37 @@ struct PhotoFailureTests {
         await rig.engine.engine.syncNow()
         let second = await rig.engine.snapshot
         let writes = await rig.photos.google.photoWrites
-        #expect(second.lastRun?.warnings == first.lastRun?.warnings, "only the listing of the photo left alone")
+        #expect(
+            second.lastRun?.warnings == first.lastRun?.warnings,
+            "only the listing of the photo left alone")
         #expect(second.lastRun?.leftForNextRun == 0 && writes.isEmpty)
         await rig.engine.engine.stop()
     }
 
     // MARK: permanent failures on a read
 
-    @Test("A Google photo that is not a picture is recorded, counts as evaluated, and is not downloaded again")
+    @Test(
+        "A Google photo that is not a picture is recorded, counts as evaluated, and is not downloaded again"
+    )
     func unreadableGooglePhoto() async throws {
         let rig = try await PhotoRig.linked(count: 2)
         defer { rig.cleanUp() }
         try await rig.setGooglePhoto(1, garbage)
         let first = try await rig.look(.syncNow)
-        #expect(first.observed.unevaluated.isEmpty && first.observed.failures.keys.sorted() == ["I1"])
+        #expect(
+            first.observed.unevaluated.isEmpty && first.observed.failures.keys.sorted() == ["I1"])
         #expect(first.plan.photosUnevaluated == 0 && first.plan.checkpoint != nil)
         let marker = try #require(first.plan.photoOps.first { $0.icloudID == "I1" })
-        #expect(marker.kind == .recordBaseline && marker.baseline.failure?.stamp.hasPrefix("google:") == true)
+        #expect(
+            marker.kind == .recordBaseline
+                && marker.baseline.failure?.stamp.hasPrefix("google:") == true)
         _ = try await rig.executor().execute(first.plan.photoOps)
 
         let requested = await rig.fetcher.requested.count
         let second = try await rig.look(.syncNow, fullListing: true)
-        #expect(second.observed.failures.isEmpty && second.observed.unevaluated.isEmpty && second.observed.pairs["I1"] == nil)
+        #expect(
+            second.observed.failures.isEmpty && second.observed.unevaluated.isEmpty
+                && second.observed.pairs["I1"] == nil)
         let after = await rig.fetcher.requested.count
         #expect(after == requested, "not downloaded again")
         #expect(second.plan.checkpoint != nil && second.plan.photoReviewIsComplete)
@@ -238,7 +287,9 @@ struct PhotoFailureTests {
         #expect(third.observed.pairs["I1"]?.seen.google != nil && third.observed.failures.isEmpty)
     }
 
-    @Test("A Google photo that is gone (404) is permanent; one that fails with a 503 is only deferred")
+    @Test(
+        "A Google photo that is gone (404) is permanent; one that fails with a 503 is only deferred"
+    )
     func downloadStatuses() async throws {
         let rig = try await PhotoRig.linked(count: 2)
         defer { rig.cleanUp() }
@@ -258,7 +309,9 @@ struct PhotoFailureTests {
         defer { rig.cleanUp() }
         try await rig.setICloudPhoto("I1", garbage)
         let first = try await rig.look(.syncNow)
-        #expect(first.observed.failures["I1"]?.stamp == "icloud:" + PhotoHash.sha256Hex(garbage) && first.plan.photosUnevaluated == 0)
+        #expect(
+            first.observed.failures["I1"]?.stamp == "icloud:" + PhotoHash.sha256Hex(garbage)
+                && first.plan.photosUnevaluated == 0)
         _ = try await rig.executor().execute(first.plan.photoOps)
 
         let reads = rig.store.photoReads.data
@@ -270,30 +323,40 @@ struct PhotoFailureTests {
 
     private func question(_ id: String, _ name: String) -> ReviewItem {
         ReviewItem(
-            candidate: ReviewCandidate(kind: .photoConflict, icloudID: id, resourceName: name, photoStamp: "h|k", photoReason: .bothChanged),
+            candidate: ReviewCandidate(
+                kind: .photoConflict, icloudID: id, resourceName: name, photoStamp: "h|k",
+                photoReason: .bothChanged),
             pinned: false, at: SyncFixtures.t0
         )
     }
 
-    @Test("A stored photo question survives a run that skipped or could not read its pair; one whose pair was judged is dropped")
+    @Test(
+        "A stored photo question survives a run that skipped or could not read its pair; one whose pair was judged is dropped"
+    )
     func questionsOfUnjudgedPairsStay() async throws {
         let rig = try await PhotoRig.linked(count: 3)
         defer { rig.cleanUp() }
         try await rig.setGooglePhoto(1, garbage)
         try await rig.setICloudPhoto("I2", garbage)
-        let items = [question("I1", "people/c1"), question("I2", "people/c2"), question("I3", "people/c3")]
+        let items = [
+            question("I1", "people/c1"), question("I2", "people/c2"), question("I3", "people/c3"),
+        ]
 
         // This run cannot read two photos for the first time.
         let first = try await rig.look(.syncNow, fullListing: true)
         try #require(first.plan.photoReviewIsComplete && first.observed.failures.count == 2)
         var list = ReviewList(items: items)
         _ = list.reconcile(with: first.plan, ignoredGoogle: [], at: SyncFixtures.t0)
-        #expect(list.items.compactMap(\.icloudID).sorted() == ["I1", "I2"], "I3 was judged, has no question to ask, and goes")
+        #expect(
+            list.items.compactMap(\.icloudID).sorted() == ["I1", "I2"],
+            "I3 was judged, has no question to ask, and goes")
 
         // The next one skips them, for they failed the same way before.
         _ = try await rig.executor().execute(first.plan.photoOps)
         let second = try await rig.look(.syncNow, fullListing: true)
-        try #require(second.plan.photoReviewIsComplete && second.observed.failures.isEmpty && second.observed.pairs.keys.sorted() == ["I3"])
+        try #require(
+            second.plan.photoReviewIsComplete && second.observed.failures.isEmpty
+                && second.observed.pairs.keys.sorted() == ["I3"])
         list = ReviewList(items: items)
         _ = list.reconcile(with: second.plan, ignoredGoogle: [], at: SyncFixtures.t0)
         #expect(list.items.compactMap(\.icloudID).sorted() == ["I1", "I2"])
@@ -305,7 +368,9 @@ struct PhotoFailureTests {
         #expect(list.items.compactMap(\.icloudID) == ["I2"])
     }
 
-    @Test("An unreadable profile photo drops only the profile: Google's own photo still replaces the profile copy in iCloud")
+    @Test(
+        "An unreadable profile photo drops only the profile: Google's own photo still replaces the profile copy in iCloud"
+    )
     func unreadableProfilePhoto() async throws {
         let rig = try await PhotoRig.linked(count: 2)
         defer { rig.cleanUp() }
@@ -313,7 +378,8 @@ struct PhotoFailureTests {
         try rig.base.stateStore.update {
             $0.useGoogleProfilePhotos = true
             $0.baselines["I1"]?.photo = PhotoBaseline(
-                icloud: fingerprint, googleProfile: fingerprint, icloudHint: PhotoHash.sha256Hex(one), googleProfileKey: "old-profile-key",
+                icloud: fingerprint, googleProfile: fingerprint,
+                icloudHint: PhotoHash.sha256Hex(one), googleProfileKey: "old-profile-key",
                 icloudOrigin: .googleProfile, syncedAt: SyncFixtures.t0
             )
         }
@@ -327,44 +393,58 @@ struct PhotoFailureTests {
         #expect(failure.stamp.hasPrefix("profile:"))
         #expect(look.plan.photosUnevaluated == 0)
         let copy = try #require(look.plan.photoOps.first { $0.icloudID == "I1" })
-        #expect(copy.kind == .copyToICloud(source: .googleContact) && copy.baseline.icloudOrigin == .user)
-        #expect(copy.baseline.failure?.stamp == failure.stamp, "the unreadable profile photo is remembered on the same baseline")
+        #expect(
+            copy.kind == .copyToICloud(source: .googleContact)
+                && copy.baseline.icloudOrigin == .user)
+        #expect(
+            copy.baseline.failure?.stamp == failure.stamp,
+            "the unreadable profile photo is remembered on the same baseline")
         #expect(look.plan.photoOps.filter { $0.icloudID == "I1" }.count == 1)
 
         _ = try await rig.executor().execute(look.plan.photoOps)
         let requested = await rig.fetcher.requested.count
         let again = try await rig.look(.syncNow, fullListing: true)
         let after = await rig.fetcher.requested.count
-        #expect(again.observed.failures.isEmpty && after == requested, "the profile photo is not downloaded again")
+        #expect(
+            again.observed.failures.isEmpty && after == requested,
+            "the profile photo is not downloaded again")
     }
 
     @Test("Photos given up on are one line per reason naming every contact")
     func givenUpLines() {
         let lost = "macOS Contacts could not save this contact's photo"
         let many = (1...12).map { (name: "Person \($0)", message: lost) }
-        let lines = PhotoNotice.lines(many + [(name: "Ada", message: "bad image")], couldNotBe: "synced")
-        #expect(lines == [
-            "A contact photo could not be synced and is left alone until it changes (Ada): bad image",
-            "12 contact photos could not be synced and are left alone until a photo changes (Person 1, Person 2, Person 3, Person 4, "
-                + "Person 5, Person 6, Person 7, Person 8, Person 9, Person 10, Person 11, Person 12): \(lost)",
-        ])
+        let lines = PhotoNotice.lines(
+            many + [(name: "Ada", message: "bad image")], couldNotBe: "synced")
+        #expect(
+            lines == [
+                "A contact photo could not be synced and is left alone until it changes (Ada): bad image",
+                "12 contact photos could not be synced and are left alone until a photo changes (Person 1, Person 2, Person 3, Person 4, "
+                    + "Person 5, Person 6, Person 7, Person 8, Person 9, Person 10, Person 11, Person 12): \(lost)",
+            ])
         #expect(PhotoNotice.lines([], couldNotBe: "read").isEmpty)
     }
 
-    @Test("A photo given up on is named in every run summary until it changes, and not counted as tried again next run")
+    @Test(
+        "A photo given up on is named in every run summary until it changes, and not counted as tried again next run"
+    )
     func givenUpInRunSummary() async throws {
         let rig = try await PhotoRig.linked(count: 2)
         defer { rig.cleanUp() }
-        let support = SyncPhotoSupport(fetcher: rig.fetcher, history: rig.photoHistory, sleep: { _ in })
+        let support = SyncPhotoSupport(
+            fetcher: rig.fetcher, history: rig.photoHistory, sleep: { _ in })
         let engine = EngineRig(rig.base, photos: support)
         try await rig.setICloudPhoto("I1", one)
-        await rig.google.inject(.error(.other(status: 400, message: "bad image")), on: .updateContactPhoto)
+        await rig.google.inject(
+            .error(.other(status: 400, message: "bad image")), on: .updateContactPhoto)
         _ = await engine.startAndRun()
 
         let run = try #require(await engine.snapshot.lastRun)
         let name = try #require(try rig.state.baselines["I1"]?.icloud.displayName)
         let lines = run.warnings.filter { $0.contains("could not be synced") }
-        #expect(lines.count == 1 && lines.first?.contains("(\(name))") == true && lines.first?.contains("bad image") == true)
+        #expect(
+            lines.count == 1 && lines.first?.contains("(\(name))") == true
+                && lines.first?.contains("bad image") == true)
         #expect(run.leftForNextRun == 0, "a photo given up on is not tried again next run")
 
         // The next run does not try it again, but still lists it, until a photo changes.
@@ -373,7 +453,9 @@ struct PhotoFailureTests {
         #expect(next.warnings.filter { $0.contains("could not be synced") } == lines)
         try await rig.setICloudPhoto("I1", two)
         await engine.engine.syncNow()
-        #expect(await engine.snapshot.lastRun?.warnings.contains { $0.contains("could not be synced") } == false)
+        #expect(
+            await engine.snapshot.lastRun?.warnings.contains { $0.contains("could not be synced") }
+                == false)
         await engine.engine.stop()
     }
 }

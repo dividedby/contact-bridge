@@ -48,7 +48,10 @@ public final class InMemoryContactStore: ContactStoring {
         grantsAccess: Bool = true,
         containerID: String? = "mem-container"
     ) {
-        state = Mutex(State(records: records, photos: photos, authorization: authorization, containerID: containerID))
+        state = Mutex(
+            State(
+                records: records, photos: photos, authorization: authorization,
+                containerID: containerID))
         self.grantsAccess = grantsAccess
     }
 
@@ -56,21 +59,29 @@ public final class InMemoryContactStore: ContactStoring {
     public var mutationLog: [StoreMutation] { state.withLock { $0.log } }
 
     /// How many `photoSignatures` calls and `photoData` calls have been made: the reads a scan that found nothing new avoids.
-    public var photoReads: (signatures: Int, data: Int) { state.withLock { ($0.signatureReads, $0.dataReads) } }
+    public var photoReads: (signatures: Int, data: Int) {
+        state.withLock { ($0.signatureReads, $0.dataReads) }
+    }
 
     /// Simulates the user switching to another account's container.
     public func setContainerID(_ id: String?) { state.withLock { $0.containerID = id } }
 
     /// Simulates photo saves that report success but do not stay.
-    public func setDropsPhotoWrites(_ drops: Bool) { state.withLock { $0.dropsPhotoWrites = drops } }
+    public func setDropsPhotoWrites(_ drops: Bool) {
+        state.withLock { $0.dropsPhotoWrites = drops }
+    }
 
     /// Simulates contacts whose photo the Contacts framework cannot save (error 134092).
-    public func setRefusesPhotoWrites(_ ids: Set<String>) { state.withLock { $0.refusedPhotoIDs = ids } }
+    public func setRefusesPhotoWrites(_ ids: Set<String>) {
+        state.withLock { $0.refusedPhotoIDs = ids }
+    }
 
     /// A photo write the way the Contacts app makes it: not refused for the contacts above.
     public func setPhotoAsContactsApp(id: String, data: Data?) throws {
         try state.withLock { state in
-            guard state.records.contains(where: { $0.sourceIdentifier == id }) else { throw ContactStoreError.notFound([id]) }
+            guard state.records.contains(where: { $0.sourceIdentifier == id }) else {
+                throw ContactStoreError.notFound([id])
+            }
             state.photos[id] = data
             state.version += 1
         }
@@ -83,7 +94,9 @@ public final class InMemoryContactStore: ContactStoring {
 
     public func requestAccess() async throws -> ContactAuthorization {
         state.withLock { state in
-            if state.authorization == .notDetermined { state.authorization = grantsAccess ? .authorized : .denied }
+            if state.authorization == .notDetermined {
+                state.authorization = grantsAccess ? .authorized : .denied
+            }
             return state.authorization
         }
     }
@@ -95,7 +108,8 @@ public final class InMemoryContactStore: ContactStoring {
         }
     }
 
-    public func create(_ record: ContactRecord, backup: BackupReceipt) async throws -> ContactRecord {
+    public func create(_ record: ContactRecord, backup: BackupReceipt) async throws -> ContactRecord
+    {
         let created: ContactRecord = try state.withLock { state in
             try Self.requireAccess(state)
             var stored = record
@@ -115,7 +129,11 @@ public final class InMemoryContactStore: ContactStoring {
     public func update(_ record: ContactRecord, backup: BackupReceipt) async throws {
         try state.withLock { state in
             try Self.requireAccess(state)
-            guard let index = state.records.firstIndex(where: { $0.sourceIdentifier == record.sourceIdentifier }) else {
+            guard
+                let index = state.records.firstIndex(where: {
+                    $0.sourceIdentifier == record.sourceIdentifier
+                })
+            else {
                 throw ContactStoreError.notFound([record.sourceIdentifier])
             }
             var stored = record
@@ -144,10 +162,16 @@ public final class InMemoryContactStore: ContactStoring {
         notify()
     }
 
-    public func merge(survivor: ContactRecord, absorbing ids: [String], backup: BackupReceipt) async throws {
+    public func merge(survivor: ContactRecord, absorbing ids: [String], backup: BackupReceipt)
+        async throws
+    {
         try state.withLock { state in
             try Self.requireAccess(state)
-            guard let index = state.records.firstIndex(where: { $0.sourceIdentifier == survivor.sourceIdentifier }) else {
+            guard
+                let index = state.records.firstIndex(where: {
+                    $0.sourceIdentifier == survivor.sourceIdentifier
+                })
+            else {
                 throw ContactStoreError.notFound([survivor.sourceIdentifier])
             }
             var seen: Set<String> = [survivor.sourceIdentifier]
@@ -174,7 +198,9 @@ public final class InMemoryContactStore: ContactStoring {
             }
             for id in doomed { state.photos[id] = nil }
             state.version += 1
-            state.log.append(StoreMutation(kind: .merge, ids: [stored.sourceIdentifier] + doomed, receiptID: backup.id))
+            state.log.append(
+                StoreMutation(
+                    kind: .merge, ids: [stored.sourceIdentifier] + doomed, receiptID: backup.id))
         }
         notify()
     }
@@ -187,7 +213,8 @@ public final class InMemoryContactStore: ContactStoring {
             var signatures: [String: PhotoSignature] = [:]
             for id in ids where existing.contains(id) {
                 let photo = state.photos[id]
-                signatures[id] = PhotoSignature(hasPhoto: photo != nil, thumbnailHash: photo.map(PhotoHash.sha256Hex))
+                signatures[id] = PhotoSignature(
+                    hasPhoto: photo != nil, thumbnailHash: photo.map(PhotoHash.sha256Hex))
             }
             return signatures
         }
@@ -196,7 +223,9 @@ public final class InMemoryContactStore: ContactStoring {
     public func photoData(id: String) async throws -> Data? {
         try state.withLock { state in
             try Self.requireAccess(state)
-            guard state.records.contains(where: { $0.sourceIdentifier == id }) else { throw ContactStoreError.notFound([id]) }
+            guard state.records.contains(where: { $0.sourceIdentifier == id }) else {
+                throw ContactStoreError.notFound([id])
+            }
             state.dataReads += 1
             return state.photos[id]
         }
@@ -205,7 +234,9 @@ public final class InMemoryContactStore: ContactStoring {
     public func setPhoto(id: String, data: Data?, backup: BackupReceipt) async throws {
         try state.withLock { state in
             try Self.requireAccess(state)
-            guard state.records.contains(where: { $0.sourceIdentifier == id }) else { throw ContactStoreError.notFound([id]) }
+            guard state.records.contains(where: { $0.sourceIdentifier == id }) else {
+                throw ContactStoreError.notFound([id])
+            }
             if state.refusedPhotoIDs.contains(id) { throw ContactStoreError.photoNotSaved }
             state.photos[id] = state.dropsPhotoWrites ? nil : data
             state.version += 1
@@ -217,7 +248,9 @@ public final class InMemoryContactStore: ContactStoring {
     public func exportVCard(ids: [String]) async throws -> Data {
         let chosen: [(ContactRecord, Data?)] = try state.withLock { state in
             try Self.requireAccess(state)
-            let byID = Dictionary(state.records.map { ($0.sourceIdentifier, $0) }, uniquingKeysWith: { first, _ in first })
+            let byID = Dictionary(
+                state.records.map { ($0.sourceIdentifier, $0) },
+                uniquingKeysWith: { first, _ in first })
             let missing = ids.filter { byID[$0] == nil }
             guard missing.isEmpty else { throw ContactStoreError.notFound(missing) }
             return ids.compactMap { id in byID[id].map { ($0, state.photos[id]) } }
@@ -240,7 +273,8 @@ public final class InMemoryContactStore: ContactStoring {
     }
 
     public func changes() -> AsyncStream<Void> {
-        let (stream, continuation) = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        let (stream, continuation) = AsyncStream<Void>.makeStream(
+            bufferingPolicy: .bufferingNewest(1))
         let id = UUID()
         state.withLock { $0.subscribers[id] = continuation }
         continuation.onTermination = { [weak self] _ in
@@ -263,17 +297,23 @@ public final class InMemoryContactStore: ContactStoring {
     /// Minimal vCard 3.0, enough for previews and tests; the real adapter uses CNContactVCardSerialization.
     private static func vCard(_ record: ContactRecord, photo: Data?) -> String {
         func escape(_ text: String) -> String {
-            text.replacing("\\", with: "\\\\").replacing(";", with: "\\;").replacing(",", with: "\\,")
-                .replacing("\r\n", with: "\\n").replacing("\n", with: "\\n")
+            text.replacing("\\", with: "\\\\").replacing(";", with: "\\;").replacing(
+                ",", with: "\\,"
+            )
+            .replacing("\r\n", with: "\\n").replacing("\n", with: "\\n")
         }
         func line(_ name: String, label: String?, _ value: String) -> String {
             let type = label.flatMap { $0.isBlank ? nil : ";TYPE=\(escape($0))" } ?? ""
             return "\(name)\(type):\(escape(value))"
         }
 
-        let display = [record.givenName, record.middleName, record.familyName].filter { !$0.isBlank }.joined(separator: " ")
+        let display = [record.givenName, record.middleName, record.familyName].filter {
+            !$0.isBlank
+        }.joined(separator: " ")
         var lines = ["BEGIN:VCARD", "VERSION:3.0"]
-        lines.append("N:\(escape(record.familyName));\(escape(record.givenName));\(escape(record.middleName));;")
+        lines.append(
+            "N:\(escape(record.familyName));\(escape(record.givenName));\(escape(record.middleName));;"
+        )
         lines.append("FN:\(escape(display.isEmpty ? record.organization : display))")
         if !record.nickname.isBlank { lines.append("NICKNAME:\(escape(record.nickname))") }
         if !record.organization.isBlank { lines.append("ORG:\(escape(record.organization))") }
@@ -283,14 +323,19 @@ public final class InMemoryContactStore: ContactStoring {
         for url in record.urls { lines.append(line("URL", label: url.label, url.value)) }
         for address in record.postalAddresses {
             let a = address.value
-            let joined = ["", "", a.street, a.city, a.state, a.postalCode, a.country].map(escape).joined(separator: ";")
+            let joined = ["", "", a.street, a.city, a.state, a.postalCode, a.country].map(escape)
+                .joined(separator: ";")
             lines.append("ADR\(address.label.map { ";TYPE=\(escape($0))" } ?? ""):\(joined)")
         }
         if let birthday = record.birthday, let month = birthday.month, let day = birthday.day {
             let year = birthday.year.map { String(format: "%04d", $0) } ?? "-"
             lines.append("BDAY:\(year)-\(String(format: "%02d-%02d", month, day))")
         }
-        if let photo { lines.append("PHOTO;ENCODING=b;TYPE=\(VCardWriter.imageType(photo)):\(photo.base64EncodedString())") }
+        if let photo {
+            lines.append(
+                "PHOTO;ENCODING=b;TYPE=\(VCardWriter.imageType(photo)):\(photo.base64EncodedString())"
+            )
+        }
         lines.append("END:VCARD")
         return lines.joined(separator: "\r\n") + "\r\n"
     }

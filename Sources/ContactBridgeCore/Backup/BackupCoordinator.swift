@@ -72,10 +72,12 @@ public actor BackupCoordinator {
 
     /// For callers with a single, unnamed container.
     public init(
-        makeWriter: @escaping @Sendable () async throws -> BackupWriter, maxAge: TimeInterval = 3600,
+        makeWriter: @escaping @Sendable () async throws -> BackupWriter,
+        maxAge: TimeInterval = 3600,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
-        self.init(makeSetup: { BackupSetup(writer: try await makeWriter()) }, maxAge: maxAge, now: now)
+        self.init(
+            makeSetup: { BackupSetup(writer: try await makeWriter()) }, maxAge: maxAge, now: now)
     }
 
     /// Forget the cached receipt (the container, notes access or sign-in changed).
@@ -91,9 +93,12 @@ public actor BackupCoordinator {
     /// - Parameter maxAge: how old a reused receipt may be; the coordinator's own limit when nil. Sync's Google writes pass
     ///   24 hours, since they need a Google backup but not a minutes-old one.
     public func freshReceipt(
-        requiring requirement: BackupRequirement = BackupRequirement(containerID: nil), maxAge limit: TimeInterval? = nil
+        requiring requirement: BackupRequirement = BackupRequirement(containerID: nil),
+        maxAge limit: TimeInterval? = nil
     ) async throws -> BackupReceipt {
-        if let cached, cached.receipt.isFresh(maxAge: limit ?? maxAge, now: now()), Self.meets(requirement, cached.coverage) {
+        if let cached, cached.receipt.isFresh(maxAge: limit ?? maxAge, now: now()),
+            Self.meets(requirement, cached.coverage)
+        {
             return cached.receipt
         }
         return try await newBackup(requiring: requirement)
@@ -106,8 +111,12 @@ public actor BackupCoordinator {
         guard coverage.containerID == requirement.containerID else {
             throw BackupCoordinatorError.requirementNotMet("the selected contacts account")
         }
-        guard !requirement.needsNotes || coverage.notes else { throw BackupCoordinatorError.requirementNotMet("notes") }
-        guard !requirement.needsGoogle || coverage.google else { throw BackupCoordinatorError.requirementNotMet("your Google contacts") }
+        guard !requirement.needsNotes || coverage.notes else {
+            throw BackupCoordinatorError.requirementNotMet("notes")
+        }
+        guard !requirement.needsGoogle || coverage.google else {
+            throw BackupCoordinatorError.requirementNotMet("your Google contacts")
+        }
         return receipt
     }
 
@@ -141,7 +150,7 @@ public actor BackupCoordinator {
     private func takeBackup(joining policy: Join) async throws -> (BackupReceipt, Coverage) {
         if let running = inFlight {
             if policy.accepts(running.key) { return try await running.task.value }
-            _ = try? await running.task.value // a run for another container: let it finish, then take our own
+            _ = try? await running.task.value  // a run for another container: let it finish, then take our own
             if let again = inFlight, policy.accepts(again.key) { return try await again.task.value }
         }
         let make = makeSetup
@@ -149,9 +158,13 @@ public actor BackupCoordinator {
         let task = Task { () -> (BackupReceipt, Coverage) in
             let setup = try await make()
             let receipt = try await setup.writer.createBackup()
-            return (receipt, Coverage(
-                containerID: setup.containerID, notes: receipt.manifest.notesIncluded, google: receipt.manifest.sources.contains("google")
-            ))
+            return (
+                receipt,
+                Coverage(
+                    containerID: setup.containerID, notes: receipt.manifest.notesIncluded,
+                    google: receipt.manifest.sources.contains("google")
+                )
+            )
         }
         inFlight = (policy.key, task)
         defer { if inFlight?.task == task { inFlight = nil } }

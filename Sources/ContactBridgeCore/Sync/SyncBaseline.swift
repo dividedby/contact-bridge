@@ -20,7 +20,8 @@ public struct SyncBaseline: Sendable, Hashable, Codable {
 
     public init(
         icloud: ContactRecord, google: ContactRecord, googleEtag: String,
-        icloudNoteHash: String? = nil, googleNoteHash: String? = nil, syncedAt: Date, photo: PhotoBaseline? = nil
+        icloudNoteHash: String? = nil, googleNoteHash: String? = nil, syncedAt: Date,
+        photo: PhotoBaseline? = nil
     ) {
         self.icloud = icloud
         self.google = google
@@ -88,11 +89,15 @@ public struct SyncState: Sendable, Hashable, Codable {
     public var photoRepairVersion: Int
 
     public init(
-        version: Int = SyncState.currentVersion, baselines: [String: SyncBaseline] = [:], googleSyncToken: String? = nil,
-        fieldsVersion: String? = nil, icloudChangeToken: Data? = nil, icloudContainerID: String? = nil,
+        version: Int = SyncState.currentVersion, baselines: [String: SyncBaseline] = [:],
+        googleSyncToken: String? = nil,
+        fieldsVersion: String? = nil, icloudChangeToken: Data? = nil,
+        icloudContainerID: String? = nil,
         lastNotesReadAt: Date? = nil, googleAccount: String? = nil, ignoredGoogle: Set<String> = [],
-        keepSeparate: Set<String> = [], firstSyncApproved: Bool = false, pause: PauseReason? = nil, syncPhotos: Bool = true,
-        useGoogleProfilePhotos: Bool = false, profilePhotoOptOut: Set<String> = [], lastPhotoFullListingAt: Date? = nil,
+        keepSeparate: Set<String> = [], firstSyncApproved: Bool = false, pause: PauseReason? = nil,
+        syncPhotos: Bool = true,
+        useGoogleProfilePhotos: Bool = false, profilePhotoOptOut: Set<String> = [],
+        lastPhotoFullListingAt: Date? = nil,
         photoRepairVersion: Int = PhotoRepair.currentVersion
     ) {
         self.version = version
@@ -131,9 +136,12 @@ public struct SyncState: Sendable, Hashable, Codable {
         firstSyncApproved = try values.decode(Bool.self, forKey: .firstSyncApproved)
         pause = try values.decodeIfPresent(PauseReason.self, forKey: .pause)
         syncPhotos = try values.decodeIfPresent(Bool.self, forKey: .syncPhotos) ?? true
-        useGoogleProfilePhotos = try values.decodeIfPresent(Bool.self, forKey: .useGoogleProfilePhotos) ?? false
-        profilePhotoOptOut = try values.decodeIfPresent(Set<String>.self, forKey: .profilePhotoOptOut) ?? []
-        lastPhotoFullListingAt = try values.decodeIfPresent(Date.self, forKey: .lastPhotoFullListingAt)
+        useGoogleProfilePhotos =
+            try values.decodeIfPresent(Bool.self, forKey: .useGoogleProfilePhotos) ?? false
+        profilePhotoOptOut =
+            try values.decodeIfPresent(Set<String>.self, forKey: .profilePhotoOptOut) ?? []
+        lastPhotoFullListingAt = try values.decodeIfPresent(
+            Date.self, forKey: .lastPhotoFullListingAt)
         photoRepairVersion = try values.decodeIfPresent(Int.self, forKey: .photoRepairVersion) ?? 0
     }
 
@@ -152,8 +160,10 @@ public enum NoteHash {
     /// SHA-256 (hex) of the note with line endings unified and surrounding whitespace trimmed, since Google and Contacts
     /// disagree about both.
     public static func hash(_ note: String) -> String {
-        let text = note.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = note.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(
+            of: "\r", with: "\n"
+        )
+        .trimmingCharacters(in: .whitespacesAndNewlines)
         return SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 }

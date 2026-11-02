@@ -1,13 +1,16 @@
 import Testing
+
 @testable import ContactBridgeCore
 
 struct EmailNormalizerTests {
-    @Test("Lowercases and trims", arguments: [
-        ("  Foo@Example.COM ", "foo@example.com"),
-        ("foo@example.com", "foo@example.com"),
-        ("\tFoo@Example.com\n", "foo@example.com"),
-        ("mailto:Foo@Example.com", "foo@example.com"),
-    ])
+    @Test(
+        "Lowercases and trims",
+        arguments: [
+            ("  Foo@Example.COM ", "foo@example.com"),
+            ("foo@example.com", "foo@example.com"),
+            ("\tFoo@Example.com\n", "foo@example.com"),
+            ("mailto:Foo@Example.com", "foo@example.com"),
+        ])
     func basic(raw: String, expected: String) {
         #expect(EmailNormalizer.normalize(raw) == expected)
     }

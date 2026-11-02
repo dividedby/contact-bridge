@@ -1,19 +1,28 @@
 import Foundation
 import Testing
+
 @testable import ContactBridgeCore
 
 struct SyncBaselineTests {
     private let t0 = Date(timeIntervalSince1970: 1_800_000_000)
 
     private func baseline() -> SyncBaseline {
-        var icloud = ContactRecord(id: "I1", source: .icloud, sourceIdentifier: "I1", givenName: "Ann", familyName: "Lee")
+        var icloud = ContactRecord(
+            id: "I1", source: .icloud, sourceIdentifier: "I1", givenName: "Ann", familyName: "Lee")
         icloud.phones = [Labeled(label: "mobile", value: "(415) 555-0100")]
-        icloud.postalAddresses = [Labeled(label: "home", value: PostalAddress(street: "1 Main St", city: "Town", isoCountryCode: "us"))]
+        icloud.postalAddresses = [
+            Labeled(
+                label: "home",
+                value: PostalAddress(street: "1 Main St", city: "Town", isoCountryCode: "us"))
+        ]
         icloud.birthday = DateComponents(month: 3, day: 9)
-        var google = ContactRecord(id: "people/c1", source: .google, sourceIdentifier: "people/c1", givenName: "Ann", familyName: "Lee")
+        var google = ContactRecord(
+            id: "people/c1", source: .google, sourceIdentifier: "people/c1", givenName: "Ann",
+            familyName: "Lee")
         google.emails = [Labeled(label: nil, value: "ann@example.com")]
         return SyncBaseline(
-            icloud: icloud, google: google, googleEtag: "etag-1", icloudNoteHash: NoteHash.hash("hi"), googleNoteHash: nil, syncedAt: t0
+            icloud: icloud, google: google, googleEtag: "etag-1",
+            icloudNoteHash: NoteHash.hash("hi"), googleNoteHash: nil, syncedAt: t0
         )
     }
 
@@ -37,8 +46,10 @@ struct SyncBaselineTests {
     @Test("Sync state survives JSON with every field set")
     func stateRoundTrip() throws {
         let state = SyncState(
-            baselines: ["I1": baseline()], googleSyncToken: "tok", fieldsVersion: "fv", icloudChangeToken: Data([1, 2, 3]),
-            googleAccount: "me@example.com", ignoredGoogle: ["people/c9", "people/c8"], firstSyncApproved: true, pause: .user
+            baselines: ["I1": baseline()], googleSyncToken: "tok", fieldsVersion: "fv",
+            icloudChangeToken: Data([1, 2, 3]),
+            googleAccount: "me@example.com", ignoredGoogle: ["people/c9", "people/c8"],
+            firstSyncApproved: true, pause: .user
         )
         let decoded = try roundTrip(state)
         #expect(decoded == state)
@@ -48,7 +59,9 @@ struct SyncBaselineTests {
     @Test("A new state is empty, current-version, unapproved and not paused")
     func emptyState() throws {
         let state = SyncState()
-        #expect(state.version == SyncState.currentVersion && state.baselines.isEmpty && state.ignoredGoogle.isEmpty)
+        #expect(
+            state.version == SyncState.currentVersion && state.baselines.isEmpty
+                && state.ignoredGoogle.isEmpty)
         #expect(!state.firstSyncApproved && state.pause == nil && state.googleSyncToken == nil)
         #expect(try roundTrip(state) == state)
     }
@@ -56,7 +69,8 @@ struct SyncBaselineTests {
     @Test("Every pause reason round-trips, keeping the confirmation summary")
     func pauseReasons() throws {
         let reasons: [PauseReason] = [
-            .user, .accountChanged, .containerChanged, .googleEmpty, .notesUnavailable, .needsConfirmation(summary: "12 deletes"),
+            .user, .accountChanged, .containerChanged, .googleEmpty, .notesUnavailable,
+            .needsConfirmation(summary: "12 deletes"),
         ]
         for reason in reasons {
             let state = SyncState(pause: reason)

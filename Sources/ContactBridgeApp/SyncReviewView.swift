@@ -27,10 +27,15 @@ struct SyncReviewView: View {
                     Divider()
                     footer(detail)
                         .confirmationDialog(
-                            model.confirmingPhoto?.title ?? "", isPresented: Binding(get: { model.confirmingPhoto != nil }, set: { if !$0 { model.confirmingPhoto = nil } }),
+                            model.confirmingPhoto?.title ?? "",
+                            isPresented: Binding(
+                                get: { model.confirmingPhoto != nil },
+                                set: { if !$0 { model.confirmingPhoto = nil } }),
                             presenting: model.confirmingPhoto
                         ) { option in
-                            Button(option.title, role: .destructive) { Task { await model.applyPhoto(option) } }
+                            Button(option.title, role: .destructive) {
+                                Task { await model.applyPhoto(option) }
+                            }
                             Button("Cancel", role: .cancel) {}
                         } message: { option in
                             Text("\(option.detail) This is for \(detail.name) only.")
@@ -39,30 +44,48 @@ struct SyncReviewView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .confirmationDialog(
                     model.confirming.map { $0.question(detail.name) } ?? "",
-                    isPresented: Binding(get: { model.confirming != nil }, set: { if !$0 { model.confirming = nil } }),
+                    isPresented: Binding(
+                        get: { model.confirming != nil }, set: { if !$0 { model.confirming = nil } }
+                    ),
                     presenting: model.confirming
                 ) { confirmation in
                     switch confirmation {
                     case .deleteFromICloud:
-                        Button("Delete from iCloud", role: .destructive) { Task { await model.deleteFromICloud() } }
+                        Button("Delete from iCloud", role: .destructive) {
+                            Task { await model.deleteFromICloud() }
+                        }
                     case .keepDeleted:
-                        Button("Delete from Google", role: .destructive) { Task { await model.keepDeleted() } }
+                        Button("Delete from Google", role: .destructive) {
+                            Task { await model.keepDeleted() }
+                        }
                     case .deleteFromGoogle:
-                        Button("Delete from Google", role: .destructive) { Task { await model.deleteFromGoogle() } }
+                        Button("Delete from Google", role: .destructive) {
+                            Task { await model.deleteFromGoogle() }
+                        }
                     case .deleteFromBoth:
-                        Button("Delete from both", role: .destructive) { Task { await model.deleteFromBoth() } }
+                        Button("Delete from both", role: .destructive) {
+                            Task { await model.deleteFromBoth() }
+                        }
                     }
                     Button("Cancel", role: .cancel) {}
                 } message: { confirmation in
                     switch confirmation {
                     case .deleteFromICloud:
-                        Text("\(detail.name) was deleted in Google. A backup with notes is taken first, then the contact is deleted here. You can get it back from that backup.")
+                        Text(
+                            "\(detail.name) was deleted in Google. A backup with notes is taken first, then the contact is deleted here. You can get it back from that backup."
+                        )
                     case .keepDeleted:
-                        Text("\(detail.name) was deleted here and edited in Google since. Deleting it from Google throws those edits away. A Google backup is taken first and the change is logged.")
+                        Text(
+                            "\(detail.name) was deleted here and edited in Google since. Deleting it from Google throws those edits away. A Google backup is taken first and the change is logged."
+                        )
                     case .deleteFromGoogle:
-                        Text("\(detail.name) is only in Google. A Google backup is taken first and the change is logged, so you can get it back from that backup.")
+                        Text(
+                            "\(detail.name) is only in Google. A Google backup is taken first and the change is logged, so you can get it back from that backup."
+                        )
                     case .deleteFromBoth:
-                        Text("\(detail.name) is deleted from iCloud and from Google. A backup of both, with notes, is taken first, so you can get the contact back from it.")
+                        Text(
+                            "\(detail.name) is deleted from iCloud and from Google. A backup of both, with notes, is taken first, so you can get the contact back from it."
+                        )
                     }
                 }
             } else {
@@ -79,8 +102,12 @@ struct SyncReviewView: View {
 
     private func header(_ detail: ReviewDetail) -> some View {
         HStack(spacing: 12) {
-            Button { model.close() } label: { Label("Back", systemImage: "chevron.left") }
-                .disabled(model.isWorking)
+            Button {
+                model.close()
+            } label: {
+                Label("Back", systemImage: "chevron.left")
+            }
+            .disabled(model.isWorking)
             Text(detail.name).font(.title2).lineLimit(1)
             Text(detail.item.kind.title(photoReason: detail.item.photoReason))
                 .font(.caption.weight(.medium))
@@ -103,9 +130,11 @@ struct SyncReviewView: View {
             // resulting minimum height (~1600 pt) pushes the whole window's layout off screen.
             VStack(alignment: .leading, spacing: 2) {
                 if let reason = blockReason(detail) {
-                    Label(reason, systemImage: "exclamationmark.triangle.fill").font(.callout).foregroundStyle(.orange)
+                    Label(reason, systemImage: "exclamationmark.triangle.fill").font(.callout)
+                        .foregroundStyle(.orange)
                 }
-                Label(Self.backupCaption(kind), systemImage: "externaldrive").font(.caption).foregroundStyle(.secondary)
+                Label(Self.backupCaption(kind), systemImage: "externaldrive").font(.caption)
+                    .foregroundStyle(.secondary)
             }
             Spacer()
             if model.isWorking { ProgressView().controlSize(.small) }
@@ -138,9 +167,11 @@ struct SyncReviewView: View {
                 .disabled(disabled || model.block(for: .save) != nil || detail.draft == nil)
                 .help("Save the choices to iCloud, then copy the result to Google")
         case .newInGoogle:
-            Button("Delete from Google…", role: .destructive) { model.confirming = .deleteFromGoogle }
-                .disabled(disabled || model.block(for: .deleteFromGoogle) != nil)
-                .help("Delete this contact from Google")
+            Button("Delete from Google…", role: .destructive) {
+                model.confirming = .deleteFromGoogle
+            }
+            .disabled(disabled || model.block(for: .deleteFromGoogle) != nil)
+            .help("Delete this contact from Google")
             Button("Ignore") { Task { await model.ignore() } }
                 .disabled(disabled || model.blockReason != nil)
                 .help("Never offer this contact again. Show ignored brings it back.")
@@ -149,8 +180,10 @@ struct SyncReviewView: View {
                 .controlSize(.large)
                 .disabled(disabled || model.block(for: .importContact) != nil)
         case .deletedInGoogle:
-            Button("Delete from iCloud…", role: .destructive) { model.confirming = .deleteFromICloud }
-                .disabled(disabled || model.block(for: .deleteFromICloud) != nil)
+            Button("Delete from iCloud…", role: .destructive) {
+                model.confirming = .deleteFromICloud
+            }
+            .disabled(disabled || model.block(for: .deleteFromICloud) != nil)
             Button("Put back in Google") { Task { await model.putBack() } }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
@@ -201,28 +234,45 @@ struct SyncReviewView: View {
             if let draft = detail.draft {
                 edits(detail, draft)
             } else {
-                Label("One of the two contacts is not there any more. Go back and run Sync now.", systemImage: "questionmark.circle")
-                    .foregroundStyle(.secondary)
+                Label(
+                    "One of the two contacts is not there any more. Go back and run Sync now.",
+                    systemImage: "questionmark.circle"
+                )
+                .foregroundStyle(.secondary)
             }
         case .newInGoogle:
-            Text("This contact is in Google and not in iCloud. Import copies it (and its note) into iCloud and keeps the two in sync. Ignore leaves it out of iCloud and stops asking.")
-                .foregroundStyle(.secondary)
-            RecordComparison(left: nil, right: detail.google, leftTitle: "iCloud", rightTitle: "Google", leftNote: nil, rightNote: detail.googleNote)
-        case .deletedInGoogle:
-            Text("This contact was deleted in Google. Delete it from iCloud too, or put it back in Google as a new contact.")
-                .foregroundStyle(.secondary)
-            RecordComparison(left: detail.icloud, right: nil, leftTitle: "iCloud", rightTitle: "Google", leftNote: detail.icloudNote, rightNote: nil)
-        case .deletedInICloudEditedInGoogle:
-            Text("You deleted this contact from iCloud, but it was edited in Google since the last sync. Keep it deleted (the Google contact is deleted too), or restore it to iCloud from Google.")
-                .foregroundStyle(.secondary)
+            Text(
+                "This contact is in Google and not in iCloud. Import copies it (and its note) into iCloud and keeps the two in sync. Ignore leaves it out of iCloud and stops asking."
+            )
+            .foregroundStyle(.secondary)
             RecordComparison(
-                left: detail.googleBefore, right: detail.google, leftTitle: "Before (last sync)", rightTitle: "Now in Google", leftNote: nil, rightNote: detail.googleNote
+                left: nil, right: detail.google, leftTitle: "iCloud", rightTitle: "Google",
+                leftNote: nil, rightNote: detail.googleNote)
+        case .deletedInGoogle:
+            Text(
+                "This contact was deleted in Google. Delete it from iCloud too, or put it back in Google as a new contact."
+            )
+            .foregroundStyle(.secondary)
+            RecordComparison(
+                left: detail.icloud, right: nil, leftTitle: "iCloud", rightTitle: "Google",
+                leftNote: detail.icloudNote, rightNote: nil)
+        case .deletedInICloudEditedInGoogle:
+            Text(
+                "You deleted this contact from iCloud, but it was edited in Google since the last sync. Keep it deleted (the Google contact is deleted too), or restore it to iCloud from Google."
+            )
+            .foregroundStyle(.secondary)
+            RecordComparison(
+                left: detail.googleBefore, right: detail.google, leftTitle: "Before (last sync)",
+                rightTitle: "Now in Google", leftNote: nil, rightNote: detail.googleNote
             )
         case .possibleLink:
-            Text("These might be the same person. Link them to keep them in sync, or keep them separate and the iCloud contact is added to Google as its own.")
-                .foregroundStyle(.secondary)
+            Text(
+                "These might be the same person. Link them to keep them in sync, or keep them separate and the iCloud contact is added to Google as its own."
+            )
+            .foregroundStyle(.secondary)
             RecordComparison(
-                left: detail.icloud, right: detail.google, leftTitle: "iCloud", rightTitle: "Google", leftNote: detail.icloudNote, rightNote: detail.googleNote
+                left: detail.icloud, right: detail.google, leftTitle: "iCloud",
+                rightTitle: "Google", leftNote: detail.icloudNote, rightNote: detail.googleNote
             )
         case .photoConflict:
             photoContent(detail)
@@ -233,11 +283,14 @@ struct SyncReviewView: View {
 
     @ViewBuilder private func photoContent(_ detail: ReviewDetail) -> some View {
         if let photos = detail.photos {
-            Text(photos.draft.explanation).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Text(photos.draft.explanation).foregroundStyle(.secondary).fixedSize(
+                horizontal: false, vertical: true)
             HStack(alignment: .top, spacing: 24) {
                 photoColumn(title: "iCloud", data: photos.icloud, empty: "No photo", caption: nil)
                 if photos.draft.isAboutProfilePhoto {
-                    photoColumn(title: "Their Google profile photo", data: photos.profile, empty: "No profile photo", caption: nil)
+                    photoColumn(
+                        title: "Their Google profile photo", data: photos.profile,
+                        empty: "No profile photo", caption: nil)
                 } else {
                     photoColumn(
                         title: "Google", data: photos.google, empty: "No photo",
@@ -250,21 +303,30 @@ struct SyncReviewView: View {
             VStack(alignment: .leading, spacing: 12) {
                 ForEach(photos.draft.options) { option in
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
-                        Button(option.title, role: option.isDestructive ? .destructive : nil) { model.choosePhoto(option) }
-                            .buttonStyle(.bordered)
-                            .controlSize(.large)
-                            .disabled(model.isWorking || model.isLoading || model.block(for: .photo) != nil)
-                        Text(option.detail).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        Button(option.title, role: option.isDestructive ? .destructive : nil) {
+                            model.choosePhoto(option)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.large)
+                        .disabled(
+                            model.isWorking || model.isLoading || model.block(for: .photo) != nil)
+                        Text(option.detail).font(.caption).foregroundStyle(.secondary).fixedSize(
+                            horizontal: false, vertical: true)
                     }
                 }
             }
         } else {
-            Label("One of the two contacts is not there any more. Go back and run Sync now.", systemImage: "questionmark.circle")
-                .foregroundStyle(.secondary)
+            Label(
+                "One of the two contacts is not there any more. Go back and run Sync now.",
+                systemImage: "questionmark.circle"
+            )
+            .foregroundStyle(.secondary)
         }
     }
 
-    private func photoColumn(title: String, data: Data?, empty: String, caption: String?) -> some View {
+    private func photoColumn(title: String, data: Data?, empty: String, caption: String?)
+        -> some View
+    {
         VStack(alignment: .leading, spacing: 6) {
             Text(title).font(.headline)
             if let data, let image = NSImage(data: data) {
@@ -281,19 +343,26 @@ struct SyncReviewView: View {
                     .overlay(Text(empty).foregroundStyle(.secondary))
             }
             if let caption {
-                Text(caption).font(.caption).foregroundStyle(.secondary).frame(width: 200, alignment: .leading)
-                    .fixedSize(horizontal: false, vertical: true)
+                Text(caption).font(.caption).foregroundStyle(.secondary).frame(
+                    width: 200, alignment: .leading
+                )
+                .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
 
     @ViewBuilder private func edits(_ detail: ReviewDetail, _ draft: SyncReviewDraft) -> some View {
-        Text(detail.item.kind == .googleEdited
-            ? "This contact was edited in Google. Pick, field by field, what it should say. Your choices are saved to iCloud first, then copied back to Google."
-            : "This contact differs between iCloud and Google. Pick, field by field, what it should say. Your choices are saved to iCloud first, then copied to Google.")
-            .foregroundStyle(.secondary)
+        Text(
+            detail.item.kind == .googleEdited
+                ? "This contact was edited in Google. Pick, field by field, what it should say. Your choices are saved to iCloud first, then copied back to Google."
+                : "This contact differs between iCloud and Google. Pick, field by field, what it should say. Your choices are saved to iCloud first, then copied to Google."
+        )
+        .foregroundStyle(.secondary)
         if draft.isSettled {
-            Label("The two sides agree now. Saving just records that.", systemImage: "checkmark.circle").foregroundStyle(.green)
+            Label(
+                "The two sides agree now. Saving just records that.",
+                systemImage: "checkmark.circle"
+            ).foregroundStyle(.green)
         } else {
             Button("Use iCloud for everything") { model.chooseICloudEverywhere() }
                 .help("iCloud's values win; entries only Google has stay in Google")
@@ -307,7 +376,11 @@ struct SyncReviewView: View {
             .foregroundStyle(.secondary)
             Divider()
 
-            ForEach(draft.singleRows.filter { $0.differs || !$0.icloudText.isEmpty || !$0.googleText.isEmpty }) { row in
+            ForEach(
+                draft.singleRows.filter {
+                    $0.differs || !$0.icloudText.isEmpty || !$0.googleText.isEmpty
+                }
+            ) { row in
                 line(
                     Text(row.field.label).font(.callout.weight(.medium)),
                     valueText(row.icloudText, highlighted: row.needsChoice),
@@ -321,7 +394,8 @@ struct SyncReviewView: View {
                 Text(group.field.label).font(.callout.weight(.medium))
                 ForEach(group.rows) { row in
                     line(
-                        Text(row.status.title).font(.caption).foregroundStyle(row.status == .both ? .tertiary : .secondary),
+                        Text(row.status.title).font(.caption).foregroundStyle(
+                            row.status == .both ? .tertiary : .secondary),
                         valueText(row.icloudText ?? "—", highlighted: row.needsChoice),
                         valueText(row.googleText ?? "—", highlighted: row.needsChoice),
                         entryChoice(row)
@@ -333,22 +407,28 @@ struct SyncReviewView: View {
                 Divider()
                 line(
                     Text("Note").font(.callout.weight(.medium)),
-                    BoundedText(text: note.icloudText.isEmpty ? "—" : note.icloudText, maxHeight: 120),
-                    BoundedText(text: note.googleText.isEmpty ? "—" : note.googleText, maxHeight: 120),
+                    BoundedText(
+                        text: note.icloudText.isEmpty ? "—" : note.icloudText, maxHeight: 120),
+                    BoundedText(
+                        text: note.googleText.isEmpty ? "—" : note.googleText, maxHeight: 120),
                     noteChoice(note)
                 )
                 if note.pick == .combine, let combined = note.combinedText {
                     HStack(alignment: .firstTextBaseline, spacing: 16) {
-                        Text("Both").font(.caption).foregroundStyle(.secondary).frame(width: Self.titleWidth, alignment: .leading)
+                        Text("Both").font(.caption).foregroundStyle(.secondary).frame(
+                            width: Self.titleWidth, alignment: .leading)
                         BoundedText(text: combined, maxHeight: 140)
                     }
                 }
             }
         }
         if draft.noteUnreadable {
-            Label("The note changed, but it can't be read right now, so it is left as it is. Grant notes access in Setup.", systemImage: "note.text")
-                .foregroundStyle(.orange)
-                .fixedSize(horizontal: false, vertical: true)
+            Label(
+                "The note changed, but it can't be read right now, so it is left as it is. Grant notes access in Setup.",
+                systemImage: "note.text"
+            )
+            .foregroundStyle(.orange)
+            .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -356,7 +436,9 @@ struct SyncReviewView: View {
     private static let choiceWidth: CGFloat = 230
 
     /// One table row: a fixed-width heading, two flexible value columns and a fixed-width choice column.
-    private func line(_ title: some View, _ icloud: some View, _ google: some View, _ choice: some View) -> some View {
+    private func line(
+        _ title: some View, _ icloud: some View, _ google: some View, _ choice: some View
+    ) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 16) {
             title.frame(width: Self.titleWidth, alignment: .leading)
             icloud.frame(maxWidth: .infinity, alignment: .leading)
@@ -367,7 +449,8 @@ struct SyncReviewView: View {
 
     @ViewBuilder private func singleChoice(_ row: SyncReviewDraft.SingleRow) -> some View {
         if row.needsChoice {
-            Picker("Use", selection: Binding(get: { row.pick }, set: { model.pick(row.field, $0) })) {
+            Picker("Use", selection: Binding(get: { row.pick }, set: { model.pick(row.field, $0) }))
+            {
                 Text("iCloud").tag(SyncReviewDraft.Side.icloud)
                 Text("Google").tag(SyncReviewDraft.Side.google)
             }
@@ -375,7 +458,10 @@ struct SyncReviewView: View {
             .labelsHidden()
         } else {
             Text(row.differs ? "Next sync" : "Same").font(.caption).foregroundStyle(.tertiary)
-                .help(row.differs ? "Not part of this decision: an edit in iCloud goes to Google on the next sync" : "")
+                .help(
+                    row.differs
+                        ? "Not part of this decision: an edit in iCloud goes to Google on the next sync"
+                        : "")
         }
     }
 
@@ -401,7 +487,10 @@ struct SyncReviewView: View {
     }
 
     @ViewBuilder private func entryChoice(_ row: SyncReviewDraft.EntryRow) -> some View {
-        Picker("Use", selection: Binding(get: { row.action }, set: { model.setAction($0, forEntry: row.id) })) {
+        Picker(
+            "Use",
+            selection: Binding(get: { row.action }, set: { model.setAction($0, forEntry: row.id) })
+        ) {
             ForEach(row.choices, id: \.self) { Text($0.title(for: row.status)).tag($0) }
         }
         .pickerStyle(.menu)
@@ -411,9 +500,9 @@ struct SyncReviewView: View {
 
 // MARK: - wording
 
-private extension SyncField {
+extension SyncField {
     /// The field group as a row heading.
-    var label: String {
+    fileprivate var label: String {
         switch self {
         case .name: "Name"
         case .nickname: "Nickname"
@@ -428,8 +517,8 @@ private extension SyncField {
     }
 }
 
-private extension SyncReviewDraft.EntryStatus {
-    var title: String {
+extension SyncReviewDraft.EntryStatus {
+    fileprivate var title: String {
         switch self {
         case .both: "Same"
         case .addedInGoogle: "New in Google"
@@ -444,8 +533,8 @@ private extension SyncReviewDraft.EntryStatus {
     }
 }
 
-private extension ReviewConfirmation {
-    func question(_ name: String) -> String {
+extension ReviewConfirmation {
+    fileprivate func question(_ name: String) -> String {
         switch self {
         case .deleteFromICloud: "Delete \(name) from iCloud?"
         case .keepDeleted: "Delete \(name) from Google too?"
@@ -455,8 +544,8 @@ private extension ReviewConfirmation {
     }
 }
 
-private extension SyncReviewDraft.EntryAction {
-    func title(for status: SyncReviewDraft.EntryStatus) -> String {
+extension SyncReviewDraft.EntryAction {
+    fileprivate func title(for status: SyncReviewDraft.EntryStatus) -> String {
         switch self {
         case .keep: status == .addedInICloud ? "Add to Google" : "Keep"
         case .addToICloud: "Add to iCloud"
@@ -491,7 +580,9 @@ private struct RecordComparison: View {
             Divider()
             if rows.isEmpty { Text("Nothing to show.").foregroundStyle(.secondary) }
             ForEach(rows, id: \.title) { row in
-                line(Text(row.title).font(.callout.weight(.medium)), cell(row.left, differs: row.differs), cell(row.right, differs: row.differs))
+                line(
+                    Text(row.title).font(.callout.weight(.medium)),
+                    cell(row.left, differs: row.differs), cell(row.right, differs: row.differs))
             }
         }
     }
@@ -518,13 +609,23 @@ private struct RecordComparison: View {
         var differs: Bool { left != right }
     }
 
-    private static func rows(_ left: ContactRecord?, _ right: ContactRecord?, leftNote: String?, rightNote: String?) -> [Row] {
+    private static func rows(
+        _ left: ContactRecord?, _ right: ContactRecord?, leftNote: String?, rightNote: String?
+    ) -> [Row] {
         func texts(_ record: ContactRecord?, _ note: String?) -> [(String, String)] {
             guard let record else { return [] }
             return [
-                ("Name", [record.givenName, record.middleName, record.familyName].filter { !$0.isBlank }.joined(separator: " ")),
+                (
+                    "Name",
+                    [record.givenName, record.middleName, record.familyName].filter { !$0.isBlank }
+                        .joined(separator: " ")
+                ),
                 ("Nickname", record.nickname),
-                ("Company", [record.organization, record.jobTitle].filter { !$0.isBlank }.joined(separator: " · ")),
+                (
+                    "Company",
+                    [record.organization, record.jobTitle].filter { !$0.isBlank }.joined(
+                        separator: " · ")
+                ),
                 ("Phones", ContactText.phonesOrEmails(record.phones)),
                 ("Emails", ContactText.phonesOrEmails(record.emails)),
                 ("Addresses", ContactText.addresses(record.postalAddresses)),
@@ -533,10 +634,15 @@ private struct RecordComparison: View {
                 ("Note", note ?? ""),
             ]
         }
-        let a = texts(left, leftNote), b = texts(right, rightNote)
-        let titles = ["Name", "Nickname", "Company", "Phones", "Emails", "Addresses", "Websites", "Birthday", "Note"]
+        let a = texts(left, leftNote)
+        let b = texts(right, rightNote)
+        let titles = [
+            "Name", "Nickname", "Company", "Phones", "Emails", "Addresses", "Websites", "Birthday",
+            "Note",
+        ]
         return titles.compactMap { title in
-            let l = a.first { $0.0 == title }?.1 ?? "", r = b.first { $0.0 == title }?.1 ?? ""
+            let l = a.first { $0.0 == title }?.1 ?? ""
+            let r = b.first { $0.0 == title }?.1 ?? ""
             return l.isEmpty && r.isEmpty ? nil : Row(title: title, left: l, right: r)
         }
     }
@@ -569,15 +675,19 @@ struct KeepICloudSheet: View {
         let items = model.firstLinkItems
         return VStack(alignment: .leading, spacing: 12) {
             Text("Keep iCloud for \(ContactText.count(items.count, "contact"))?").font(.title2)
-            Text("These contacts exist in iCloud and Google and disagree. For all of them, iCloud's values are sent to Google. Phones, emails and other entries that only Google has stay in Google. Nothing in iCloud changes.")
-                .fixedSize(horizontal: false, vertical: true)
+            Text(
+                "These contacts exist in iCloud and Google and disagree. For all of them, iCloud's values are sent to Google. Phones, emails and other entries that only Google has stay in Google. Nothing in iCloud changes."
+            )
+            .fixedSize(horizontal: false, vertical: true)
             ScrollView {
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(items) { item in
                         Label {
                             HStack {
                                 Text(item.name)
-                                Text(item.fields.map(\.title).joined(separator: ", ")).font(.caption).foregroundStyle(.secondary)
+                                Text(item.fields.map(\.title).joined(separator: ", ")).font(
+                                    .caption
+                                ).foregroundStyle(.secondary)
                             }
                         } icon: {
                             Image(systemName: "person.crop.circle")
@@ -587,8 +697,10 @@ struct KeepICloudSheet: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(height: min(CGFloat(items.count) * 28 + 8, 260))
-            Text("A backup of iCloud and Google is taken first if the last one is old, and each Google change is logged.")
-                .font(.caption).foregroundStyle(.secondary)
+            Text(
+                "A backup of iCloud and Google is taken first if the last one is old, and each Google change is logged."
+            )
+            .font(.caption).foregroundStyle(.secondary)
             HStack {
                 Spacer()
                 Button("Cancel", role: .cancel) { model.showingBulk = false }
@@ -602,15 +714,24 @@ struct KeepICloudSheet: View {
     private func summary(_ report: BulkKeepReport) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Done").font(.title2)
-            Label("Kept iCloud's values for \(ContactText.count(report.applied.count, "contact")).", systemImage: "checkmark.circle.fill")
-                .foregroundStyle(.green)
+            Label(
+                "Kept iCloud's values for \(ContactText.count(report.applied.count, "contact")).",
+                systemImage: "checkmark.circle.fill"
+            )
+            .foregroundStyle(.green)
             if !report.skipped.isEmpty || !report.changedSinceShown.isEmpty {
-                Label("\(ContactText.count(report.skipped.count + report.changedSinceShown.count, "item")) left in the list: they changed since you looked, or are gone. Look at them one by one.", systemImage: "exclamationmark.circle")
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                Label(
+                    "\(ContactText.count(report.skipped.count + report.changedSinceShown.count, "item")) left in the list: they changed since you looked, or are gone. Look at them one by one.",
+                    systemImage: "exclamationmark.circle"
+                )
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             }
             ForEach(report.failed, id: \.itemID) { failure in
-                Label("\(failure.name): \(failure.reason)", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                Label(
+                    "\(failure.name): \(failure.reason)",
+                    systemImage: "exclamationmark.triangle.fill"
+                ).foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
             }
             ForEach(report.warnings, id: \.self) { warning in
@@ -654,21 +775,28 @@ struct PhotoBulkSheet: View {
     private var confirmation: some View {
         let count = model.photoItems.count
         return VStack(alignment: .leading, spacing: 12) {
-            Text("Keep \(side.name) photos for \(ContactText.count(count, "contact"))?").font(.title2)
-            Text(side == .icloud
-                ? "For every contact with a photo question, iCloud's photo is kept and copied to Google. Where iCloud has no photo, Google's photo is removed too. Where an iCloud photo from their Google profile was removed, their profile photo stops being used for that contact."
-                : "For every contact with a photo question, Google's photo is kept and copied to iCloud. Where Google has no photo, iCloud's photo is removed too.")
-                .fixedSize(horizontal: false, vertical: true)
-            Text(side == .icloud
-                ? "A Google photo that is replaced or removed is saved to the photo history first (30 days). Google takes at most 60 photo changes at a time; the rest stay in the list."
-                : "A backup is taken before iCloud's photos change. Google takes no change from this.")
-                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Text("Keep \(side.name) photos for \(ContactText.count(count, "contact"))?").font(
+                .title2)
+            Text(
+                side == .icloud
+                    ? "For every contact with a photo question, iCloud's photo is kept and copied to Google. Where iCloud has no photo, Google's photo is removed too. Where an iCloud photo from their Google profile was removed, their profile photo stops being used for that contact."
+                    : "For every contact with a photo question, Google's photo is kept and copied to iCloud. Where Google has no photo, iCloud's photo is removed too."
+            )
+            .fixedSize(horizontal: false, vertical: true)
+            Text(
+                side == .icloud
+                    ? "A Google photo that is replaced or removed is saved to the photo history first (30 days). Google takes at most 60 photo changes at a time; the rest stay in the list."
+                    : "A backup is taken before iCloud's photos change. Google takes no change from this."
+            )
+            .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             HStack {
                 Spacer()
                 Button("Cancel", role: .cancel) { model.photoBulkSide = nil }
-                Button("Keep \(side.name) photos for all \(count)") { Task { await model.runPhotoBulk(confirmed: false) } }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(model.block(for: .photo) != nil || count == 0)
+                Button("Keep \(side.name) photos for all \(count)") {
+                    Task { await model.runPhotoBulk(confirmed: false) }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(model.block(for: .photo) != nil || count == 0)
             }
         }
     }
@@ -676,8 +804,11 @@ struct PhotoBulkSheet: View {
     private func limit(_ question: String) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("That is a lot of photos").font(.title2)
-            Label("\(question). Nothing has been changed yet.", systemImage: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+            Label(
+                "\(question). Nothing has been changed yet.",
+                systemImage: "exclamationmark.triangle.fill"
+            )
+            .foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
             HStack {
                 Spacer()
                 Button("Cancel", role: .cancel) { model.photoBulkSide = nil }
@@ -690,22 +821,35 @@ struct PhotoBulkSheet: View {
     private func summary(_ report: BulkPhotoReport) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Done").font(.title2)
-            Label("Kept \(side.name)'s photo state for \(ContactText.count(report.applied.count, "contact")).", systemImage: "checkmark.circle.fill")
-                .foregroundStyle(.green)
+            Label(
+                "Kept \(side.name)'s photo state for \(ContactText.count(report.applied.count, "contact")).",
+                systemImage: "checkmark.circle.fill"
+            )
+            .foregroundStyle(.green)
             if !report.carried.isEmpty {
-                Label("\(ContactText.count(report.carried.count, "contact")) left in the list: Google takes at most 60 photo changes at a time. Run this again for the rest.", systemImage: "hourglass")
-                    .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Label(
+                    "\(ContactText.count(report.carried.count, "contact")) left in the list: Google takes at most 60 photo changes at a time. Run this again for the rest.",
+                    systemImage: "hourglass"
+                )
+                .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             if !report.changedSinceShown.isEmpty || !report.skipped.isEmpty {
-                Label("\(ContactText.count(report.changedSinceShown.count + report.skipped.count, "item")) left in the list: they changed since you looked, or are gone. Look at them one by one.", systemImage: "exclamationmark.circle")
-                    .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Label(
+                    "\(ContactText.count(report.changedSinceShown.count + report.skipped.count, "item")) left in the list: they changed since you looked, or are gone. Look at them one by one.",
+                    systemImage: "exclamationmark.circle"
+                )
+                .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             ForEach(report.failed, id: \.itemID) { failure in
-                Label("\(failure.name): \(failure.reason)", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                Label(
+                    "\(failure.name): \(failure.reason)",
+                    systemImage: "exclamationmark.triangle.fill"
+                ).foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
             }
             ForEach(report.warnings, id: \.self) { warning in
-                Label(warning, systemImage: "exclamationmark.circle").foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Label(warning, systemImage: "exclamationmark.circle").foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             HStack {
                 Spacer()
@@ -724,9 +868,11 @@ struct IgnoredSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Ignored contacts").font(.title2)
-            Text("These Google contacts are not offered for import, even if they change. Show again offers one on the next sync.")
-                .font(.callout).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            Text(
+                "These Google contacts are not offered for import, even if they change. Show again offers one on the next sync."
+            )
+            .font(.callout).foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
             if model.isLoadingIgnored {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
@@ -741,7 +887,9 @@ struct IgnoredSheet: View {
                             HStack {
                                 VStack(alignment: .leading) {
                                     Text(contact.name)
-                                    if let detail = contact.detail { Text(detail).font(.caption).foregroundStyle(.secondary) }
+                                    if let detail = contact.detail {
+                                        Text(detail).font(.caption).foregroundStyle(.secondary)
+                                    }
                                 }
                                 Spacer()
                                 Button("Show again") { Task { await model.unignore(contact) } }

@@ -9,7 +9,10 @@ public struct StoredGoogleToken: Codable, Sendable, Equatable, CustomStringConve
     public var grantedScopes: [String]
     public var email: String?
 
-    public init(refreshToken: String, accessToken: String? = nil, expiry: Date? = nil, grantedScopes: [String] = [], email: String? = nil) {
+    public init(
+        refreshToken: String, accessToken: String? = nil, expiry: Date? = nil,
+        grantedScopes: [String] = [], email: String? = nil
+    ) {
         self.refreshToken = refreshToken
         self.accessToken = accessToken
         self.expiry = expiry
@@ -21,7 +24,9 @@ public struct StoredGoogleToken: Codable, Sendable, Equatable, CustomStringConve
         case refreshToken, accessToken, expiry, grantedScopes
     }
 
-    public var description: String { "StoredGoogleToken(email: \(email ?? "nil"), tokens: <redacted>)" }
+    public var description: String {
+        "StoredGoogleToken(email: \(email ?? "nil"), tokens: <redacted>)"
+    }
 }
 
 /// Persists the single signed-in account's credentials. Calls are synchronous (keychain access is local and fast).
@@ -91,7 +96,8 @@ public struct KeychainTokenStore: TokenStore {
         let status = SecItemCopyMatching(query as CFDictionary, &result)
         if status == errSecItemNotFound { return nil }
         guard status == errSecSuccess else { throw KeychainError(status: status) }
-        guard let item = result as? [String: Any], let data = item[kSecValueData as String] as? Data else { return nil }
+        guard let item = result as? [String: Any], let data = item[kSecValueData as String] as? Data
+        else { return nil }
         var token = try Self.decoder.decode(StoredGoogleToken.self, from: data)
         let account = item[kSecAttrAccount as String] as? String
         token.email = account == Self.defaultAccount ? nil : account
@@ -102,7 +108,8 @@ public struct KeychainTokenStore: TokenStore {
         let account = token.email ?? Self.defaultAccount
         let data = try Self.encoder.encode(token)
         let match = query(account: account)
-        var status = SecItemUpdate(match as CFDictionary, [kSecValueData as String: data] as CFDictionary)
+        var status = SecItemUpdate(
+            match as CFDictionary, [kSecValueData as String: data] as CFDictionary)
         if status == errSecItemNotFound {
             var add = match
             add[kSecValueData as String] = data
@@ -114,7 +121,9 @@ public struct KeychainTokenStore: TokenStore {
 
     public func delete() throws {
         let status = SecItemDelete(serviceQuery as CFDictionary)
-        guard status == errSecSuccess || status == errSecItemNotFound else { throw KeychainError(status: status) }
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw KeychainError(status: status)
+        }
     }
 
     /// Only one account is signed in at a time: signing in as someone else replaces the previous item.
@@ -127,10 +136,14 @@ public struct KeychainTokenStore: TokenStore {
         if status == errSecItemNotFound { return }
         guard status == errSecSuccess else { throw KeychainError(status: status) }
         for item in (result as? [[String: Any]]) ?? [] {
-            guard let other = item[kSecAttrAccount as String] as? String, other != account else { continue }
+            guard let other = item[kSecAttrAccount as String] as? String, other != account else {
+                continue
+            }
             let remove = query(account: other)
             let removed = SecItemDelete(remove as CFDictionary)
-            guard removed == errSecSuccess || removed == errSecItemNotFound else { throw KeychainError(status: removed) }
+            guard removed == errSecSuccess || removed == errSecItemNotFound else {
+                throw KeychainError(status: removed)
+            }
         }
     }
 

@@ -37,9 +37,13 @@ public struct SyncJournalEntry: Sendable, Hashable, Codable, Identifiable {
 
     /// Digest of the pushed groups' values (and the note, when pushed), comparable between what was sent and what Google
     /// holds afterwards.
-    static func projectionHash(of record: ContactRecord, fields: Set<SyncField>, noteHash: String) -> String {
+    static func projectionHash(of record: ContactRecord, fields: Set<SyncField>, noteHash: String)
+        -> String
+    {
         var probe = ContactRecord(id: "", source: .google, sourceIdentifier: "")
-        for field in SyncField.recordFields where fields.contains(field) { probe.copy(field, from: record) }
+        for field in SyncField.recordFields where fields.contains(field) {
+            probe.copy(field, from: record)
+        }
         let text = ContactFingerprint.of(probe) + "|" + (fields.contains(.note) ? noteHash : "")
         return SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
     }
@@ -71,7 +75,9 @@ public protocol SyncJournalStoring: Sendable {
 
 /// `sync-journal.json` next to `links.json`, rewritten atomically on every change.
 public final class SyncJournalStore: SyncJournalStoring, Sendable {
-    public static var defaultURL: URL { VersionedJSONFile<SyncJournal>.inSupportFolder("sync-journal.json") }
+    public static var defaultURL: URL {
+        VersionedJSONFile<SyncJournal>.inSupportFolder("sync-journal.json")
+    }
 
     private let file: VersionedJSONFile<SyncJournal>
     private let lock = Mutex(())
@@ -80,7 +86,9 @@ public final class SyncJournalStore: SyncJournalStoring, Sendable {
         file = VersionedJSONFile(url: url)
     }
 
-    public func load() throws -> SyncJournal { try lock.withLock { _ in try file.read() ?? SyncJournal() } }
+    public func load() throws -> SyncJournal {
+        try lock.withLock { _ in try file.read() ?? SyncJournal() }
+    }
 
     public func append(_ entries: [SyncJournalEntry]) throws {
         guard !entries.isEmpty else { return }
@@ -95,7 +103,8 @@ public final class SyncJournalStore: SyncJournalStoring, Sendable {
         guard !entries.isEmpty else { return }
         try lock.withLock { _ in
             guard var journal = try file.read() else { return }
-            let new = Dictionary(entries.map { ($0.opID, $0) }, uniquingKeysWith: { _, last in last })
+            let new = Dictionary(
+                entries.map { ($0.opID, $0) }, uniquingKeysWith: { _, last in last })
             journal.entries = journal.entries.map { new[$0.opID] ?? $0 }
             try file.write(journal)
         }
@@ -117,7 +126,9 @@ public final class InMemorySyncJournalStore: SyncJournalStoring, Sendable {
     public init() {}
 
     public func load() throws -> SyncJournal { journal.withLock { $0 } }
-    public func append(_ entries: [SyncJournalEntry]) throws { journal.withLock { $0.entries += entries } }
+    public func append(_ entries: [SyncJournalEntry]) throws {
+        journal.withLock { $0.entries += entries }
+    }
     public func replace(_ entries: [SyncJournalEntry]) throws {
         let new = Dictionary(entries.map { ($0.opID, $0) }, uniquingKeysWith: { _, last in last })
         journal.withLock { $0.entries = $0.entries.map { new[$0.opID] ?? $0 } }
@@ -148,7 +159,8 @@ public struct SyncHistoryEntry: Sendable, Hashable, Codable {
     public var confirmed: Bool
 
     public init(
-        at: Date, operation: Operation, icloudID: String, resourceName: String, before: GooglePerson?, after: GooglePerson?, confirmed: Bool
+        at: Date, operation: Operation, icloudID: String, resourceName: String,
+        before: GooglePerson?, after: GooglePerson?, confirmed: Bool
     ) {
         self.at = at
         self.operation = operation
@@ -172,7 +184,8 @@ public protocol SyncHistoryStoring: Sendable {
 /// `sync-history/YYYY-MM-DD.jsonl` next to `links.json`: one JSON object per line, one file per day.
 public final class SyncHistoryStore: SyncHistoryStoring, Sendable {
     public static var defaultDirectory: URL {
-        LinkStore.defaultURL.deletingLastPathComponent().appendingPathComponent("sync-history", isDirectory: true)
+        LinkStore.defaultURL.deletingLastPathComponent().appendingPathComponent(
+            "sync-history", isDirectory: true)
     }
 
     private let directory: URL
@@ -183,7 +196,10 @@ public final class SyncHistoryStore: SyncHistoryStoring, Sendable {
     /// - Parameters:
     ///   - retentionDays: days kept, counting today's.
     ///   - timeZone: decides which day an entry belongs to.
-    public init(directory: URL = SyncHistoryStore.defaultDirectory, retentionDays: Int = 30, timeZone: TimeZone = .current) {
+    public init(
+        directory: URL = SyncHistoryStore.defaultDirectory, retentionDays: Int = 30,
+        timeZone: TimeZone = .current
+    ) {
         self.directory = directory
         self.retentionDays = retentionDays
         self.timeZone = timeZone
@@ -216,13 +232,17 @@ public final class SyncHistoryStore: SyncHistoryStoring, Sendable {
         let encoder = encoder()
         var lines: [String: Data] = [:]
         for entry in entries {
-            lines[formatter.string(from: entry.at), default: Data()] += try encoder.encode(entry) + Data("\n".utf8)
+            lines[formatter.string(from: entry.at), default: Data()] +=
+                try encoder.encode(entry) + Data("\n".utf8)
         }
         try lock.withLock { _ in
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(
+                at: directory, withIntermediateDirectories: true)
             for (day, data) in lines {
                 let url = directory.appendingPathComponent("\(day).jsonl")
-                if !FileManager.default.fileExists(atPath: url.path) { FileManager.default.createFile(atPath: url.path, contents: nil) }
+                if !FileManager.default.fileExists(atPath: url.path) {
+                    FileManager.default.createFile(atPath: url.path, contents: nil)
+                }
                 let handle = try FileHandle(forUpdating: url)
                 defer { try? handle.close() }
                 var payload = data
@@ -230,7 +250,9 @@ public final class SyncHistoryStore: SyncHistoryStoring, Sendable {
                 if size > 0 {
                     // A tail cut short by a crash must not swallow the line appended after it.
                     try handle.seek(toOffset: size - 1)
-                    if try handle.read(upToCount: 1) != Data("\n".utf8) { payload = Data("\n".utf8) + data }
+                    if try handle.read(upToCount: 1) != Data("\n".utf8) {
+                        payload = Data("\n".utf8) + data
+                    }
                     try handle.seekToEnd()
                 }
                 try handle.write(contentsOf: payload)
@@ -246,7 +268,9 @@ public final class SyncHistoryStore: SyncHistoryStoring, Sendable {
             try dayFiles().flatMap { url -> [SyncHistoryEntry] in
                 let text = String(decoding: try Data(contentsOf: url), as: UTF8.self)
                 // A line cut short by a crash is skipped rather than hiding the rest.
-                return text.split(separator: "\n").compactMap { try? decoder.decode(SyncHistoryEntry.self, from: Data($0.utf8)) }
+                return text.split(separator: "\n").compactMap {
+                    try? decoder.decode(SyncHistoryEntry.self, from: Data($0.utf8))
+                }
             }
         }
     }
@@ -258,8 +282,11 @@ public final class SyncHistoryStore: SyncHistoryStoring, Sendable {
         return try lock.withLock { _ in
             var removed = 0
             for url in try dayFiles() {
-                guard let day = formatter.date(from: String(url.lastPathComponent.dropLast(".jsonl".count))),
-                      let expires = calendar.date(byAdding: .day, value: retentionDays + 1, to: day), now >= expires
+                guard
+                    let day = formatter.date(
+                        from: String(url.lastPathComponent.dropLast(".jsonl".count))),
+                    let expires = calendar.date(byAdding: .day, value: retentionDays + 1, to: day),
+                    now >= expires
                 else { continue }
                 try FileManager.default.removeItem(at: url)
                 removed += 1
@@ -272,9 +299,15 @@ public final class SyncHistoryStore: SyncHistoryStoring, Sendable {
     private func dayFiles() throws -> [URL] {
         guard FileManager.default.fileExists(atPath: directory.path) else { return [] }
         let formatter = formatter()
-        return try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
-            .filter { $0.pathExtension == "jsonl" && formatter.date(from: String($0.lastPathComponent.dropLast(".jsonl".count))) != nil }
-            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+        return try FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: nil
+        )
+        .filter {
+            $0.pathExtension == "jsonl"
+                && formatter.date(from: String($0.lastPathComponent.dropLast(".jsonl".count)))
+                    != nil
+        }
+        .sorted { $0.lastPathComponent < $1.lastPathComponent }
     }
 }
 
@@ -303,7 +336,9 @@ extension SyncBaseline {
     /// Groups held for review keep their old Google values. While any group still differs from what Google holds, the etag
     /// stays at the old one too: the planner treats "same etag as the baseline" as "nothing changed" and would otherwise
     /// never see the unreviewed Google edit again.
-    func afterUpdate(fields: Set<SyncField>, returned person: GooglePerson, at now: Date) -> SyncBaseline {
+    func afterUpdate(fields: Set<SyncField>, returned person: GooglePerson, at now: Date)
+        -> SyncBaseline
+    {
         var baseline = self
         var unreviewed = false
         if let record = GooglePersonMapper.record(from: person, source: .google) {
@@ -325,7 +360,9 @@ extension SyncBaseline {
     /// The baseline of a contact just created in Google: the iCloud half as planned, the Google half as returned.
     func afterCreate(returned person: GooglePerson, at now: Date) -> SyncBaseline {
         var baseline = self
-        if let record = GooglePersonMapper.record(from: person, source: .google) { baseline.google = record }
+        if let record = GooglePersonMapper.record(from: person, source: .google) {
+            baseline.google = record
+        }
         baseline.googleEtag = person.etag ?? ""
         baseline.googleNoteHash = GooglePersonMapper.noteHash(of: person)
         baseline.syncedAt = now
@@ -385,7 +422,8 @@ struct SyncJournalRecovery: Sendable {
 
         var tagged: [String: GooglePerson]?
         if entries.contains(where: { $0.kind == .create }) {
-            let feed = try? await GoogleChangeFeed(client: google).fetch(state: SyncState(), requireFullListing: true)
+            let feed = try? await GoogleChangeFeed(client: google).fetch(
+                state: SyncState(), requireFullListing: true)
             tagged = feed.map { feed in feed.ownershipIndex.compactMapValues { feed.people[$0] } }
         }
 
@@ -413,17 +451,23 @@ struct SyncJournalRecovery: Sendable {
                     mark(entry, .unresolved)
                     continue
                 }
-                if let person = tagged[entry.tag], let name = person.resourceName, let baseline = entry.baseline {
+                if let person = tagged[entry.tag], let name = person.resourceName,
+                    let baseline = entry.baseline
+                {
                     settled.append(entry.opID)
                     // The planner may have linked it already from a later listing; that baseline is newer than ours.
                     if knownBaselines[entry.icloudID] == nil || knownLinks[entry.icloudID] == nil {
                         baselines[entry.icloudID] = baseline.afterCreate(returned: person, at: at)
-                        newLinks.append(ImportedLink(
-                            icloudID: entry.icloudID, googleResourceName: name, origin: .createdInGoogle, displayName: baseline.icloud.displayName
-                        ))
+                        newLinks.append(
+                            ImportedLink(
+                                icloudID: entry.icloudID, googleResourceName: name,
+                                origin: .createdInGoogle, displayName: baseline.icloud.displayName
+                            ))
                     }
                     mark(entry, .applied)
-                } else if at.timeIntervalSince(entry.attemptedAt ?? entry.recheckedAt ?? at) < Self.createGracePeriod {
+                } else if at.timeIntervalSince(entry.attemptedAt ?? entry.recheckedAt ?? at)
+                    < Self.createGracePeriod
+                {
                     var held = entry
                     held.recheckedAt = at
                     rechecked.append(held)
@@ -450,17 +494,23 @@ struct SyncJournalRecovery: Sendable {
                 }
                 settled.append(entry.opID)
                 let fields = Set(entry.fields)
-                guard person.etag != entry.baseEtag, let record = GooglePersonMapper.record(from: person, source: .google),
-                      SyncJournalEntry.projectionHash(of: record, fields: fields, noteHash: GooglePersonMapper.noteHash(of: person)) == entry.payloadHash,
-                      let baseline = entry.baseline
+                guard person.etag != entry.baseEtag,
+                    let record = GooglePersonMapper.record(from: person, source: .google),
+                    SyncJournalEntry.projectionHash(
+                        of: record, fields: fields,
+                        noteHash: GooglePersonMapper.noteHash(of: person)) == entry.payloadHash,
+                    let baseline = entry.baseline
                 else {
                     mark(entry, .notApplied)
                     continue
                 }
-                baselines[entry.icloudID] = baseline.afterUpdate(fields: fields, returned: person, at: at)
-                confirmations.append(SyncHistoryEntry(
-                    at: at, operation: .update, icloudID: entry.icloudID, resourceName: name, before: nil, after: person, confirmed: true
-                ))
+                baselines[entry.icloudID] = baseline.afterUpdate(
+                    fields: fields, returned: person, at: at)
+                confirmations.append(
+                    SyncHistoryEntry(
+                        at: at, operation: .update, icloudID: entry.icloudID, resourceName: name,
+                        before: nil, after: person, confirmed: true
+                    ))
                 mark(entry, .applied)
 
             case .delete:
@@ -472,9 +522,11 @@ struct SyncJournalRecovery: Sendable {
                 } catch GoogleAPIError.notFound {
                     settled.append(entry.opID)
                     droppedIDs.append(entry.icloudID)
-                    confirmations.append(SyncHistoryEntry(
-                        at: at, operation: .delete, icloudID: entry.icloudID, resourceName: name, before: nil, after: nil, confirmed: true
-                    ))
+                    confirmations.append(
+                        SyncHistoryEntry(
+                            at: at, operation: .delete, icloudID: entry.icloudID,
+                            resourceName: name, before: nil, after: nil, confirmed: true
+                        ))
                     mark(entry, .applied)
                 } catch is CancellationError {
                     throw CancellationError()

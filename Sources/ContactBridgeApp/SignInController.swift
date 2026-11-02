@@ -41,7 +41,9 @@ final class SignInController {
     init(
         store: any TokenStore = KeychainTokenStore(),
         loadConfig: @escaping @MainActor () throws -> OAuthConfig = { try OAuthConfig.load() },
-        openURL: @escaping @Sendable (URL) async -> Bool = { url in await MainActor.run { NSWorkspace.shared.open(url) } }
+        openURL: @escaping @Sendable (URL) async -> Bool = { url in
+            await MainActor.run { NSWorkspace.shared.open(url) }
+        }
     ) {
         self.store = store
         self.loadConfig = loadConfig
@@ -56,7 +58,9 @@ final class SignInController {
         guard demoEmail == nil else { return }
         guard task == nil, status == .signedOut else { return }
         do {
-            if let account = try await makeSession().currentAccount() { status = .signedIn(email: account.email) }
+            if let account = try await makeSession().currentAccount() {
+                status = .signedIn(email: account.email)
+            }
         } catch {
             status = .failed(Self.message(for: error))
         }
@@ -101,7 +105,8 @@ final class SignInController {
             do {
                 if let session = try? makeSession() {
                     if try await session.signOut() == false {
-                        notice = "Signed out here, but Google could not be reached to revoke access. You can remove it at myaccount.google.com/permissions."
+                        notice =
+                            "Signed out here, but Google could not be reached to revoke access. You can remove it at myaccount.google.com/permissions."
                     }
                 } else {
                     try store.delete()
@@ -115,7 +120,8 @@ final class SignInController {
 
     private func makeSession() throws -> GoogleAuthSession {
         if let session { return session }
-        let session = GoogleAuthSession(oauth: GoogleOAuthClient(config: try loadConfig()), store: store, openURL: openURL)
+        let session = GoogleAuthSession(
+            oauth: GoogleOAuthClient(config: try loadConfig()), store: store, openURL: openURL)
         self.session = session
         return session
     }

@@ -25,7 +25,10 @@ public struct MergeLinkOutcome: Sendable, Equatable {
     /// What tidying up the links did not manage. The merge is done regardless.
     public var followUpWarnings: [String] = []
 
-    public init(linksMoved: Int = 0, googleCopiesLeft: Int = 0, googleRemovalsPending: Int = 0, followUpWarnings: [String] = []) {
+    public init(
+        linksMoved: Int = 0, googleCopiesLeft: Int = 0, googleRemovalsPending: Int = 0,
+        followUpWarnings: [String] = []
+    ) {
         self.linksMoved = linksMoved
         self.googleCopiesLeft = googleCopiesLeft
         self.googleRemovalsPending = googleRemovalsPending
@@ -144,9 +147,12 @@ public struct ContactWorkflows: Sendable {
     ///     they never interleave with a sync run. Nil means no sync engine to wait for.
     ///   - containerID: the container `store` writes to; backups must cover exactly this one.
     public init(
-        store: any ContactStoring, google: (any GoogleContactsClient)?, notes: (any NotesStoring)?, backups: BackupCoordinator,
-        links: any LinkStoring, syncState: (any SyncStateStoring)? = nil, gate: WriteGate? = nil, dismissals: any DismissalStoring,
-        matcher: DuplicateMatcher = DuplicateMatcher(), containerID: String? = nil, now: @escaping @Sendable () -> Date = { Date() }
+        store: any ContactStoring, google: (any GoogleContactsClient)?, notes: (any NotesStoring)?,
+        backups: BackupCoordinator,
+        links: any LinkStoring, syncState: (any SyncStateStoring)? = nil, gate: WriteGate? = nil,
+        dismissals: any DismissalStoring,
+        matcher: DuplicateMatcher = DuplicateMatcher(), containerID: String? = nil,
+        now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.containerID = containerID
         self.store = store
@@ -169,9 +175,12 @@ public struct ContactWorkflows: Sendable {
         let records = try await store.fetchAll()
         let connections = try await google.allConnections()
         let others = try await google.allOtherContacts()
-        let known = Dictionary(try links.load().links.map { ($0.value.googleResourceName, $0.key) }, uniquingKeysWith: min)
+        let known = Dictionary(
+            try links.load().links.map { ($0.value.googleResourceName, $0.key) },
+            uniquingKeysWith: min)
         return ImportPlanner(matcher: matcher).plan(
-            icloud: records, googleConnections: connections, googleOtherContacts: others, knownLinks: known
+            icloud: records, googleConnections: connections, googleOtherContacts: others,
+            knownLinks: known
         )
     }
 
@@ -179,8 +188,10 @@ public struct ContactWorkflows: Sendable {
     @concurrent
     public func runImport(_ candidates: [ImportCandidate]) async throws -> ImportRun {
         try await exclusively {
-            let receipt = try await backups.freshReceipt(requiring: BackupRequirement(containerID: containerID, needsGoogle: google != nil))
-            let result = try await ImportExecutor(store: store, receipt: receipt, links: links).execute(candidates, now: now())
+            let receipt = try await backups.freshReceipt(
+                requiring: BackupRequirement(containerID: containerID, needsGoogle: google != nil))
+            let result = try await ImportExecutor(store: store, receipt: receipt, links: links)
+                .execute(candidates, now: now())
             return ImportRun(result: result, receipt: receipt)
         }
     }
@@ -193,7 +204,8 @@ public struct ContactWorkflows: Sendable {
         let analysis = matcher.analyze(records)
         let visible = try dismissals.load().visible(from: analysis.clusters)
         return DuplicateScan(
-            records: records, clusters: visible, hiddenCount: analysis.clusters.count - visible.count, diagnostics: analysis.diagnostics
+            records: records, clusters: visible,
+            hiddenCount: analysis.clusters.count - visible.count, diagnostics: analysis.diagnostics
         )
     }
 
@@ -225,7 +237,8 @@ public struct ContactWorkflows: Sendable {
         guard draft.canMerge else { throw WorkflowError.nothingToMerge }
         guard notes != nil else { throw WorkflowError.notesUnavailable }
         return try await exclusively {
-            let receipt = try await backups.freshReceipt(requiring: BackupRequirement(containerID: containerID, needsNotes: true))
+            let receipt = try await backups.freshReceipt(
+                requiring: BackupRequirement(containerID: containerID, needsNotes: true))
             return try await merge(draft, receipt: receipt)
         }
     }
@@ -238,26 +251,36 @@ public struct ContactWorkflows: Sendable {
         // Read before anything changes, as Clean up does: if either file is unreadable, nothing is merged.
         let table = try links.load()
         let state = try syncState?.load()
-        let carry = Self.linkCarryOver(survivorID: survivorID, loserIDs: loserIDs, table: table, state: state)
+        let carry = Self.linkCarryOver(
+            survivorID: survivorID, loserIDs: loserIDs, table: table, state: state)
 
         let outcome = try await MergeExecutor(store: store, notes: notes)
             .execute(survivor: plan.merged, absorbing: loserIDs, backup: receipt, now: now())
-        var run = MergeRun(receipt: receipt, outcome: outcome, survivor: plan.merged, deleted: deleted)
+        var run = MergeRun(
+            receipt: receipt, outcome: outcome, survivor: plan.merged, deleted: deleted)
         run.links = applyLinkCarry(carry, survivor: plan.merged)
         return run
     }
 
     /// The merge is done; the links follow it. A failure here is reported, never thrown.
-    private func applyLinkCarry(_ carry: LinkCarryPlan, survivor: ContactRecord) -> MergeLinkOutcome {
-        var result = MergeLinkOutcome(googleCopiesLeft: carry.googleCopiesLeft, googleRemovalsPending: carry.keptForSync.count)
+    private func applyLinkCarry(_ carry: LinkCarryPlan, survivor: ContactRecord) -> MergeLinkOutcome
+    {
+        var result = MergeLinkOutcome(
+            googleCopiesLeft: carry.googleCopiesLeft, googleRemovalsPending: carry.keptForSync.count
+        )
         guard carry.moved != nil || !carry.linksToRemove.isEmpty else { return result }
         do {
             if let moved = carry.moved {
                 // `add` takes the Google contact away from its old owner, so there is never a moment with two.
-                try links.add([ImportedLink(
-                    icloudID: survivor.sourceIdentifier, googleResourceName: moved.googleResourceName, origin: moved.origin ?? .imported,
-                    displayName: survivor.displayName
-                )], at: now())
+                try links.add(
+                    [
+                        ImportedLink(
+                            icloudID: survivor.sourceIdentifier,
+                            googleResourceName: moved.googleResourceName,
+                            origin: moved.origin ?? .imported,
+                            displayName: survivor.displayName
+                        )
+                    ], at: now())
                 result.linksMoved = 1
             }
             try links.remove(icloudIDs: carry.linksToRemove)
@@ -267,11 +290,15 @@ public struct ContactWorkflows: Sendable {
                     state.baselines[moved.from] = nil
                     state.baselines[survivor.sourceIdentifier] = baseline
                     // The opt-out is about the person, not the contact: it follows the baseline to the survivor.
-                    if state.profilePhotoOptOut.remove(moved.from) != nil { state.profilePhotoOptOut.insert(survivor.sourceIdentifier) }
+                    if state.profilePhotoOptOut.remove(moved.from) != nil {
+                        state.profilePhotoOptOut.insert(survivor.sourceIdentifier)
+                    }
                 }
             }
         } catch {
-            result.followUpWarnings.append("The contacts are merged, but their Google links could not be updated: \(error.localizedDescription)")
+            result.followUpWarnings.append(
+                "The contacts are merged, but their Google links could not be updated: \(error.localizedDescription)"
+            )
         }
         return result
     }
@@ -285,19 +312,31 @@ public struct ContactWorkflows: Sendable {
     ///   the same person; the survivor's link wins. With sync on, a copy the sync can safely delete (one with a baseline) keeps
     ///   its link and baseline so the next sync deletes it, as it does after Clean up. Otherwise the link goes and Google is left
     ///   alone (`googleCopiesLeft`).
-    public static func linkCarryOver(survivorID: String, loserIDs: [String], table: LinkTable, state: SyncState?) -> LinkCarryPlan {
+    public static func linkCarryOver(
+        survivorID: String, loserIDs: [String], table: LinkTable, state: SyncState?
+    ) -> LinkCarryPlan {
         var plan = LinkCarryPlan()
         let syncOn = state?.firstSyncApproved == true
-        let linked = Set(loserIDs).subtracting([survivorID]).filter { table.links[$0] != nil }.sorted()
+        let linked = Set(loserIDs).subtracting([survivorID]).filter { table.links[$0] != nil }
+            .sorted()
         guard !linked.isEmpty else { return plan }
 
         var others = linked
-        if table.links[survivorID] == nil, let mover = linked.min(by: { lhs, rhs in
-            let l = (state?.baselines[lhs] == nil ? 1 : 0, table.links[lhs]?.linkedAt ?? .distantFuture, lhs)
-            let r = (state?.baselines[rhs] == nil ? 1 : 0, table.links[rhs]?.linkedAt ?? .distantFuture, rhs)
-            return l < r
-        }), let entry = table.links[mover] {
-            plan.moved = LinkCarryPlan.Moved(from: mover, googleResourceName: entry.googleResourceName, origin: entry.origin)
+        if table.links[survivorID] == nil,
+            let mover = linked.min(by: { lhs, rhs in
+                let l = (
+                    state?.baselines[lhs] == nil ? 1 : 0,
+                    table.links[lhs]?.linkedAt ?? .distantFuture, lhs
+                )
+                let r = (
+                    state?.baselines[rhs] == nil ? 1 : 0,
+                    table.links[rhs]?.linkedAt ?? .distantFuture, rhs
+                )
+                return l < r
+            }), let entry = table.links[mover]
+        {
+            plan.moved = LinkCarryPlan.Moved(
+                from: mover, googleResourceName: entry.googleResourceName, origin: entry.origin)
             plan.linksToRemove.append(mover)
             if syncOn, var baseline = state?.baselines[mover] {
                 baseline.icloud.id = survivorID
@@ -307,7 +346,11 @@ public struct ContactWorkflows: Sendable {
             others.removeAll { $0 == mover }
         }
         for id in others {
-            if syncOn, state?.baselines[id] != nil { plan.keptForSync.append(id) } else { plan.linksToRemove.append(id) }
+            if syncOn, state?.baselines[id] != nil {
+                plan.keptForSync.append(id)
+            } else {
+                plan.linksToRemove.append(id)
+            }
         }
         return plan
     }
@@ -324,16 +367,23 @@ public struct ContactWorkflows: Sendable {
         _ drafts: [MergeDraft], progress: @escaping @Sendable (BulkProgress) -> Void = { _ in },
         isCancelled: @escaping @Sendable () -> Bool = { false }
     ) async throws -> BulkMergeReport {
-        try await exclusively { try await bulkMerge(drafts, progress: progress, isCancelled: isCancelled) }
+        try await exclusively {
+            try await bulkMerge(drafts, progress: progress, isCancelled: isCancelled)
+        }
     }
 
     private func bulkMerge(
-        _ drafts: [MergeDraft], progress: @escaping @Sendable (BulkProgress) -> Void, isCancelled: @escaping @Sendable () -> Bool
+        _ drafts: [MergeDraft], progress: @escaping @Sendable (BulkProgress) -> Void,
+        isCancelled: @escaping @Sendable () -> Bool
     ) async throws -> BulkMergeReport {
-        guard !drafts.isEmpty, drafts.allSatisfy(\.canMerge) else { throw WorkflowError.nothingToMerge }
+        guard !drafts.isEmpty, drafts.allSatisfy(\.canMerge) else {
+            throw WorkflowError.nothingToMerge
+        }
         guard notes != nil else { throw WorkflowError.notesUnavailable }
         let review = drafts.filter { $0.bulkEligibility == .needsReview }
-        guard review.isEmpty else { throw WorkflowError.needsReview(groupIDs: review.map(\.cluster.id)) }
+        guard review.isEmpty else {
+            throw WorkflowError.needsReview(groupIDs: review.map(\.cluster.id))
+        }
 
         let total = drafts.count
         var entries = drafts.map { BulkMergeReport.Entry(draft: $0, outcome: .notRun) }
@@ -344,7 +394,9 @@ public struct ContactWorkflows: Sendable {
         do {
             receipts = [try await backups.newBackup(requiring: requirement)]
         } catch {
-            return BulkMergeReport(entries: entries, stop: .backupFailed(reason: error.localizedDescription), receipts: [])
+            return BulkMergeReport(
+                entries: entries, stop: .backupFailed(reason: error.localizedDescription),
+                receipts: [])
         }
 
         var stop = BulkMergeReport.Stop.completed
@@ -361,7 +413,9 @@ public struct ContactWorkflows: Sendable {
                 let receipt = try await backups.freshReceipt(requiring: requirement)
                 if receipt != receipts.last { receipts.append(receipt) }
                 let run = try await merge(draft, receipt: receipt)
-                entries[index].outcome = .merged(survivor: run.survivor, deleted: run.deleted, notes: run.outcome.notes, links: run.links)
+                entries[index].outcome = .merged(
+                    survivor: run.survivor, deleted: run.deleted, notes: run.outcome.notes,
+                    links: run.links)
                 if case .writeFailed = run.outcome.notes {
                     stop = .stoppedOnProblem
                     break
@@ -376,7 +430,9 @@ public struct ContactWorkflows: Sendable {
                 break
             }
         }
-        progress(BulkProgress(phase: .merging, completed: entries.count { $0.outcome != .notRun }, total: total))
+        progress(
+            BulkProgress(
+                phase: .merging, completed: entries.count { $0.outcome != .notRun }, total: total))
         return BulkMergeReport(entries: entries, stop: stop, receipts: receipts)
     }
 
@@ -386,12 +442,15 @@ public struct ContactWorkflows: Sendable {
     @concurrent
     public func loadCleanupRows() async throws -> [CleanupRow] {
         let records = try await store.fetchAll()
-        let imported = Set(try links.load().links.filter { $0.value.effectiveOrigin == .imported }.keys)
-        return records.map { CleanupRow(record: $0, isImported: imported.contains($0.sourceIdentifier)) }
-            .sorted {
-                let order = $0.displayName.localizedStandardCompare($1.displayName)
-                return order == .orderedSame ? $0.id < $1.id : order == .orderedAscending
-            }
+        let imported = Set(
+            try links.load().links.filter { $0.value.effectiveOrigin == .imported }.keys)
+        return records.map {
+            CleanupRow(record: $0, isImported: imported.contains($0.sourceIdentifier))
+        }
+        .sorted {
+            let order = $0.displayName.localizedStandardCompare($1.displayName)
+            return order == .orderedSame ? $0.id < $1.id : order == .orderedAscending
+        }
     }
 
     /// Deletes the contacts (by store identifier) in one all-or-nothing call, after a brand-new backup that includes notes
@@ -405,11 +464,15 @@ public struct ContactWorkflows: Sendable {
     /// contact that is gone from iCloud and only then drops the link and baseline (`googleRemovalsPending` counts them).
     /// Contacts that never synced, and every contact before sync was approved, lose their link as before.
     @concurrent
-    public func deleteContacts(ids: [String], progress: @escaping @Sendable (CleanupPhase) -> Void = { _ in }) async throws -> CleanupRun {
+    public func deleteContacts(
+        ids: [String], progress: @escaping @Sendable (CleanupPhase) -> Void = { _ in }
+    ) async throws -> CleanupRun {
         try await exclusively { try await deleteNow(ids: ids, progress: progress) }
     }
 
-    private func deleteNow(ids: [String], progress: @escaping @Sendable (CleanupPhase) -> Void) async throws -> CleanupRun {
+    private func deleteNow(ids: [String], progress: @escaping @Sendable (CleanupPhase) -> Void)
+        async throws -> CleanupRun
+    {
         var seen = Set<String>()
         let ids = ids.filter { seen.insert($0).inserted }
         guard !ids.isEmpty else { throw WorkflowError.nothingToDelete }
@@ -422,11 +485,14 @@ public struct ContactWorkflows: Sendable {
         let syncOn = state?.firstSyncApproved == true
 
         progress(.backingUp)
-        let receipt = try await backups.newBackup(requiring: BackupRequirement(containerID: containerID, needsNotes: true))
+        let receipt = try await backups.newBackup(
+            requiring: BackupRequirement(containerID: containerID, needsNotes: true))
         progress(.deleting)
         try await store.delete(ids: ids, backup: receipt)
 
-        var run = CleanupRun(receipt: receipt, deletedIDs: ids, linksRemoved: 0, googleRemovalsPending: 0, dismissalsPruned: 0, followUpWarnings: [])
+        var run = CleanupRun(
+            receipt: receipt, deletedIDs: ids, linksRemoved: 0, googleRemovalsPending: 0,
+            dismissalsPruned: 0, followUpWarnings: [])
         do {
             let table = try links.load()
             let linked = Set(table.links.keys).intersection(ids)
@@ -438,12 +504,16 @@ public struct ContactWorkflows: Sendable {
                 run.linksRemoved = removable.count
             }
         } catch {
-            run.followUpWarnings.append("The contacts are deleted, but their import links could not be removed: \(error.localizedDescription)")
+            run.followUpWarnings.append(
+                "The contacts are deleted, but their import links could not be removed: \(error.localizedDescription)"
+            )
         }
         do {
             run.dismissalsPruned = try dismissals.forget(ids: ids)
         } catch {
-            run.followUpWarnings.append("The contacts are deleted, but the groups you marked as not duplicates could not be updated: \(error.localizedDescription)")
+            run.followUpWarnings.append(
+                "The contacts are deleted, but the groups you marked as not duplicates could not be updated: \(error.localizedDescription)"
+            )
         }
         return run
     }
@@ -453,16 +523,21 @@ public struct ContactWorkflows: Sendable {
     /// sync" when this is not zero.
     public func googleRemovalsPending(ifDeleting ids: [String]) throws -> Int {
         guard let state = try syncState?.load(), state.firstSyncApproved else { return 0 }
-        return Self.googleCopiesToRemove(among: Set(try links.load().links.keys).intersection(ids), state: state).count
+        return Self.googleCopiesToRemove(
+            among: Set(try links.load().links.keys).intersection(ids), state: state
+        ).count
     }
 
     /// A link without a baseline has no Google copy the sync could delete safely; it goes with the contact.
-    private static func googleCopiesToRemove(among linked: Set<String>, state: SyncState?) -> Set<String> {
+    private static func googleCopiesToRemove(among linked: Set<String>, state: SyncState?) -> Set<
+        String
+    > {
         linked.filter { state?.baselines[$0] != nil }
     }
 
     /// Runs `body` inside the write gate, if there is one.
-    private func exclusively<T: Sendable>(_ body: @Sendable () async throws -> T) async throws -> T {
+    private func exclusively<T: Sendable>(_ body: @Sendable () async throws -> T) async throws -> T
+    {
         guard let gate else { return try await body() }
         return try await gate.withLock(body)
     }
@@ -470,6 +545,8 @@ public struct ContactWorkflows: Sendable {
     private func requireMembersExist(_ draft: MergeDraft) async throws {
         let present = Set(try await store.fetchAll().map(\.sourceIdentifier))
         let missing = draft.members.filter { !present.contains($0.sourceIdentifier) }
-        guard missing.isEmpty else { throw WorkflowError.membersGone(names: missing.map(\.displayName)) }
+        guard missing.isEmpty else {
+            throw WorkflowError.membersGone(names: missing.map(\.displayName))
+        }
     }
 }
