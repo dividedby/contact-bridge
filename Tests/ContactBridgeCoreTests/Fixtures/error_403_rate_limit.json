@@ -2,13 +2,7 @@
   "error": {
     "code": 403,
     "message": "Rate Limit Exceeded",
-    "errors": [
-      {
-        "message": "Rate Limit Exceeded",
-        "domain": "usageLimits",
-        "reason": "rateLimitExceeded"
-      }
-    ],
+    "errors": [{ "message": "Rate Limit Exceeded", "domain": "usageLimits", "reason": "rateLimitExceeded" }],
     "status": "PERMISSION_DENIED"
   }
 }

@@ -16,10 +16,7 @@
       },
       "names": [
         {
-          "metadata": {
-            "primary": true,
-            "source": { "type": "CONTACT", "id": "1234567890123456789" }
-          },
+          "metadata": { "primary": true, "source": { "type": "CONTACT", "id": "1234567890123456789" } },
           "displayName": "Ann Lee",
           "familyName": "Lee",
           "givenName": "Ann",
@@ -29,10 +26,7 @@
       ],
       "phoneNumbers": [
         {
-          "metadata": {
-            "primary": true,
-            "source": { "type": "CONTACT", "id": "1234567890123456789" }
-          },
+          "metadata": { "primary": true, "source": { "type": "CONTACT", "id": "1234567890123456789" } },
           "value": "(415) 555-2671",
           "canonicalForm": "+14155552671",
           "type": "mobile",
@@ -41,10 +35,7 @@
       ],
       "emailAddresses": [
         {
-          "metadata": {
-            "primary": true,
-            "source": { "type": "CONTACT", "id": "1234567890123456789" }
-          },
+          "metadata": { "primary": true, "source": { "type": "CONTACT", "id": "1234567890123456789" } },
           "value": "ann@example.com",
           "type": "home",
           "formattedType": "Home"
@@ -52,13 +43,8 @@
       ],
       "memberships": [
         {
-          "metadata": {
-            "source": { "type": "CONTACT", "id": "1234567890123456789" }
-          },
-          "contactGroupMembership": {
-            "contactGroupId": "myContacts",
-            "contactGroupResourceName": "contactGroups/myContacts"
-          }
+          "metadata": { "source": { "type": "CONTACT", "id": "1234567890123456789" } },
+          "contactGroupMembership": { "contactGroupId": "myContacts", "contactGroupResourceName": "contactGroups/myContacts" }
         }
       ]
     },
@@ -66,37 +52,17 @@
       "resourceName": "people/c9876543210987654321",
       "etag": "%EgUBAj0LNy4=",
       "metadata": {
-        "sources": [
-          {
-            "type": "CONTACT",
-            "id": "9876543210987654321",
-            "etag": "#aB3dE5fGh7I=",
-            "updateTime": "2024-06-18T09:02:55.001Z"
-          }
-        ],
+        "sources": [{ "type": "CONTACT", "id": "9876543210987654321", "etag": "#aB3dE5fGh7I=", "updateTime": "2024-06-18T09:02:55.001Z" }],
         "objectType": "PERSON"
       },
       "names": [
-        {
-          "metadata": { "primary": true },
-          "displayName": "Acme Support",
-          "unstructuredName": "Acme Support"
-        }
+        { "metadata": { "primary": true }, "displayName": "Acme Support", "unstructuredName": "Acme Support" }
       ],
       "organizations": [
-        {
-          "metadata": { "primary": true },
-          "name": "Acme Corp",
-          "current": true
-        }
+        { "metadata": { "primary": true }, "name": "Acme Corp", "current": true }
       ],
       "phoneNumbers": [
-        {
-          "value": "+1 800 555 0199",
-          "canonicalForm": "+18005550199",
-          "type": "work",
-          "formattedType": "Work"
-        }
+        { "value": "+1 800 555 0199", "canonicalForm": "+18005550199", "type": "work", "formattedType": "Work" }
       ]
     }
   ],

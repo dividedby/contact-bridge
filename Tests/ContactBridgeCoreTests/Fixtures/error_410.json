@@ -4,11 +4,7 @@
     "message": "Sync token is expired. Clear local cache and retry call without the sync token.",
     "status": "GONE",
     "details": [
-      {
-        "@type": "type.googleapis.com/google.rpc.ErrorInfo",
-        "reason": "EXPIRED_SYNC_TOKEN",
-        "domain": "googleapis.com"
-      }
+      { "@type": "type.googleapis.com/google.rpc.ErrorInfo", "reason": "EXPIRED_SYNC_TOKEN", "domain": "googleapis.com" }
     ]
   }
 }
