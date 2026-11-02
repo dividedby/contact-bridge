@@ -1,18 +1,22 @@
 import Foundation
 import Synchronization
 import Testing
+
 @testable import ContactBridgeCore
 
 struct ImportExecutorTests {
     private let receipt = BackupReceipt.forTesting(createdAt: Date())
 
     private func candidate(
-        _ resourceName: String, _ given: String, source: ContactSource = .google, selected: Bool = true
+        _ resourceName: String, _ given: String, source: ContactSource = .google,
+        selected: Bool = true
     ) -> ImportCandidate {
         ImportCandidate(
             record: ContactRecord(
-                id: resourceName, source: source, sourceIdentifier: resourceName, givenName: given, familyName: "Test",
-                phones: [Labeled(label: "mobile", value: "415-555-0100")], emails: [Labeled(label: "home", value: "\(given)@example.com")]
+                id: resourceName, source: source, sourceIdentifier: resourceName, givenName: given,
+                familyName: "Test",
+                phones: [Labeled(label: "mobile", value: "415-555-0100")],
+                emails: [Labeled(label: "home", value: "\(given)@example.com")]
             ),
             isSelected: selected
         )
@@ -32,7 +36,9 @@ struct ImportExecutorTests {
             self.failingCreate = failingCreate
         }
 
-        func authorizationStatus() async -> ContactAuthorization { await base.authorizationStatus() }
+        func authorizationStatus() async -> ContactAuthorization {
+            await base.authorizationStatus()
+        }
         func requestAccess() async throws -> ContactAuthorization { try await base.requestAccess() }
         func fetchAll() async throws -> [ContactRecord] { try await base.fetchAll() }
         func create(_ record: ContactRecord, backup: BackupReceipt) async throws -> ContactRecord {
@@ -43,18 +49,28 @@ struct ImportExecutorTests {
             if number == failingCreate { throw Boom() }
             return try await base.create(record, backup: backup)
         }
-        func update(_ record: ContactRecord, backup: BackupReceipt) async throws { try await base.update(record, backup: backup) }
-        func merge(survivor: ContactRecord, absorbing ids: [String], backup: BackupReceipt) async throws {
+        func update(_ record: ContactRecord, backup: BackupReceipt) async throws {
+            try await base.update(record, backup: backup)
+        }
+        func merge(survivor: ContactRecord, absorbing ids: [String], backup: BackupReceipt)
+            async throws
+        {
             try await base.merge(survivor: survivor, absorbing: ids, backup: backup)
         }
-        func delete(ids: [String], backup: BackupReceipt) async throws { try await base.delete(ids: ids, backup: backup) }
-        func exportVCard(ids: [String]) async throws -> Data { try await base.exportVCard(ids: ids) }
+        func delete(ids: [String], backup: BackupReceipt) async throws {
+            try await base.delete(ids: ids, backup: backup)
+        }
+        func exportVCard(ids: [String]) async throws -> Data {
+            try await base.exportVCard(ids: ids)
+        }
         func changes() -> AsyncStream<Void> { base.changes() }
     }
 
     private struct BrokenLinks: LinkStoring {
         func load() throws -> LinkTable { LinkTable() }
-        func add(_ links: [ImportedLink], at date: Date) throws { throw LinkStoreError.unreadable("locked") }
+        func add(_ links: [ImportedLink], at date: Date) throws {
+            throw LinkStoreError.unreadable("locked")
+        }
         func remove(icloudIDs: [String]) throws {}
     }
 
@@ -63,7 +79,9 @@ struct ImportExecutorTests {
         let store = InMemoryContactStore()
         let old = BackupReceipt.forTesting(createdAt: Date(timeIntervalSinceNow: -7200))
         let executor = ImportExecutor(store: store, receipt: old)
-        await #expect(throws: ImportExecutor.Failure.staleBackup) { _ = try await executor.execute([candidate("people/c1", "Ann")]) }
+        await #expect(throws: ImportExecutor.Failure.staleBackup) {
+            _ = try await executor.execute([candidate("people/c1", "Ann")])
+        }
         #expect(store.mutationLog.isEmpty)
     }
 
@@ -81,18 +99,32 @@ struct ImportExecutorTests {
         #expect(first.record.source == .icloud && first.record.id == "mem-1")
     }
 
-    @Test("Contacts created from a connection are linked to its resource name; other contacts are not")
+    @Test(
+        "Contacts created from a connection are linked to its resource name; other contacts are not"
+    )
     func linksOnlyConnections() async throws {
         let store = InMemoryContactStore()
         let links = InMemoryLinkStore()
         let now = Date(timeIntervalSince1970: 1_800_000_000)
-        let result = try await ImportExecutor(store: store, receipt: .forTesting(createdAt: now), links: links)
-            .execute([candidate("people/c1", "Ann"), candidate("otherContacts/c7", "Cara", source: .googleOther)], now: now)
+        let result = try await ImportExecutor(
+            store: store, receipt: .forTesting(createdAt: now), links: links
+        )
+        .execute(
+            [
+                candidate("people/c1", "Ann"),
+                candidate("otherContacts/c7", "Cara", source: .googleOther),
+            ], now: now)
         #expect(result.created.count == 2)
-        #expect(result.links == [ImportedLink(icloudID: "mem-1", googleResourceName: "people/c1", displayName: "Ann Test")])
+        #expect(
+            result.links == [
+                ImportedLink(
+                    icloudID: "mem-1", googleResourceName: "people/c1", displayName: "Ann Test")
+            ])
         let table = try links.load()
         #expect(table.links == ["mem-1": LinkEntry(googleResourceName: "people/c1", linkedAt: now)])
-        #expect(table.links["mem-1"]?.displayName == "Ann Test", "the name is kept so a screen can say who the link was for after the contact is gone")
+        #expect(
+            table.links["mem-1"]?.displayName == "Ann Test",
+            "the name is kept so a screen can say who the link was for after the contact is gone")
         #expect(result.linkSaveError == nil)
     }
 
@@ -102,7 +134,10 @@ struct ImportExecutorTests {
         let links = InMemoryLinkStore()
         let store = FlakyStore(base: base, failingCreate: 2)
         let result = try await ImportExecutor(store: store, receipt: receipt, links: links)
-            .execute([candidate("people/c1", "Ann"), candidate("people/c2", "Bob"), candidate("people/c3", "Cy")])
+            .execute([
+                candidate("people/c1", "Ann"), candidate("people/c2", "Bob"),
+                candidate("people/c3", "Cy"),
+            ])
         #expect(!result.isComplete)
         #expect(result.created.map(\.candidateID) == ["people/c1"])
         #expect(result.stopped == .failed(candidateID: "people/c2", reason: "disk full"))
@@ -126,10 +161,12 @@ struct ImportExecutorTests {
         #expect(result.notAttempted == ["people/c2"])
     }
 
-    @Test("A link file that cannot be written does not undo the import; the links are still returned")
+    @Test(
+        "A link file that cannot be written does not undo the import; the links are still returned")
     func linkSaveFailure() async throws {
         let store = InMemoryContactStore()
-        let result = try await ImportExecutor(store: store, receipt: receipt, links: BrokenLinks()).execute([candidate("people/c1", "Ann")])
+        let result = try await ImportExecutor(store: store, receipt: receipt, links: BrokenLinks())
+            .execute([candidate("people/c1", "Ann")])
         #expect(result.isComplete && result.created.count == 1)
         #expect(result.links.count == 1)
         #expect(result.linkSaveError?.isEmpty == false)
@@ -140,7 +177,8 @@ struct ImportExecutorTests {
     func emptySelection() async throws {
         let store = InMemoryContactStore()
         let links = InMemoryLinkStore()
-        let result = try await ImportExecutor(store: store, receipt: receipt, links: links).execute([])
+        let result = try await ImportExecutor(store: store, receipt: receipt, links: links).execute(
+            [])
         #expect(result == ImportResult())
         #expect(store.mutationLog.isEmpty)
         #expect(try links.load().links.isEmpty)
@@ -150,7 +188,9 @@ struct ImportExecutorTests {
     func skipsUnselected() async throws {
         let store = InMemoryContactStore()
         let result = try await ImportExecutor(store: store, receipt: receipt)
-            .execute([candidate("people/c1", "Ann"), candidate("people/c2", "Bob", selected: false)])
+            .execute([
+                candidate("people/c1", "Ann"), candidate("people/c2", "Bob", selected: false),
+            ])
         #expect(result.created.map(\.candidateID) == ["people/c1"])
     }
 
@@ -160,7 +200,9 @@ struct ImportExecutorTests {
         let executor = ImportExecutor(store: store, receipt: receipt)
         let task = Task {
             withUnsafeCurrentTask { $0?.cancel() }
-            return try await executor.execute([candidate("people/c1", "Ann"), candidate("people/c2", "Bob")])
+            return try await executor.execute([
+                candidate("people/c1", "Ann"), candidate("people/c2", "Bob"),
+            ])
         }
         let result = try await task.value
         #expect(result.stopped == .cancelled)

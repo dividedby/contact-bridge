@@ -1,44 +1,66 @@
 import Foundation
 import Testing
+
 @testable import ContactBridgeCore
 
 struct GooglePersonMapperTests {
-    private func full() throws -> GooglePerson { try GoogleFixtures.decode(GooglePerson.self, "person_full") }
+    private func full() throws -> GooglePerson {
+        try GoogleFixtures.decode(GooglePerson.self, "person_full")
+    }
 
     // MARK: reading
 
     @Test("The primary name wins whatever its position")
     func primaryName() {
-        let person = GooglePerson(resourceName: "people/c1", names: [
-            GoogleName(givenName: "Annie", familyName: "L"),
-            GoogleName(metadata: GoogleFieldMetadata(primary: true), givenName: "Ann", familyName: "Lee"),
-        ])
+        let person = GooglePerson(
+            resourceName: "people/c1",
+            names: [
+                GoogleName(givenName: "Annie", familyName: "L"),
+                GoogleName(
+                    metadata: GoogleFieldMetadata(primary: true), givenName: "Ann",
+                    familyName: "Lee"),
+            ])
         #expect(GooglePersonMapper.record(from: person)?.givenName == "Ann")
     }
 
-    @Test("Birthdays without a year, or with year 0, are year-less; text-only birthdays are ignored")
+    @Test(
+        "Birthdays without a year, or with year 0, are year-less; text-only birthdays are ignored")
     func birthdays() {
         func record(_ date: GoogleDate?) -> ContactRecord? {
-            GooglePersonMapper.record(from: GooglePerson(resourceName: "people/c1", birthdays: [GoogleBirthday(date: date, text: "March")]))
+            GooglePersonMapper.record(
+                from: GooglePerson(
+                    resourceName: "people/c1",
+                    birthdays: [GoogleBirthday(date: date, text: "March")]))
         }
         #expect(record(GoogleDate(month: 3, day: 9))?.birthday == DateComponents(month: 3, day: 9))
-        #expect(record(GoogleDate(year: 0, month: 3, day: 9))?.birthday == DateComponents(month: 3, day: 9))
-        #expect(record(GoogleDate(year: 1990, month: 3, day: 9))?.birthday == DateComponents(year: 1990, month: 3, day: 9))
+        #expect(
+            record(GoogleDate(year: 0, month: 3, day: 9))?.birthday
+                == DateComponents(month: 3, day: 9))
+        #expect(
+            record(GoogleDate(year: 1990, month: 3, day: 9))?.birthday
+                == DateComponents(year: 1990, month: 3, day: 9))
         #expect(record(nil)?.birthday == nil)
         #expect(record(GoogleDate(year: 1990))?.birthday == nil)
     }
 
     @Test("A person without a resource name has no record")
     func noResourceName() {
-        #expect(GooglePersonMapper.record(from: GooglePerson(names: [GoogleName(givenName: "A")])) == nil)
+        #expect(
+            GooglePersonMapper.record(from: GooglePerson(names: [GoogleName(givenName: "A")]))
+                == nil)
     }
 
-    @Test("Labels map to the same friendly names the Apple side uses, and custom types pass through", arguments: [
-        ("mobile", "mobile"), ("home", "home"), ("work", "work"), ("other", "other"), ("main", "main"),
-        ("homeFax", "home fax"), ("workFax", "work fax"), ("otherFax", "other fax"), ("pager", "pager"),
-        ("workMobile", "work mobile"), ("workPager", "work pager"), ("googleVoice", "google voice"),
-        ("homePage", "homepage"), ("Cabin", "Cabin"),
-    ])
+    @Test(
+        "Labels map to the same friendly names the Apple side uses, and custom types pass through",
+        arguments: [
+            ("mobile", "mobile"), ("home", "home"), ("work", "work"), ("other", "other"),
+            ("main", "main"),
+            ("homeFax", "home fax"), ("workFax", "work fax"), ("otherFax", "other fax"),
+            ("pager", "pager"),
+            ("workMobile", "work mobile"), ("workPager", "work pager"),
+            ("googleVoice", "google voice"),
+            ("homePage", "homepage"), ("Cabin", "Cabin"),
+        ])
     func labels(type: String, friendly: String) {
         #expect(GooglePersonMapper.friendlyLabel(type) == friendly)
         #expect(GooglePersonMapper.googleType(friendly) == type)
@@ -72,23 +94,38 @@ struct GooglePersonMapperTests {
 
     @Test("Create payload splits a two-line street, omits blanks, and uppercases the country code")
     func createDetails() throws {
-        var record = ContactRecord(id: "x", source: .google, sourceIdentifier: "x", givenName: "Ann")
-        record.postalAddresses = [Labeled(label: "home", value: PostalAddress(
-            street: "1 Main\nApt 2", city: "Austin", isoCountryCode: "us"
-        ))]
-        record.phones = [Labeled(label: "home fax", value: "555-0100"), Labeled(label: nil, value: "555-0101"), Labeled(label: nil, value: " ")]
+        var record = ContactRecord(
+            id: "x", source: .google, sourceIdentifier: "x", givenName: "Ann")
+        record.postalAddresses = [
+            Labeled(
+                label: "home",
+                value: PostalAddress(
+                    street: "1 Main\nApt 2", city: "Austin", isoCountryCode: "us"
+                ))
+        ]
+        record.phones = [
+            Labeled(label: "home fax", value: "555-0100"), Labeled(label: nil, value: "555-0101"),
+            Labeled(label: nil, value: " "),
+        ]
         let payload = GooglePersonMapper.createPayload(for: record)
         let address = try #require(payload.addresses?.first)
-        #expect(address.streetAddress == "1 Main" && address.extendedAddress == "Apt 2" && address.countryCode == "US")
+        #expect(
+            address.streetAddress == "1 Main" && address.extendedAddress == "Apt 2"
+                && address.countryCode == "US")
         #expect(address.region == nil && address.postalCode == nil)
         #expect(payload.phoneNumbers?.map(\.type) == ["homeFax", nil])
-        #expect(payload.nicknames == nil && payload.organizations == nil && payload.birthdays == nil)
+        #expect(
+            payload.nicknames == nil && payload.organizations == nil && payload.birthdays == nil)
     }
 
     @Test("The create payload encodes without nulls")
     func encodesCleanly() throws {
-        let record = ContactRecord(id: "x", source: .google, sourceIdentifier: "x", givenName: "Ann", emails: [Labeled(label: "work", value: "a@x.com")])
-        let json = String(decoding: try JSONEncoder().encode(GooglePersonMapper.createPayload(for: record)), as: UTF8.self)
+        let record = ContactRecord(
+            id: "x", source: .google, sourceIdentifier: "x", givenName: "Ann",
+            emails: [Labeled(label: "work", value: "a@x.com")])
+        let json = String(
+            decoding: try JSONEncoder().encode(GooglePersonMapper.createPayload(for: record)),
+            as: UTF8.self)
         #expect(!json.contains("null"))
         #expect(json.contains(#""givenName":"Ann""#))
     }
@@ -97,39 +134,56 @@ struct GooglePersonMapperTests {
     func writesBirthdays() {
         var record = ContactRecord(id: "x", source: .google, sourceIdentifier: "x")
         record.birthday = DateComponents(month: 3, day: 9)
-        #expect(GooglePersonMapper.createPayload(for: record).birthdays?.first?.date == GoogleDate(month: 3, day: 9))
+        #expect(
+            GooglePersonMapper.createPayload(for: record).birthdays?.first?.date
+                == GoogleDate(month: 3, day: 9))
         record.birthday = DateComponents(year: 1990, month: 3, day: 9)
-        #expect(GooglePersonMapper.createPayload(for: record).birthdays?.first?.date == GoogleDate(year: 1990, month: 3, day: 9))
+        #expect(
+            GooglePersonMapper.createPayload(for: record).birthdays?.first?.date
+                == GoogleDate(year: 1990, month: 3, day: 9))
     }
 
     // MARK: update payloads
 
-    @Test("The update mask lists only modeled fields, adding clientData only when the ownership tag is written")
+    @Test(
+        "The update mask lists only modeled fields, adding clientData only when the ownership tag is written"
+    )
     func mask() throws {
         let existing = try full()
         let record = try #require(GooglePersonMapper.record(from: existing))
         let plain = GooglePersonMapper.updatePayload(for: record, existing: existing)
-        #expect(plain.updatePersonFields == "names,nicknames,organizations,phoneNumbers,emailAddresses,addresses,urls,birthdays")
+        #expect(
+            plain.updatePersonFields
+                == "names,nicknames,organizations,phoneNumbers,emailAddresses,addresses,urls,birthdays"
+        )
         #expect(plain.person.clientData == nil)
         #expect(plain.person.etag == existing.etag && plain.resourceName == existing.resourceName)
 
-        let tagged = GooglePersonMapper.updatePayload(for: record, existing: existing, ownershipSourceID: "NEW-ID")
+        let tagged = GooglePersonMapper.updatePayload(
+            for: record, existing: existing, ownershipSourceID: "NEW-ID")
         #expect(tagged.updatePersonFields.hasSuffix(",clientData"))
-        #expect(GooglePersonMapper.updatePersonFields(includingOwnershipTag: true) == tagged.updatePersonFields)
+        #expect(
+            GooglePersonMapper.updatePersonFields(includingOwnershipTag: true)
+                == tagged.updatePersonFields)
     }
 
-    @Test("Updating keeps what the record cannot express: other names, department, PO box, other apps' client data")
+    @Test(
+        "Updating keeps what the record cannot express: other names, department, PO box, other apps' client data"
+    )
     func updatePreserves() throws {
         let existing = try full()
         var record = try #require(GooglePersonMapper.record(from: existing))
         record.givenName = "Anne"
         record.jobTitle = "CEO"
         record.phones[0].value = "(415) 555-9999"
-        let payload = GooglePersonMapper.updatePayload(for: record, existing: existing, ownershipSourceID: "NEW-ID").person
+        let payload = GooglePersonMapper.updatePayload(
+            for: record, existing: existing, ownershipSourceID: "NEW-ID"
+        ).person
 
         #expect(payload.names?.count == 2)
         #expect(payload.names?[0].givenName == "Anne")
-        #expect(payload.names?[0].middleName == "Marie" && payload.names?[0].honorificPrefix == "Dr.")
+        #expect(
+            payload.names?[0].middleName == "Marie" && payload.names?[0].honorificPrefix == "Dr.")
         #expect(payload.names?[0].phoneticGivenName == "An")
         #expect(payload.names?[0].displayName == nil)
         #expect(payload.names?[1].givenName == "Annie")
@@ -138,7 +192,9 @@ struct GooglePersonMapperTests {
         #expect(payload.addresses?.first?.poBox == "PO 99")
         #expect(payload.phoneNumbers?[0].value == "(415) 555-9999")
         #expect(payload.phoneNumbers?[1].canonicalForm == "+12125553344")
-        #expect(payload.clientData?.contains(GoogleClientData(key: "otherApp.note", value: "keep me")) == true)
+        #expect(
+            payload.clientData?.contains(GoogleClientData(key: "otherApp.note", value: "keep me"))
+                == true)
         #expect(payload.contactBridgeSourceID == "NEW-ID")
         #expect(payload.clientData?.count == 2)
     }
@@ -208,7 +264,8 @@ struct GooglePersonMapperTests {
 
     @Test("A created payload can carry the iCloud identifier as the ownership tag")
     func createWithTag() {
-        let record = ContactRecord(id: "x", source: .google, sourceIdentifier: "x", givenName: "Ann")
+        let record = ContactRecord(
+            id: "x", source: .google, sourceIdentifier: "x", givenName: "Ann")
         let payload = GooglePersonMapper.createPayload(for: record, ownershipSourceID: "ICLOUD-9")
         #expect(payload.contactBridgeSourceID == "ICLOUD-9")
     }
@@ -230,7 +287,9 @@ struct GooglePersonMapperTests {
     @Test("Edited entries keep every key the models do not declare")
     func unknownKeysSurviveEdits() throws {
         let existing = try full()
-        let payload = GooglePersonMapper.updatePayload(for: try editedRecord(from: existing), existing: existing).person
+        let payload = GooglePersonMapper.updatePayload(
+            for: try editedRecord(from: existing), existing: existing
+        ).person
 
         #expect(payload.names?[0].givenName == "Anne")
         #expect(payload.names?[0].extras["phoneticFullName"] == .string("An Mari Li"))
@@ -238,8 +297,11 @@ struct GooglePersonMapperTests {
         let organization = try #require(payload.organizations?.first)
         #expect(organization.title == "CEO")
         #expect(organization.extras["jobDescription"] == .string("Runs engineering"))
-        #expect(organization.extras["startDate"] == .object(["year": .int(2019), "month": .int(4)]))
-        #expect(organization.extras["costCenter"] == .string("CC-1042") && organization.extras["location"] == .string("Austin HQ"))
+        #expect(
+            organization.extras["startDate"] == .object(["year": .int(2019), "month": .int(4)]))
+        #expect(
+            organization.extras["costCenter"] == .string("CC-1042")
+                && organization.extras["location"] == .string("Austin HQ"))
         #expect(organization.extras["domain"] == .string("acme.com"))
         #expect(payload.phoneNumbers?[0].value == "(415) 555-9999")
         #expect(payload.phoneNumbers?[0].canonicalForm == nil)
@@ -273,9 +335,13 @@ struct GooglePersonMapperTests {
     @Test("The encoded payload carries the unknown keys at entry level and no wrapper key")
     func payloadJSON() throws {
         let existing = try full()
-        let payload = GooglePersonMapper.updatePayload(for: try editedRecord(from: existing), existing: existing).person
+        let payload = GooglePersonMapper.updatePayload(
+            for: try editedRecord(from: existing), existing: existing
+        ).person
         let json = String(decoding: try JSONEncoder().encode(payload), as: UTF8.self)
-        for key in ["phoneticFullName", "jobDescription", "costCenter", "startDate", "futureField", "poBox"] {
+        for key in [
+            "phoneticFullName", "jobDescription", "costCenter", "startDate", "futureField", "poBox",
+        ] {
             #expect(json.contains(key), "missing \(key)")
         }
         #expect(!json.contains(#""extras""#))
@@ -305,7 +371,10 @@ struct GooglePersonMapperTests {
         record.emails[0].value = "bo@new.example"
         let update = GooglePersonMapper.updatePayload(for: record, existing: person)
         let json = String(decoding: try JSONEncoder().encode(update.person), as: UTF8.self)
-        for forbidden in ["bo@corp.com", "Redmond", "corp.example", "Robert", "Corp Inc", "Bobby", "+1 415 555 0002"] {
+        for forbidden in [
+            "bo@corp.com", "Redmond", "corp.example", "Robert", "Corp Inc", "Bobby",
+            "+1 415 555 0002",
+        ] {
             #expect(!json.contains(forbidden), "sent \(forbidden)")
         }
         #expect(update.person.emailAddresses?.map(\.value) == ["bo@new.example"])
@@ -315,14 +384,18 @@ struct GooglePersonMapperTests {
 
     // MARK: address matching
 
-    @Test("Address matching ignores sub-locality, sub-administrative area and ISO case, so the PO box survives")
+    @Test(
+        "Address matching ignores sub-locality, sub-administrative area and ISO case, so the PO box survives"
+    )
     func addressMatching() throws {
         let existing = try full()
         var record = try #require(GooglePersonMapper.record(from: existing))
         record.postalAddresses[0].value.subLocality = "Downtown"
         record.postalAddresses[0].value.subAdministrativeArea = "Travis"
         record.postalAddresses[0].value.isoCountryCode = "US"
-        let reused = try #require(GooglePersonMapper.updatePayload(for: record, existing: existing).person.addresses?.first)
+        let reused = try #require(
+            GooglePersonMapper.updatePayload(for: record, existing: existing).person.addresses?
+                .first)
         #expect(reused.poBox == "PO 99" && reused.countryCode == "US")
         #expect(reused.extras["futureField"] == .string("keep-addresses"))
         #expect(reused.formattedValue != nil)
@@ -334,13 +407,17 @@ struct GooglePersonMapperTests {
         var record = try #require(GooglePersonMapper.record(from: existing))
         record.postalAddresses[0].value.city = "Dallas"
         record.postalAddresses[0].value.isoCountryCode = "US"
-        let edited = try #require(GooglePersonMapper.updatePayload(for: record, existing: existing).person.addresses)
+        let edited = try #require(
+            GooglePersonMapper.updatePayload(for: record, existing: existing).person.addresses)
         #expect(edited.count == 1)
-        #expect(edited[0].city == "Dallas" && edited[0].poBox == "PO 99" && edited[0].countryCode == "US")
+        #expect(
+            edited[0].city == "Dallas" && edited[0].poBox == "PO 99"
+                && edited[0].countryCode == "US")
         #expect(edited[0].extras["futureField"] == .string("keep-addresses"))
 
         record.postalAddresses[0].label = "work"
-        let relabelled = try #require(GooglePersonMapper.updatePayload(for: record, existing: existing).person.addresses)
+        let relabelled = try #require(
+            GooglePersonMapper.updatePayload(for: record, existing: existing).person.addresses)
         #expect(relabelled[0].poBox == nil && relabelled[0].type == "work")
     }
 
@@ -354,7 +431,9 @@ struct GooglePersonMapperTests {
         let payload = GooglePersonMapper.updatePayload(for: record, existing: existing)
         #expect(!payload.updatePersonFields.split(separator: ",").contains("birthdays"))
         #expect(payload.person.birthdays == nil)
-        #expect(payload.updatePersonFields == "names,nicknames,organizations,phoneNumbers,emailAddresses,addresses,urls")
+        #expect(
+            payload.updatePersonFields
+                == "names,nicknames,organizations,phoneNumbers,emailAddresses,addresses,urls")
     }
 
     @Test("A record birthday replaces a text-only one, keeping unknown keys")

@@ -18,9 +18,14 @@ public enum BackupError: Error, Equatable, Sendable {
 public struct BackupWriter: Sendable {
     /// `~/Library/Application Support/Contact Bridge/Backups` (inside the app's container when sandboxed).
     public static var defaultDirectory: URL {
-        let support = (try? FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true))
-            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support")
-        return support.appendingPathComponent("Contact Bridge", isDirectory: true).appendingPathComponent("Backups", isDirectory: true)
+        let support =
+            (try? FileManager.default.url(
+                for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil,
+                create: true))
+            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(
+                "Library/Application Support")
+        return support.appendingPathComponent("Contact Bridge", isDirectory: true)
+            .appendingPathComponent("Backups", isDirectory: true)
     }
 
     private let store: any ContactStoring
@@ -67,67 +72,96 @@ public struct BackupWriter: Sendable {
     }
 
     public static var bundleVersion: String {
-        (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "0.0.0-dev"
+        (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String)
+            ?? "0.0.0-dev"
     }
 
     // MARK: backup
 
     public func createBackup() async throws -> BackupReceipt {
         // Read the small sources first: a failing Google or notes call leaves no trace on disk.
-        let records = try await store.fetchAll().sorted { ($0.id, $0.sourceIdentifier) < ($1.id, $1.sourceIdentifier) }
+        let records = try await store.fetchAll().sorted {
+            ($0.id, $0.sourceIdentifier) < ($1.id, $1.sourceIdentifier)
+        }
         let identifiers = records.map(\.sourceIdentifier)
         var connections: [GooglePerson]?
         var others: [GooglePerson]?
         if let google {
-            connections = try await Self.allPages("google-connections") { try await google.listConnections(syncToken: nil, pageToken: $0) }
-            others = try await Self.allPages("google-other") { try await google.listOtherContacts(pageToken: $0) }
+            connections = try await Self.allPages("google-connections") {
+                try await google.listConnections(syncToken: nil, pageToken: $0)
+            }
+            others = try await Self.allPages("google-other") {
+                try await google.listOtherContacts(pageToken: $0)
+            }
         }
-        let googlePhotos = if let connections, let photoFetcher { await Self.downloadPhotos(of: connections, with: photoFetcher) } else { nil as [GooglePhotoDownload]? }
+        let googlePhotos =
+            if let connections, let photoFetcher {
+                await Self.downloadPhotos(of: connections, with: photoFetcher)
+            } else { nil as [GooglePhotoDownload]? }
         // Contacts without a note come back as "": the file lists only real notes.
         let noteMap = try await notes?.fetchNotes(ids: identifiers).filter { !$0.value.isEmpty }
         let createdAt = Date(timeIntervalSince1970: now().timeIntervalSince1970.rounded(.down))
 
         let fm = FileManager.default
         try fm.createDirectory(at: baseDirectory, withIntermediateDirectories: true)
-        let temp = baseDirectory.appendingPathComponent("\(Self.tempPrefix)\(UUID().uuidString)", isDirectory: true)
+        let temp = baseDirectory.appendingPathComponent(
+            "\(Self.tempPrefix)\(UUID().uuidString)", isDirectory: true)
         let manifest: BackupManifest
         let final: URL
         do {
             try fm.createDirectory(at: temp, withIntermediateDirectories: false)
             let vcard = try await writeVCard(identifiers, into: temp)
             var files = [vcard.file]
-            files.append(try writeFile("icloud.json", Self.encode(records), recordCount: records.count, into: temp))
+            files.append(
+                try writeFile(
+                    "icloud.json", Self.encode(records), recordCount: records.count, into: temp))
             if let connections {
-                files.append(try writeFile("google-connections.json", Self.encode(connections), recordCount: connections.count, into: temp))
+                files.append(
+                    try writeFile(
+                        "google-connections.json", Self.encode(connections),
+                        recordCount: connections.count, into: temp))
             }
             if let others {
-                files.append(try writeFile("google-other.json", Self.encode(others), recordCount: others.count, into: temp))
+                files.append(
+                    try writeFile(
+                        "google-other.json", Self.encode(others), recordCount: others.count,
+                        into: temp))
             }
             if let noteMap {
-                files.append(try writeFile("icloud-notes.json", Self.encode(noteMap), recordCount: noteMap.count, into: temp))
+                files.append(
+                    try writeFile(
+                        "icloud-notes.json", Self.encode(noteMap), recordCount: noteMap.count,
+                        into: temp))
             }
             if let googlePhotos {
-                try fm.createDirectory(at: temp.appendingPathComponent(Self.googlePhotoFolder), withIntermediateDirectories: false)
+                try fm.createDirectory(
+                    at: temp.appendingPathComponent(Self.googlePhotoFolder),
+                    withIntermediateDirectories: false)
                 for download in googlePhotos {
                     if let file = download.entry.file, let data = download.data {
                         files.append(try writeFile(file, data, recordCount: nil, into: temp))
                     }
                 }
                 let index = googlePhotos.map(\.entry)
-                files.append(try writeFile("google-photos.json", Self.encode(index), recordCount: index.count, into: temp))
+                files.append(
+                    try writeFile(
+                        "google-photos.json", Self.encode(index), recordCount: index.count,
+                        into: temp))
             }
             manifest = BackupManifest(
                 appVersion: appVersion,
                 createdAt: createdAt,
                 sources: ["icloud"] + (google == nil ? [] : ["google", "googleOther"]),
                 counts: BackupManifest.Counts(
-                    icloud: records.count, googleConnections: connections?.count, googleOther: others?.count, icloudPhotos: vcard.photos,
+                    icloud: records.count, googleConnections: connections?.count,
+                    googleOther: others?.count, icloudPhotos: vcard.photos,
                     googlePhotos: googlePhotos?.filter { $0.data != nil }.count
                 ),
                 files: files,
                 notesIncluded: noteMap != nil
             )
-            _ = try writeFile("manifest.json", Self.encodeManifest(manifest), recordCount: nil, into: temp)
+            _ = try writeFile(
+                "manifest.json", Self.encodeManifest(manifest), recordCount: nil, into: temp)
             try beforeVerify?(temp)
             try Self.verify(temp, manifest: manifest, expectedCards: records.count)
             try syncDirectory(temp)
@@ -160,7 +194,9 @@ public struct BackupWriter: Sendable {
             people += page.people
             pages += 1
             guard let next = page.nextPageToken else { return people }
-            guard pages < maxPages, seen.insert(next).inserted else { throw BackupError.pagingDidNotTerminate(source) }
+            guard pages < maxPages, seen.insert(next).inserted else {
+                throw BackupError.pagingDidNotTerminate(source)
+            }
             token = next
         }
     }
@@ -187,9 +223,13 @@ public struct BackupWriter: Sendable {
     }
 
     /// Each contact's own photo (not a profile photo or a letter avatar) at full size, a few at a time, in contact order.
-    private static func downloadPhotos(of people: [GooglePerson], with fetcher: any GooglePhotoFetching) async -> [GooglePhotoDownload] {
+    private static func downloadPhotos(
+        of people: [GooglePerson], with fetcher: any GooglePhotoFetching
+    ) async -> [GooglePhotoDownload] {
         let wanted = people.compactMap { person -> (String, GooglePhotoRef)? in
-            guard let resourceName = person.resourceName, let photo = GooglePersonMapper.photos(of: person).contact else { return nil }
+            guard let resourceName = person.resourceName,
+                let photo = GooglePersonMapper.photos(of: person).contact
+            else { return nil }
             return (resourceName, photo)
         }
         var results = [GooglePhotoDownload?](repeating: nil, count: wanted.count)
@@ -197,14 +237,18 @@ public struct BackupWriter: Sendable {
             var next = 0
             func start() {
                 guard next < wanted.count else { return }
-                let index = next, (resourceName, photo) = wanted[index]
+                let index = next
+                let (resourceName, photo) = wanted[index]
                 next += 1
                 group.addTask {
                     var entry = GooglePhotoEntry(resourceName: resourceName, url: photo.key)
                     do {
-                        guard let url = photo.sizedURL(0) else { throw GooglePhotoError.notAllowed("the photo has no usable address") }
+                        guard let url = photo.sizedURL(0) else {
+                            throw GooglePhotoError.notAllowed("the photo has no usable address")
+                        }
                         let data = try await fetcher.fetch(url)
-                        entry.file = "\(googlePhotoFolder)/\(fileStem(resourceName)).\(fileExtension(data))"
+                        entry.file =
+                            "\(googlePhotoFolder)/\(fileStem(resourceName)).\(fileExtension(data))"
                         return (index, GooglePhotoDownload(entry: entry, data: data))
                     } catch {
                         entry.error = error.localizedDescription
@@ -272,14 +316,17 @@ public struct BackupWriter: Sendable {
         func abort() { try? handle.close() }
     }
 
-    private func writeFile(_ name: String, _ data: Data, recordCount: Int?, into folder: URL) throws -> BackupManifest.File {
+    private func writeFile(_ name: String, _ data: Data, recordCount: Int?, into folder: URL) throws
+        -> BackupManifest.File
+    {
         let url = folder.appendingPathComponent(name)
         let sink = try FileSink(url: url)
         do {
             try sink.append(data)
             let sha = try sink.finish()
             onSync?(url)
-            return BackupManifest.File(name: name, sha256: sha, bytes: sink.bytes, recordCount: recordCount)
+            return BackupManifest.File(
+                name: name, sha256: sha, bytes: sink.bytes, recordCount: recordCount)
         } catch {
             sink.abort()
             throw error
@@ -287,7 +334,9 @@ public struct BackupWriter: Sendable {
     }
 
     /// Exports the vCard `exportChunkSize` ids at a time, appending each chunk, and counts the cards and photos written.
-    private func writeVCard(_ identifiers: [String], into folder: URL) async throws -> (file: BackupManifest.File, photos: Int) {
+    private func writeVCard(_ identifiers: [String], into folder: URL) async throws -> (
+        file: BackupManifest.File, photos: Int
+    ) {
         let url = folder.appendingPathComponent("icloud.vcf")
         let sink = try FileSink(url: url)
         do {
@@ -301,7 +350,10 @@ public struct BackupWriter: Sendable {
             }
             let sha = try sink.finish()
             onSync?(url)
-            return (BackupManifest.File(name: "icloud.vcf", sha256: sha, bytes: sink.bytes, recordCount: cards), photos)
+            return (
+                BackupManifest.File(
+                    name: "icloud.vcf", sha256: sha, bytes: sink.bytes, recordCount: cards), photos
+            )
         } catch {
             sink.abort()
             throw error
@@ -312,7 +364,9 @@ public struct BackupWriter: Sendable {
         let descriptor = open(url.path, O_RDONLY)
         guard descriptor >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
         defer { close(descriptor) }
-        guard fsync(descriptor) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        guard fsync(descriptor) == 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
         onSync?(url)
     }
 
@@ -350,23 +404,35 @@ public struct BackupWriter: Sendable {
         for file in manifest.files {
             let url = folder.appendingPathComponent(file.name)
             let isVCard = file.name == "icloud.vcf"
-            guard let digest = try? digest(of: url, countingCards: isVCard), digest.bytes == file.bytes, digest.sha256 == file.sha256 else {
+            guard let digest = try? digest(of: url, countingCards: isVCard),
+                digest.bytes == file.bytes, digest.sha256 == file.sha256
+            else {
                 throw BackupError.verificationFailed(file.name)
             }
             if isVCard {
-                guard digest.cards == file.recordCount, digest.cards == expectedCards else { throw BackupError.verificationFailed(file.name) }
+                guard digest.cards == file.recordCount, digest.cards == expectedCards else {
+                    throw BackupError.verificationFailed(file.name)
+                }
             } else if let expected = file.recordCount {
-                let count = (try? Data(contentsOf: url)).flatMap { try? JSONSerialization.jsonObject(with: $0) }
-                    .map { ($0 as? [Any])?.count ?? ($0 as? [String: Any])?.count }
+                let count = (try? Data(contentsOf: url)).flatMap {
+                    try? JSONSerialization.jsonObject(with: $0)
+                }
+                .map { ($0 as? [Any])?.count ?? ($0 as? [String: Any])?.count }
                 guard count == expected else { throw BackupError.verificationFailed(file.name) }
             }
         }
-        guard let written = try? decodeManifest(Data(contentsOf: folder.appendingPathComponent("manifest.json"))), written == manifest else {
+        guard
+            let written = try? decodeManifest(
+                Data(contentsOf: folder.appendingPathComponent("manifest.json"))),
+            written == manifest
+        else {
             throw BackupError.verificationFailed("manifest.json")
         }
     }
 
-    private static func digest(of url: URL, countingCards: Bool) throws -> (sha256: String, bytes: Int, cards: Int) {
+    private static func digest(of url: URL, countingCards: Bool) throws -> (
+        sha256: String, bytes: Int, cards: Int
+    ) {
         let handle = try FileHandle(forReadingFrom: url)
         defer { try? handle.close() }
         var hasher = SHA256()
@@ -403,7 +469,8 @@ public struct BackupWriter: Sendable {
         let fm = FileManager.default
         let base = folderBaseName(for: createdAt)
         for attempt in 1...100 {
-            let destination = baseDirectory.appendingPathComponent(attempt == 1 ? base : "\(base)-\(attempt)", isDirectory: true)
+            let destination = baseDirectory.appendingPathComponent(
+                attempt == 1 ? base : "\(base)-\(attempt)", isDirectory: true)
             if fm.fileExists(atPath: destination.path) { continue }
             do {
                 try beforeMove?(destination)
@@ -424,29 +491,39 @@ public struct BackupWriter: Sendable {
     private func prune(keeping justMade: URL) {
         let fm = FileManager.default
         let keys: [URLResourceKey] = [.isDirectoryKey, .contentModificationDateKey]
-        guard let children = try? fm.contentsOfDirectory(at: baseDirectory, includingPropertiesForKeys: keys) else { return }
+        guard
+            let children = try? fm.contentsOfDirectory(
+                at: baseDirectory, includingPropertiesForKeys: keys)
+        else { return }
 
         var backups: [(url: URL, createdAt: Date)] = []
         for url in children {
-            guard let values = try? url.resourceValues(forKeys: Set(keys)), values.isDirectory == true else { continue }
+            guard let values = try? url.resourceValues(forKeys: Set(keys)),
+                values.isDirectory == true
+            else { continue }
             if url.lastPathComponent.hasPrefix(Self.tempPrefix) {
-                if let modified = values.contentModificationDate, Date().timeIntervalSince(modified) > 24 * 3600 {
+                if let modified = values.contentModificationDate,
+                    Date().timeIntervalSince(modified) > 24 * 3600
+                {
                     try? fm.removeItem(at: url)
                 }
                 continue
             }
             guard let data = try? Data(contentsOf: url.appendingPathComponent("manifest.json")),
-                  let manifest = try? Self.decodeManifest(data)
+                let manifest = try? Self.decodeManifest(data)
             else { continue }
             backups.append((url, manifest.createdAt))
         }
-        let newestFirst = backups.sorted { ($0.createdAt, $0.url.lastPathComponent) > ($1.createdAt, $1.url.lastPathComponent) }
-        for backup in newestFirst.dropFirst(retention) where backup.url.standardizedFileURL != justMade.standardizedFileURL {
+        let newestFirst = backups.sorted {
+            ($0.createdAt, $0.url.lastPathComponent) > ($1.createdAt, $1.url.lastPathComponent)
+        }
+        for backup in newestFirst.dropFirst(retention)
+        where backup.url.standardizedFileURL != justMade.standardizedFileURL {
             try? fm.removeItem(at: backup.url)
         }
     }
 }
 
-private extension SHA256.Digest {
-    var hexString: String { map { String(format: "%02x", $0) }.joined() }
+extension SHA256.Digest {
+    fileprivate var hexString: String { map { String(format: "%02x", $0) }.joined() }
 }

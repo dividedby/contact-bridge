@@ -25,7 +25,9 @@ public actor FakeGoogleClient: GoogleContactsClient {
         /// For batch calls: fails only the items at these positions (within one chunk) and applies the rest.
         case partialBatch(indices: Set<Int>, error: GoogleAPIError)
 
-        public static func rateLimited(retryAfter: TimeInterval? = nil) -> Failure { .error(.rateLimited(retryAfter: retryAfter)) }
+        public static func rateLimited(retryAfter: TimeInterval? = nil) -> Failure {
+            .error(.rateLimited(retryAfter: retryAfter))
+        }
         public static var etagMismatch: Failure { .error(.etagMismatch) }
     }
 
@@ -71,7 +73,8 @@ public actor FakeGoogleClient: GoogleContactsClient {
     ///   - contactPhotos: the contact's own photo, by resource name, for people who start with one.
     ///   - profilePhotos: the Google profile photo, by resource name.
     public init(
-        people seeded: [GooglePerson] = [], otherContacts: [GooglePerson] = [], pageSize: Int = 100, contactPhotos: [String: Data] = [:],
+        people seeded: [GooglePerson] = [], otherContacts: [GooglePerson] = [], pageSize: Int = 100,
+        contactPhotos: [String: Data] = [:],
         profilePhotos: [String: Data] = [:]
     ) {
         self.pageSize = max(pageSize, 1)
@@ -106,10 +109,14 @@ public actor FakeGoogleClient: GoogleContactsClient {
                 seededPhotos[key] = bytes
                 var entries: [JSONValue] = []
                 if case .array(let existing)? = person.extras["photos"] { entries = existing }
-                entries.append(.object([
-                    "url": .string(key + "=s100"),
-                    "metadata": .object(["primary": .bool(true), "source": .object(["type": .string(source), "id": .string(name)])]),
-                ]))
+                entries.append(
+                    .object([
+                        "url": .string(key + "=s100"),
+                        "metadata": .object([
+                            "primary": .bool(true),
+                            "source": .object(["type": .string(source), "id": .string(name)]),
+                        ]),
+                    ]))
                 person.extras["photos"] = .array(entries)
                 seededPeople[name] = person
             }
@@ -143,7 +150,9 @@ public actor FakeGoogleClient: GoogleContactsClient {
 
     // MARK: reads
 
-    public func listConnections(syncToken: String?, pageToken: String?) async throws -> GooglePeoplePage {
+    public func listConnections(syncToken: String?, pageToken: String?) async throws
+        -> GooglePeoplePage
+    {
         try fail(.listConnections)
         var fresh: Snapshot?
         if pageToken == nil {
@@ -154,10 +163,14 @@ public actor FakeGoogleClient: GoogleContactsClient {
                 }
                 guard since >= expiredBefore else { throw GoogleAPIError.syncTokenExpired }
                 var lastChange: [String: Bool] = [:]
-                for change in changes where change.version > since { lastChange[change.resourceName] = change.deleted }
+                for change in changes where change.version > since {
+                    lastChange[change.resourceName] = change.deleted
+                }
                 items = lastChange.keys.sorted(by: orderedBefore).compactMap { name in
                     if lastChange[name] == true {
-                        return GooglePerson(resourceName: name, metadata: GooglePersonMetadata(deleted: true, objectType: "PERSON"))
+                        return GooglePerson(
+                            resourceName: name,
+                            metadata: GooglePersonMetadata(deleted: true, objectType: "PERSON"))
                     }
                     return people[name]
                 }
@@ -167,7 +180,9 @@ public actor FakeGoogleClient: GoogleContactsClient {
             fresh = Snapshot(items: items, version: version)
         }
         let (slice, next, snapshotVersion) = try page(fresh, pageToken: pageToken)
-        return GooglePeoplePage(people: slice, nextPageToken: next, nextSyncToken: next == nil ? "sync-\(snapshotVersion)" : nil)
+        return GooglePeoplePage(
+            people: slice, nextPageToken: next,
+            nextSyncToken: next == nil ? "sync-\(snapshotVersion)" : nil)
     }
 
     public func listOtherContacts(pageToken: String?) async throws -> GooglePeoplePage {
@@ -179,7 +194,11 @@ public actor FakeGoogleClient: GoogleContactsClient {
 
     public func getPerson(resourceName: String) async throws -> GooglePerson {
         try fail(.getPerson)
-        if let person = people[resourceName] ?? others.first(where: { $0.resourceName == resourceName }) { return person }
+        if let person = people[resourceName]
+            ?? others.first(where: { $0.resourceName == resourceName })
+        {
+            return person
+        }
         throw GoogleAPIError.notFound
     }
 
@@ -195,7 +214,8 @@ public actor FakeGoogleClient: GoogleContactsClient {
         resourceName: String, etag: String, person: GooglePerson, updatePersonFields: String
     ) async throws -> GooglePerson {
         try fail(.updateContact)
-        return try applyUpdate(resourceName: resourceName, etag: etag, person: person, mask: updatePersonFields)
+        return try applyUpdate(
+            resourceName: resourceName, etag: etag, person: person, mask: updatePersonFields)
     }
 
     public func deleteContact(resourceName: String) async throws {
@@ -205,9 +225,13 @@ public actor FakeGoogleClient: GoogleContactsClient {
 
     // MARK: photos
 
-    public func updateContactPhoto(resourceName: String, photoBytes: Data) async throws -> GooglePerson {
+    public func updateContactPhoto(resourceName: String, photoBytes: Data) async throws
+        -> GooglePerson
+    {
         try fail(.updateContactPhoto)
-        guard PhotoImage.isDecodable(photoBytes) else { throw GoogleAPIError.other(status: 400, message: "The photo is not a valid image") }
+        guard PhotoImage.isDecodable(photoBytes) else {
+            throw GoogleAPIError.other(status: 400, message: "The photo is not a valid image")
+        }
         let person = try applyPhoto(photoBytes, source: "CONTACT", to: resourceName)
         photoWrites.append(PhotoWrite(resourceName: resourceName, bytes: photoBytes))
         return person
@@ -240,17 +264,23 @@ public actor FakeGoogleClient: GoogleContactsClient {
 
     /// The bytes of the contact's own photo, if it has one.
     public func contactPhotoBytes(for resourceName: String) -> Data? {
-        people[resourceName].flatMap { GooglePersonMapper.photos(of: $0).contact }.flatMap { photoStore[$0.key] }
+        people[resourceName].flatMap { GooglePersonMapper.photos(of: $0).contact }.flatMap {
+            photoStore[$0.key]
+        }
     }
 
     /// Replaces the `source` entry in the person's `photos` (adds one for `bytes`; none for nil) and commits.
-    private func applyPhoto(_ bytes: Data?, source: String, to resourceName: String) throws -> GooglePerson {
+    private func applyPhoto(_ bytes: Data?, source: String, to resourceName: String) throws
+        -> GooglePerson
+    {
         guard var stored = people[resourceName] else { throw GoogleAPIError.notFound }
         var entries: [JSONValue] = []
         if case .array(let existing)? = stored.extras["photos"] {
             entries = existing.filter { entry in
-                guard case .object(let fields) = entry, case .object(let metadata)? = fields["metadata"],
-                      case .object(let origin)? = metadata["source"], case .string(let type)? = origin["type"]
+                guard case .object(let fields) = entry,
+                    case .object(let metadata)? = fields["metadata"],
+                    case .object(let origin)? = metadata["source"],
+                    case .string(let type)? = origin["type"]
                 else { return true }
                 return type != source
             }
@@ -259,10 +289,14 @@ public actor FakeGoogleClient: GoogleContactsClient {
             let key = "https://lh3.googleusercontent.com/fake/\(source.lowercased())/\(nextPhotoID)"
             nextPhotoID += 1
             photoStore[key] = bytes
-            entries.append(.object([
-                "url": .string(key + "=s100"),
-                "metadata": .object(["primary": .bool(true), "source": .object(["type": .string(source), "id": .string(resourceName)])]),
-            ]))
+            entries.append(
+                .object([
+                    "url": .string(key + "=s100"),
+                    "metadata": .object([
+                        "primary": .bool(true),
+                        "source": .object(["type": .string(source), "id": .string(resourceName)]),
+                    ]),
+                ]))
         }
         stored.extras["photos"] = entries.isEmpty ? nil : .array(entries)
         commit(stored, deleted: false)
@@ -288,11 +322,16 @@ public actor FakeGoogleClient: GoogleContactsClient {
             let mask = group[0].update.updatePersonFields
             let outcome = await runBatch(.batchUpdate, group.map(\.update), run: &run) { update in
                 let updated = try self.applyUpdate(
-                    resourceName: update.resourceName, etag: update.etag, person: update.person, mask: mask
+                    resourceName: update.resourceName, etag: update.etag, person: update.person,
+                    mask: mask
                 )
                 return GoogleBatchResult(resourceName: update.resourceName, person: updated)
-            } resourceName: { $0.resourceName }
-            for (position, result) in outcome.enumerated() { results[group[position].index] = result }
+            } resourceName: {
+                $0.resourceName
+            }
+            for (position, result) in outcome.enumerated() {
+                results[group[position].index] = result
+            }
         }
         return results.compactMap { $0 }
     }
@@ -330,13 +369,17 @@ public actor FakeGoogleClient: GoogleContactsClient {
                 let partial = try self.failBatch(operation)
                 self.batchSizes[operation, default: []].append(chunk.count)
                 return chunk.enumerated().map { index, item in
-                    if let error = partial[index] { return GoogleBatchResult(resourceName: resourceName(item), error: error) }
+                    if let error = partial[index] {
+                        return GoogleBatchResult(resourceName: resourceName(item), error: error)
+                    }
                     do {
                         return try apply(item)
                     } catch let error as GoogleAPIError {
                         return GoogleBatchResult(resourceName: resourceName(item), error: error)
                     } catch {
-                        return GoogleBatchResult(resourceName: resourceName(item), error: .other(status: 500, message: "\(error)"))
+                        return GoogleBatchResult(
+                            resourceName: resourceName(item),
+                            error: .other(status: 500, message: "\(error)"))
                     }
                 }
             }
@@ -348,27 +391,39 @@ public actor FakeGoogleClient: GoogleContactsClient {
 
     public func ensureGroup(named name: String) async throws -> String {
         try fail(.ensureGroup)
-        if let existing = groups.values.first(where: { $0.name == name }), let resourceName = existing.resourceName {
+        if let existing = groups.values.first(where: { $0.name == name }),
+            let resourceName = existing.resourceName
+        {
             return resourceName
         }
         let resourceName = "contactGroups/\(String(nextGroupID + 0xA0B0, radix: 16))"
         nextGroupID += 1
-        groups[resourceName] = GoogleContactGroup(resourceName: resourceName, etag: "g0", name: name, groupType: "USER_CONTACT_GROUP", memberCount: 0)
+        groups[resourceName] = GoogleContactGroup(
+            resourceName: resourceName, etag: "g0", name: name, groupType: "USER_CONTACT_GROUP",
+            memberCount: 0)
         return resourceName
     }
 
     public func addMembers(groupResourceName: String, memberResourceNames: [String]) async throws {
         try fail(.addMembers)
         guard var group = groups[groupResourceName] else { throw GoogleAPIError.notFound }
-        guard memberResourceNames.allSatisfy({ people[$0] != nil }) else { throw GoogleAPIError.notFound }
+        guard memberResourceNames.allSatisfy({ people[$0] != nil }) else {
+            throw GoogleAPIError.notFound
+        }
         let groupID = String(groupResourceName.dropFirst("contactGroups/".count))
         for name in memberResourceNames {
             guard var person = people[name] else { continue }
             var memberships = person.memberships ?? []
-            if memberships.contains(where: { $0.contactGroupMembership?.contactGroupResourceName == groupResourceName }) { continue }
-            memberships.append(GoogleMembership(
-                contactGroupMembership: GoogleContactGroupMembership(contactGroupId: groupID, contactGroupResourceName: groupResourceName)
-            ))
+            if memberships.contains(where: {
+                $0.contactGroupMembership?.contactGroupResourceName == groupResourceName
+            }) {
+                continue
+            }
+            memberships.append(
+                GoogleMembership(
+                    contactGroupMembership: GoogleContactGroupMembership(
+                        contactGroupId: groupID, contactGroupResourceName: groupResourceName)
+                ))
             person.memberships = memberships
             commit(person, deleted: false)
             group.memberCount = (group.memberCount ?? 0) + 1
@@ -398,12 +453,17 @@ public actor FakeGoogleClient: GoogleContactsClient {
     }
 
     private static let acceptedMasks: Set<String> = [
-        "addresses", "ageRanges", "biographies", "birthdays", "calendarUrls", "clientData", "emailAddresses", "events",
-        "externalIds", "genders", "imClients", "interests", "locales", "locations", "memberships", "miscKeywords",
-        "names", "nicknames", "occupations", "organizations", "phoneNumbers", "relations", "sipAddresses", "urls", "userDefined",
+        "addresses", "ageRanges", "biographies", "birthdays", "calendarUrls", "clientData",
+        "emailAddresses", "events",
+        "externalIds", "genders", "imClients", "interests", "locales", "locations", "memberships",
+        "miscKeywords",
+        "names", "nicknames", "occupations", "organizations", "phoneNumbers", "relations",
+        "sipAddresses", "urls", "userDefined",
     ]
 
-    private func applyUpdate(resourceName: String, etag: String, person: GooglePerson, mask: String) throws -> GooglePerson {
+    private func applyUpdate(resourceName: String, etag: String, person: GooglePerson, mask: String)
+        throws -> GooglePerson
+    {
         guard var stored = people[resourceName] else { throw GoogleAPIError.notFound }
         guard stored.etag == etag else { throw GoogleAPIError.etagMismatch }
         let fields = mask.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
@@ -413,14 +473,27 @@ public actor FakeGoogleClient: GoogleContactsClient {
         if fields.contains("clientData") { try Self.checkClientData(person.clientData) }
         for field in fields {
             switch field {
-            case "names": stored.names = Self.replacingContactEntries(stored.names, with: person.names)
-            case "nicknames": stored.nicknames = Self.replacingContactEntries(stored.nicknames, with: person.nicknames)
-            case "organizations": stored.organizations = Self.replacingContactEntries(stored.organizations, with: person.organizations)
-            case "phoneNumbers": stored.phoneNumbers = Self.replacingContactEntries(stored.phoneNumbers, with: person.phoneNumbers)
-            case "emailAddresses": stored.emailAddresses = Self.replacingContactEntries(stored.emailAddresses, with: person.emailAddresses)
-            case "addresses": stored.addresses = Self.replacingContactEntries(stored.addresses, with: person.addresses)
+            case "names":
+                stored.names = Self.replacingContactEntries(stored.names, with: person.names)
+            case "nicknames":
+                stored.nicknames = Self.replacingContactEntries(
+                    stored.nicknames, with: person.nicknames)
+            case "organizations":
+                stored.organizations = Self.replacingContactEntries(
+                    stored.organizations, with: person.organizations)
+            case "phoneNumbers":
+                stored.phoneNumbers = Self.replacingContactEntries(
+                    stored.phoneNumbers, with: person.phoneNumbers)
+            case "emailAddresses":
+                stored.emailAddresses = Self.replacingContactEntries(
+                    stored.emailAddresses, with: person.emailAddresses)
+            case "addresses":
+                stored.addresses = Self.replacingContactEntries(
+                    stored.addresses, with: person.addresses)
             case "urls": stored.urls = Self.replacingContactEntries(stored.urls, with: person.urls)
-            case "birthdays": stored.birthdays = Self.replacingContactEntries(stored.birthdays, with: person.birthdays)
+            case "birthdays":
+                stored.birthdays = Self.replacingContactEntries(
+                    stored.birthdays, with: person.birthdays)
             case "memberships": stored.memberships = person.memberships
             case "clientData": stored.clientData = person.clientData
             default: stored.extras[field] = person.extras[field]
@@ -432,13 +505,16 @@ public actor FakeGoogleClient: GoogleContactsClient {
 
     private static func checkClientData(_ entries: [GoogleClientData]?) throws {
         if (entries?.count ?? 0) > 10 {
-            throw GoogleAPIError.other(status: 400, message: "A person can have at most 10 clientData entries")
+            throw GoogleAPIError.other(
+                status: 400, message: "A person can have at most 10 clientData entries")
         }
     }
 
     /// Entries from the contact are replaced by the request's; entries merged in from a profile or directory are
     /// read-only and stay.
-    private static func replacingContactEntries<T: GoogleMetadataCarrying>(_ stored: [T]?, with incoming: [T]?) -> [T]? {
+    private static func replacingContactEntries<T: GoogleMetadataCarrying>(
+        _ stored: [T]?, with incoming: [T]?
+    ) -> [T]? {
         let readOnly = (stored ?? []).filter { !GooglePersonMapper.isContactSourced($0) }
         let writable = (incoming ?? []).filter(GooglePersonMapper.isContactSourced)
         let merged = writable + readOnly
@@ -461,7 +537,9 @@ public actor FakeGoogleClient: GoogleContactsClient {
 
     /// Serves one page. `fresh` is a new snapshot for a first page; later pages read the snapshot named by the token, so
     /// changes made mid-pagination never shift offsets. The returned version is the snapshot's, for the sync token.
-    private func page(_ fresh: Snapshot?, pageToken: String?) throws -> (people: [GooglePerson], next: String?, version: Int) {
+    private func page(_ fresh: Snapshot?, pageToken: String?) throws -> (
+        people: [GooglePerson], next: String?, version: Int
+    ) {
         var snapshotID = 0
         var offset = 0
         var snapshot: Snapshot
@@ -470,8 +548,9 @@ public actor FakeGoogleClient: GoogleContactsClient {
             snapshotID = nextSnapshotID
         } else {
             let parts = (pageToken ?? "").split(separator: "-")
-            guard parts.count == 3, parts[0] == "page", let id = Int(parts[1]), let start = Int(parts[2]),
-                  let known = snapshots[id], start >= 0
+            guard parts.count == 3, parts[0] == "page", let id = Int(parts[1]),
+                let start = Int(parts[2]),
+                let known = snapshots[id], start >= 0
             else { throw GoogleAPIError.other(status: 400, message: "Invalid page token") }
             snapshot = known
             snapshotID = id
@@ -509,9 +588,12 @@ public actor FakeGoogleClient: GoogleContactsClient {
 
         var metadata = person.metadata ?? GooglePersonMetadata()
         metadata.objectType = "PERSON"
-        let updateTime = ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: 1_767_225_600 + Double(version)))
-        let contactSource = GoogleSource(type: "CONTACT", id: id, etag: "#e\(version)", updateTime: updateTime)
-        metadata.sources = (metadata.sources ?? []).filter { $0.type != "CONTACT" } + [contactSource]
+        let updateTime = ISO8601DateFormatter().string(
+            from: Date(timeIntervalSince1970: 1_767_225_600 + Double(version)))
+        let contactSource = GoogleSource(
+            type: "CONTACT", id: id, etag: "#e\(version)", updateTime: updateTime)
+        metadata.sources =
+            (metadata.sources ?? []).filter { $0.type != "CONTACT" } + [contactSource]
         person.metadata = metadata
 
         person.names = stampList(person.names, id: id)
@@ -526,15 +608,23 @@ public actor FakeGoogleClient: GoogleContactsClient {
         person.names = person.names?.map { name in
             guard GooglePersonMapper.isContactSourced(name) else { return name }
             var name = name
-            let parts = [name.givenName, name.middleName, name.familyName].compactMap { $0 }.filter { !$0.isEmpty }
+            let parts = [name.givenName, name.middleName, name.familyName].compactMap { $0 }.filter
+            { !$0.isEmpty }
             let display = parts.joined(separator: " ")
             name.displayName = display.isEmpty ? nil : display
             name.unstructuredName = name.displayName
-            let tail = [name.givenName, name.middleName].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " ")
-            name.displayNameLastFirst = display.isEmpty ? nil : [name.familyName, tail].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", ")
+            let tail = [name.givenName, name.middleName].compactMap { $0 }.filter { !$0.isEmpty }
+                .joined(separator: " ")
+            name.displayNameLastFirst =
+                display.isEmpty
+                ? nil
+                : [name.familyName, tail].compactMap { $0 }.filter { !$0.isEmpty }.joined(
+                    separator: ", ")
             return name
         }
-        let personDisplayName = person.names?.first(where: { $0.metadata?.primary == true })?.displayName ?? person.names?.first?.displayName
+        let personDisplayName =
+            person.names?.first(where: { $0.metadata?.primary == true })?.displayName
+            ?? person.names?.first?.displayName
 
         person.phoneNumbers = person.phoneNumbers?.map { phone in
             guard GooglePersonMapper.isContactSourced(phone) else { return phone }
@@ -567,9 +657,14 @@ public actor FakeGoogleClient: GoogleContactsClient {
             guard GooglePersonMapper.isContactSourced(address) else { return address }
             var address = address
             address.formattedType = formattedType(address.type)
-            let cityLine = [address.city, address.region, address.postalCode].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " ")
-            let lines = [address.streetAddress, address.extendedAddress, cityLine.isEmpty ? nil : cityLine, address.country]
-            address.formattedValue = lines.compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n")
+            let cityLine = [address.city, address.region, address.postalCode].compactMap { $0 }
+                .filter { !$0.isEmpty }.joined(separator: " ")
+            let lines = [
+                address.streetAddress, address.extendedAddress, cityLine.isEmpty ? nil : cityLine,
+                address.country,
+            ]
+            address.formattedValue = lines.compactMap { $0 }.filter { !$0.isEmpty }.joined(
+                separator: "\n")
             return address
         }
         return person
@@ -584,32 +679,43 @@ public actor FakeGoogleClient: GoogleContactsClient {
             entries[index].metadata = metadata
         }
         if !entries.contains(where: { $0.metadata?.primary == true }),
-           let first = entries.firstIndex(where: GooglePersonMapper.isContactSourced) {
+            let first = entries.firstIndex(where: GooglePersonMapper.isContactSourced)
+        {
             entries[first].metadata?.primary = true
         }
         return entries
     }
 
     private static let formattedTypes: [String: String] = [
-        "homeFax": "Home Fax", "workFax": "Work Fax", "otherFax": "Other Fax", "workMobile": "Work Mobile",
-        "workPager": "Work Pager", "googleVoice": "Google Voice", "homePage": "Home Page", "appInstallPage": "App Install Page",
+        "homeFax": "Home Fax", "workFax": "Work Fax", "otherFax": "Other Fax",
+        "workMobile": "Work Mobile",
+        "workPager": "Work Pager", "googleVoice": "Google Voice", "homePage": "Home Page",
+        "appInstallPage": "App Install Page",
     ]
 
     private static func formattedType(_ type: String?) -> String? {
         guard let type, !type.isEmpty else { return nil }
-        return formattedTypes[type] ?? (["mobile", "home", "work", "other", "main", "pager", "blog", "profile", "ftp", "reservations"].contains(type)
-            ? type.prefix(1).uppercased() + type.dropFirst() : type)
+        return formattedTypes[type]
+            ?? ([
+                "mobile", "home", "work", "other", "main", "pager", "blog", "profile", "ftp",
+                "reservations",
+            ].contains(type)
+                ? type.prefix(1).uppercased() + type.dropFirst() : type)
     }
 
     // MARK: failure injection
 
     private func takeInjection(_ operation: Operation, batch: Bool) -> Failure? {
-        guard let index = injections.firstIndex(where: { injection in
-            injection.remaining > 0 && (injection.operation == nil || injection.operation == operation) && {
-                if case .partialBatch = injection.failure { return batch }
-                return true
-            }()
-        }) else { return nil }
+        guard
+            let index = injections.firstIndex(where: { injection in
+                injection.remaining > 0
+                    && (injection.operation == nil || injection.operation == operation)
+                    && {
+                        if case .partialBatch = injection.failure { return batch }
+                        return true
+                    }()
+            })
+        else { return nil }
         injections[index].remaining -= 1
         return injections[index].failure
     }
@@ -622,7 +728,8 @@ public actor FakeGoogleClient: GoogleContactsClient {
     private func failBatch(_ operation: Operation) throws -> [Int: GoogleAPIError] {
         switch takeInjection(operation, batch: true) {
         case .error(let error)?: throw error
-        case .partialBatch(let indices, let error)?: return Dictionary(uniqueKeysWithValues: indices.map { ($0, error) })
+        case .partialBatch(let indices, let error)?:
+            return Dictionary(uniqueKeysWithValues: indices.map { ($0, error) })
         case nil: return [:]
         }
     }

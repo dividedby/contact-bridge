@@ -45,9 +45,11 @@ private struct FirstSyncView: View {
         } else {
             VStack(spacing: 12) {
                 ProgressView()
-                Text(snapshot.isRunning ? "Looking at your contacts…" : "Preparing the preview…").foregroundStyle(.secondary)
+                Text(snapshot.isRunning ? "Looking at your contacts…" : "Preparing the preview…")
+                    .foregroundStyle(.secondary)
                 if case .failed(let message) = snapshot.status {
-                    Text(message).foregroundStyle(.red).multilineTextAlignment(.center).padding(.horizontal)
+                    Text(message).foregroundStyle(.red).multilineTextAlignment(.center).padding(
+                        .horizontal)
                     Button("Try again") { Task { await model.refreshPreview() } }
                 }
             }
@@ -66,12 +68,12 @@ private struct FirstSyncView: View {
     }
 }
 
-private extension SyncPreview {
+extension SyncPreview {
     /// How many names a list shows before it says "and N more".
-    static let listLimit = 200
+    fileprivate static let listLimit = 200
 
     @MainActor @ViewBuilder
-    func view(model: SyncModel, app: AppModel, snapshot: SyncSnapshot) -> some View {
+    fileprivate func view(model: SyncModel, app: AppModel, snapshot: SyncSnapshot) -> some View {
         let blocked = pause.map { if case .needsConfirmation = $0 { false } else { true } } ?? false
         VStack(spacing: 0) {
             ScrollView {
@@ -79,22 +81,33 @@ private extension SyncPreview {
                     Text("First sync preview").font(.title2)
                     if case .failed(let message) = snapshot.status {
                         VStack(alignment: .leading, spacing: 4) {
-                            Label("The preview could not be refreshed: \(message)", systemImage: "exclamationmark.triangle.fill")
-                                .foregroundStyle(.red)
-                                .fixedSize(horizontal: false, vertical: true)
-                            Text("What is shown is from \(generatedAt.formatted(date: .omitted, time: .shortened)) and may be out of date. Press Refresh preview to try again.")
-                                .font(.caption).foregroundStyle(.secondary)
+                            Label(
+                                "The preview could not be refreshed: \(message)",
+                                systemImage: "exclamationmark.triangle.fill"
+                            )
+                            .foregroundStyle(.red)
+                            .fixedSize(horizontal: false, vertical: true)
+                            Text(
+                                "What is shown is from \(generatedAt.formatted(date: .omitted, time: .shortened)) and may be out of date. Press Refresh preview to try again."
+                            )
+                            .font(.caption).foregroundStyle(.secondary)
                         }
                     }
-                    Text("Nothing has been changed yet. This is what Contact Bridge would do the first time it syncs. Nothing starts until you press Start syncing.")
-                        .foregroundStyle(.secondary)
+                    Text(
+                        "Nothing has been changed yet. This is what Contact Bridge would do the first time it syncs. Nothing starts until you press Start syncing."
+                    )
+                    .foregroundStyle(.secondary)
 
                     HStack(spacing: 12) {
                         CountTile(title: "Link", count: counts.link, systemImage: "link")
                         CountTile(title: "Create", count: counts.create, systemImage: "plus.circle")
-                        CountTile(title: "Update", count: counts.update, systemImage: "pencil.circle")
-                        CountTile(title: "Delete", count: counts.delete, systemImage: "trash.circle")
-                        CountTile(title: "Review", count: counts.review, systemImage: "questionmark.circle")
+                        CountTile(
+                            title: "Update", count: counts.update, systemImage: "pencil.circle")
+                        CountTile(
+                            title: "Delete", count: counts.delete, systemImage: "trash.circle")
+                        CountTile(
+                            title: "Review", count: counts.review,
+                            systemImage: "questionmark.circle")
                         CountTile(title: "Photos", count: counts.photo, systemImage: "photo")
                     }
 
@@ -107,7 +120,8 @@ private extension SyncPreview {
 
                     PreviewList(
                         title: "Link \(ContactText.count(links.count, "contact"))",
-                        explanation: "These already exist in iCloud and Google. They are tied together; neither side is changed by linking.",
+                        explanation:
+                            "These already exist in iCloud and Google. They are tied together; neither side is changed by linking.",
                         items: links
                     )
                     PreviewList(
@@ -115,7 +129,9 @@ private extension SyncPreview {
                         explanation: "These are in iCloud only. A copy is added to Google.",
                         items: creates
                     )
-                    PreviewList(title: "Update \(ContactText.count(updates.count, "Google contact"))", explanation: "Changed in iCloud since they were linked.", items: updates)
+                    PreviewList(
+                        title: "Update \(ContactText.count(updates.count, "Google contact"))",
+                        explanation: "Changed in iCloud since they were linked.", items: updates)
                     PreviewList(
                         title: "Delete \(ContactText.count(deletes.count, "Google contact"))",
                         explanation: "Their iCloud contact is gone.",
@@ -128,19 +144,22 @@ private extension SyncPreview {
                     )
                     PreviewList(
                         title: "Copy \(ContactText.count(photos.count, "photo"))",
-                        explanation: "Photos are copied both ways between iCloud and Google. A replaced Google photo is saved first, and nothing is removed without asking.",
+                        explanation:
+                            "Photos are copied both ways between iCloud and Google. A replaced Google photo is saved first, and nothing is removed without asking.",
                         items: photos
                     )
                     ReviewListView(
                         title: "Review \(ContactText.count(reviews.count, "item"))",
-                        explanation: "These need your decision. Nothing is changed for them until you decide.",
+                        explanation:
+                            "These need your decision. Nothing is changed for them until you decide.",
                         items: reviews
                     )
 
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Backups").font(.headline)
                         ForEach(backups, id: \.self) { line in
-                            Label(line, systemImage: "externaldrive").font(.callout).foregroundStyle(.secondary)
+                            Label(line, systemImage: "externaldrive").font(.callout)
+                                .foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
@@ -151,10 +170,13 @@ private extension SyncPreview {
             Divider()
             HStack {
                 if let notice = model.notice {
-                    Label(notice, systemImage: "info.circle").foregroundStyle(.orange).font(.callout)
-                        .fixedSize(horizontal: false, vertical: true)
+                    Label(notice, systemImage: "info.circle").foregroundStyle(.orange).font(
+                        .callout
+                    )
+                    .fixedSize(horizontal: false, vertical: true)
                 } else {
-                    Text("Preview from \(generatedAt.formatted(date: .omitted, time: .shortened))").font(.caption).foregroundStyle(.secondary)
+                    Text("Preview from \(generatedAt.formatted(date: .omitted, time: .shortened))")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
                 if snapshot.isRunning || model.isApproving { ProgressView().controlSize(.small) }
@@ -165,7 +187,11 @@ private extension SyncPreview {
                     .controlSize(.large)
                     .keyboardShortcut(.defaultAction)
                     .disabled(snapshot.isRunning || model.isApproving || blocked)
-                    .help(blocked ? "Fix the problem above first" : "Link, create and update contacts as listed, and keep both sides in sync from now on")
+                    .help(
+                        blocked
+                            ? "Fix the problem above first"
+                            : "Link, create and update contacts as listed, and keep both sides in sync from now on"
+                    )
             }
             .padding(12)
         }
@@ -187,8 +213,11 @@ private extension SyncPreview {
             }
         }
         if unlinkedWaitingForFullListing > 0 {
-            Label("\(ContactText.count(unlinkedWaitingForFullListing, "contact")) wait for a full read of your Google contacts.", systemImage: "hourglass")
-                .foregroundStyle(.orange)
+            Label(
+                "\(ContactText.count(unlinkedWaitingForFullListing, "contact")) wait for a full read of your Google contacts.",
+                systemImage: "hourglass"
+            )
+            .foregroundStyle(.orange)
         }
     }
 }
@@ -212,7 +241,8 @@ private struct CountTile: View {
 }
 
 private enum ForgottenLinks {
-    static let explanation = "Their contact is gone from iCloud, so the saved link to Google is dropped. Nothing is deleted in Google for these."
+    static let explanation =
+        "Their contact is gone from iCloud, so the saved link to Google is dropped. Nothing is deleted in Google for these."
 }
 
 /// An expandable list of contact names. Long lists show their first names and a count of the rest.
@@ -235,7 +265,8 @@ private struct PreviewList: View {
                         }
                     }
                     if items.count > SyncPreview.listLimit {
-                        Text("and \(items.count - SyncPreview.listLimit) more").font(.caption).foregroundStyle(.secondary)
+                        Text("and \(items.count - SyncPreview.listLimit) more").font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -294,7 +325,8 @@ struct ReviewRow: View {
             if let detail = item.detail {
                 Text("may be \(detail)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
             } else if !item.fields.isEmpty {
-                Text(item.fields.map(\.title).joined(separator: ", ")).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                Text(item.fields.map(\.title).joined(separator: ", ")).font(.caption)
+                    .foregroundStyle(.secondary).lineLimit(1)
             }
         }
     }
@@ -313,7 +345,8 @@ private struct ReviewListView: View {
                     Text(explanation).font(.caption).foregroundStyle(.secondary).padding(.bottom, 4)
                     ForEach(items.prefix(SyncPreview.listLimit)) { item in ReviewRow(item: item) }
                     if items.count > SyncPreview.listLimit {
-                        Text("and \(items.count - SyncPreview.listLimit) more").font(.caption).foregroundStyle(.secondary)
+                        Text("and \(items.count - SyncPreview.listLimit) more").font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -349,25 +382,38 @@ private struct SyncStatusView: View {
                 }
                 if let summary = snapshot.lastRun {
                     // Next to a status other than "Synced", the last run's result must not read like the current state.
-                    Text(snapshot.status == .idle ? summary.text : "Last sync at \(Self.time(summary.finishedAt)): \(summary.text)")
-                        .foregroundStyle(.secondary)
+                    Text(
+                        snapshot.status == .idle
+                            ? summary.text
+                            : "Last sync at \(Self.time(summary.finishedAt)): \(summary.text)"
+                    )
+                    .foregroundStyle(.secondary)
                     if let halted = summary.halted {
-                        Label(haltedText(halted, retryAt: snapshot.nextAttemptAt), systemImage: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.orange)
-                            .fixedSize(horizontal: false, vertical: true)
+                        Label(
+                            haltedText(halted, retryAt: snapshot.nextAttemptAt),
+                            systemImage: "exclamationmark.triangle.fill"
+                        )
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 if case .failed = snapshot.status, let retry = snapshot.nextAttemptAt {
-                    Text("Trying again after \(retry.formatted(date: .omitted, time: .shortened)).").font(.caption).foregroundStyle(.secondary)
+                    Text("Trying again after \(retry.formatted(date: .omitted, time: .shortened)).")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
                 HStack {
                     Button("Sync now") { Task { await model.syncNow() } }
-                        .disabled(snapshot.isRunning || snapshot.isUserPaused || snapshot.confirmationSummary != nil)
+                        .disabled(
+                            snapshot.isRunning || snapshot.isUserPaused
+                                || snapshot.confirmationSummary != nil)
                     if snapshot.isUserPaused {
-                        Button("Resume") { Task { await model.resume() } }.buttonStyle(.borderedProminent)
+                        Button("Resume") { Task { await model.resume() } }.buttonStyle(
+                            .borderedProminent)
                     } else {
                         Button("Pause") { Task { await model.pause() } }
-                            .help("Stop syncing until you resume. Nothing is read or written while paused.")
+                            .help(
+                                "Stop syncing until you resume. Nothing is read or written while paused."
+                            )
                     }
                     if snapshot.isRunning { ProgressView().controlSize(.small) }
                 }
@@ -375,15 +421,23 @@ private struct SyncStatusView: View {
 
             if let summary = snapshot.confirmationSummary {
                 Section {
-                    Label("Waiting for your OK", systemImage: "hand.raised.fill").font(.headline).foregroundStyle(.orange)
+                    Label("Waiting for your OK", systemImage: "hand.raised.fill").font(.headline)
+                        .foregroundStyle(.orange)
                     Text(summary).fixedSize(horizontal: false, vertical: true)
-                    PreviewList(title: "Contacts whose links would be forgotten", explanation: ForgottenLinks.explanation, items: snapshot.pauseDetails)
+                    PreviewList(
+                        title: "Contacts whose links would be forgotten",
+                        explanation: ForgottenLinks.explanation, items: snapshot.pauseDetails)
                     if summary.contains("contact photos") {
-                        Text("Photos are copied between iCloud and Google. A Google photo that is replaced or removed is saved to the photo history first (kept for 30 days), and an iCloud photo change takes a backup first.")
-                            .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        Text(
+                            "Photos are copied between iCloud and Google. A Google photo that is replaced or removed is saved to the photo history first (kept for 30 days), and an iCloud photo change takes a backup first."
+                        )
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(
+                            horizontal: false, vertical: true)
                     }
-                    Text("Nothing has been changed. Confirm if this is what you expect; otherwise keep syncing paused and look at your contacts first.")
-                        .font(.caption).foregroundStyle(.secondary)
+                    Text(
+                        "Nothing has been changed. Confirm if this is what you expect; otherwise keep syncing paused and look at your contacts first."
+                    )
+                    .font(.caption).foregroundStyle(.secondary)
                     HStack {
                         Button("Confirm and continue") { Task { await model.confirm() } }
                             .buttonStyle(.borderedProminent)
@@ -412,15 +466,20 @@ private struct SyncStatusView: View {
         let photos = review.photoItems
         Section("Needs your review") {
             if let message = review.resultMessage {
-                Label(message, systemImage: "checkmark.circle.fill").foregroundStyle(.green).fixedSize(horizontal: false, vertical: true)
+                Label(message, systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             if items.isEmpty {
                 Text("Nothing to review.").foregroundStyle(.secondary)
             } else {
-                Text("\(ContactText.count(items.count, "item")) waiting. Open one to decide. Nothing is changed for them until you do.")
-                    .font(.caption).foregroundStyle(.secondary)
+                Text(
+                    "\(ContactText.count(items.count, "item")) waiting. Open one to decide. Nothing is changed for them until you do."
+                )
+                .font(.caption).foregroundStyle(.secondary)
                 ForEach(items.prefix(SyncPreview.listLimit)) { item in
-                    Button { Task { await review.open(item.id) } } label: {
+                    Button {
+                        Task { await review.open(item.id) }
+                    } label: {
                         HStack {
                             ReviewRow(item: item)
                             Spacer()
@@ -431,18 +490,31 @@ private struct SyncStatusView: View {
                     .buttonStyle(.plain)
                 }
                 if items.count > SyncPreview.listLimit {
-                    Text("and \(items.count - SyncPreview.listLimit) more").font(.caption).foregroundStyle(.secondary)
+                    Text("and \(items.count - SyncPreview.listLimit) more").font(.caption)
+                        .foregroundStyle(.secondary)
                 }
                 if firstLink.count > 1 {
-                    Button("Keep iCloud for all \(firstLink.count) first-link conflicts…") { review.startBulk() }
-                        .help("Two contacts that were linked for the first time disagree. Keep iCloud's values, send them to Google, and keep what only Google has.")
+                    Button("Keep iCloud for all \(firstLink.count) first-link conflicts…") {
+                        review.startBulk()
+                    }
+                    .help(
+                        "Two contacts that were linked for the first time disagree. Keep iCloud's values, send them to Google, and keep what only Google has."
+                    )
                 }
                 if photos.count > 1 {
                     HStack {
-                        Button("Keep iCloud photos for all \(photos.count)…") { review.startPhotoBulk(.icloud) }
-                            .help("For every photo question, iCloud's side wins. A photo iCloud lacks is removed from Google.")
-                        Button("Keep Google photos for all \(photos.count)…") { review.startPhotoBulk(.google) }
-                            .help("For every photo question, Google's side wins. A photo Google lacks is removed from iCloud.")
+                        Button("Keep iCloud photos for all \(photos.count)…") {
+                            review.startPhotoBulk(.icloud)
+                        }
+                        .help(
+                            "For every photo question, iCloud's side wins. A photo iCloud lacks is removed from Google."
+                        )
+                        Button("Keep Google photos for all \(photos.count)…") {
+                            review.startPhotoBulk(.google)
+                        }
+                        .help(
+                            "For every photo question, Google's side wins. A photo Google lacks is removed from iCloud."
+                        )
                     }
                 }
             }
@@ -472,7 +544,8 @@ private struct SyncStatusView: View {
         switch snapshot.status {
         case .running: ProgressView().controlSize(.small)
         case .paused: Image(systemName: "pause.circle.fill").foregroundStyle(.orange)
-        case .failed, .notReady, .disabled: Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+        case .failed, .notReady, .disabled:
+            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
         case .idle:
             if snapshot.lastRun?.halted != nil {
                 Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
@@ -502,12 +575,16 @@ private struct SyncStatusView: View {
         let conflicts = snapshot.lastRun?.conflictsFound ?? 0
         let blocked = snapshot.lastRun?.blockedByReview ?? 0
         let warnings = snapshot.lastRun?.warnings ?? []
-        if snapshot.notesUnavailable || snapshot.waitingForNotes > 0 || snapshot.unlinkedWaitingForFullListing > 0
-            || snapshot.unconfirmedCreates > 0 || leftBehind > 0 || conflicts > 0 || blocked > 0 || !warnings.isEmpty
-            || snapshot.pauseSaveWarning != nil {
+        if snapshot.notesUnavailable || snapshot.waitingForNotes > 0
+            || snapshot.unlinkedWaitingForFullListing > 0
+            || snapshot.unconfirmedCreates > 0 || leftBehind > 0 || conflicts > 0 || blocked > 0
+            || !warnings.isEmpty
+            || snapshot.pauseSaveWarning != nil
+        {
             Section("Heads up") {
                 if let saveWarning = snapshot.pauseSaveWarning {
-                    Label(saveWarning, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                    Label(saveWarning, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 if snapshot.notesUnavailable || snapshot.waitingForNotes > 0 {
@@ -531,20 +608,31 @@ private struct SyncStatusView: View {
                     .fixedSize(horizontal: false, vertical: true)
                 }
                 if conflicts > 0 {
-                    Label("\(ContactText.count(conflicts, "contact")) changed in Google while syncing. They are in the review list.", systemImage: "arrow.left.arrow.right")
-                        .foregroundStyle(.orange)
+                    Label(
+                        "\(ContactText.count(conflicts, "contact")) changed in Google while syncing. They are in the review list.",
+                        systemImage: "arrow.left.arrow.right"
+                    )
+                    .foregroundStyle(.orange)
                 }
                 if blocked > 0 {
-                    Label("\(ContactText.count(blocked, "delete")) held back because the contact is waiting for review.", systemImage: "hand.raised")
-                        .foregroundStyle(.secondary)
+                    Label(
+                        "\(ContactText.count(blocked, "delete")) held back because the contact is waiting for review.",
+                        systemImage: "hand.raised"
+                    )
+                    .foregroundStyle(.secondary)
                 }
                 if leftBehind > 0 {
-                    Label("\(ContactText.count(leftBehind, "change")) will be tried again on the next run.", systemImage: "arrow.clockwise")
-                        .foregroundStyle(.secondary)
+                    Label(
+                        "\(ContactText.count(leftBehind, "change")) will be tried again on the next run.",
+                        systemImage: "arrow.clockwise"
+                    )
+                    .foregroundStyle(.secondary)
                 }
                 ForEach(warnings, id: \.self) { warning in
-                    Label(warning, systemImage: "exclamationmark.circle").foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    Label(warning, systemImage: "exclamationmark.circle").foregroundStyle(
+                        .secondary
+                    )
+                    .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
@@ -552,7 +640,8 @@ private struct SyncStatusView: View {
 
     private func notesText(_ snapshot: SyncSnapshot) -> String {
         if snapshot.waitingForNotes > 0 {
-            return "\(ContactText.count(snapshot.waitingForNotes, "new contact")) can't sync yet: their notes can't be read. Grant notes access in Setup so no note is lost."
+            return
+                "\(ContactText.count(snapshot.waitingForNotes, "new contact")) can't sync yet: their notes can't be read. Grant notes access in Setup so no note is lost."
         }
         return "Notes can't be read, so notes are not syncing. Grant notes access in Setup."
     }

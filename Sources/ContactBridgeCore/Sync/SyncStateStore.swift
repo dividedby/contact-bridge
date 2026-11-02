@@ -73,7 +73,9 @@ public final class SyncStateStore: SyncStateStoring, Sendable {
         let data: Data
         do {
             data = try Data(contentsOf: url)
-        } catch let error as CocoaError where error.code == .fileReadNoSuchFile || error.code == .fileNoSuchFile {
+        } catch let error as CocoaError
+            where error.code == .fileReadNoSuchFile || error.code == .fileNoSuchFile
+        {
             return SyncState()
         } catch {
             throw SyncStateStoreError.unreadable(error.localizedDescription)
@@ -82,7 +84,9 @@ public final class SyncStateStore: SyncStateStoring, Sendable {
         decoder.dateDecodingStrategy = .iso8601
         do {
             let header = try decoder.decode(Header.self, from: data)
-            guard header.version == SyncState.currentVersion else { throw SyncStateStoreError.unsupportedVersion(header.version) }
+            guard header.version == SyncState.currentVersion else {
+                throw SyncStateStoreError.unsupportedVersion(header.version)
+            }
             return try decoder.decode(SyncState.self, from: data)
         } catch let error as SyncStateStoreError {
             throw error
@@ -95,7 +99,8 @@ public final class SyncStateStore: SyncStateStoring, Sendable {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try encoder.encode(state).write(to: url, options: .atomic)
     }
 }

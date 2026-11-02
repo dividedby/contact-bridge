@@ -24,7 +24,9 @@ public final class FakeAppleScriptRunner: AppleScriptRunning, @unchecked Sendabl
         try next(.run(source: source))
     }
 
-    public func call(handler: String, in source: String, arguments: [NSAppleEventDescriptor]) async throws -> NSAppleEventDescriptor {
+    public func call(handler: String, in source: String, arguments: [NSAppleEventDescriptor])
+        async throws -> NSAppleEventDescriptor
+    {
         try next(.call(handler: handler, source: source, arguments: arguments))
     }
 
@@ -33,7 +35,10 @@ public final class FakeAppleScriptRunner: AppleScriptRunning, @unchecked Sendabl
             recorded.append(call)
             return responses.isEmpty ? nil : responses.removeFirst()
         }
-        guard let response else { throw AppleScriptError(number: -1, message: "FakeAppleScriptRunner has no scripted response left.") }
+        guard let response else {
+            throw AppleScriptError(
+                number: -1, message: "FakeAppleScriptRunner has no scripted response left.")
+        }
         return try response.get()
     }
 }

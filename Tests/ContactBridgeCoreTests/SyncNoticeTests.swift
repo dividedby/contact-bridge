@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+
 @testable import ContactBridgeCore
 
 struct SyncNoticeTests {
@@ -10,7 +11,9 @@ struct SyncNoticeTests {
     }
 
     /// A snapshot after finished run number `run` (run times differ so each counts as a new run).
-    private func settled(_ ids: [String] = [], run: Double = 1, halted: String? = nil) -> SyncSnapshot {
+    private func settled(_ ids: [String] = [], run: Double = 1, halted: String? = nil)
+        -> SyncSnapshot
+    {
         var snapshot = SyncSnapshot()
         snapshot.status = .idle
         snapshot.firstSyncApproved = true
@@ -22,7 +25,9 @@ struct SyncNoticeTests {
         return snapshot
     }
 
-    private func with(_ status: SyncStatus, from base: SyncSnapshot = SyncSnapshot()) -> SyncSnapshot {
+    private func with(_ status: SyncStatus, from base: SyncSnapshot = SyncSnapshot())
+        -> SyncSnapshot
+    {
         var snapshot = base
         snapshot.status = status
         return snapshot
@@ -37,7 +42,9 @@ struct SyncNoticeTests {
         let update = tracker.observe(settled(["a", "b"]))
         #expect(update.post.count == 1)
         let notice = update.post.first
-        #expect(notice?.kind == .reviews && notice?.body == "2 contacts need your review" && notice?.destination == .reviewList)
+        #expect(
+            notice?.kind == .reviews && notice?.body == "2 contacts need your review"
+                && notice?.destination == .reviewList)
         // The same list again, and snapshots in between, say nothing more.
         #expect(tracker.observe(settled(["a", "b"])).isEmpty)
         #expect(tracker.observe(with(.running(.planning), from: settled(["a", "b"]))).isEmpty)
@@ -68,13 +75,16 @@ struct SyncNoticeTests {
         #expect(tracker.observe(settled(["a"])).isEmpty)
     }
 
-    @Test("A shrinking list says nothing; a replacement item does, and an emptied list retracts the notice")
+    @Test(
+        "A shrinking list says nothing; a replacement item does, and an emptied list retracts the notice"
+    )
     func shrinkReplaceClear() {
         var tracker = SyncNoticeTracker()
         #expect(tracker.observe(settled(["a", "b"])).post.count == 1)
         #expect(tracker.observe(settled(["a"], run: 2)).isEmpty)
         let replaced = tracker.observe(settled(["c"], run: 3))
-        #expect(replaced.post.count == 1 && replaced.post.first?.body == "1 contact needs your review")
+        #expect(
+            replaced.post.count == 1 && replaced.post.first?.body == "1 contact needs your review")
         let cleared = tracker.observe(settled([], run: 4))
         #expect(cleared.post.isEmpty && cleared.retract == [.reviews])
         #expect(tracker.observe(settled([], run: 5)).isEmpty)
@@ -84,20 +94,26 @@ struct SyncNoticeTests {
 
     // MARK: pauses
 
-    @Test("A confirmation pause is announced once, points at the confirmation, and is retracted when syncing runs again")
+    @Test(
+        "A confirmation pause is announced once, points at the confirmation, and is retracted when syncing runs again"
+    )
     func confirmationPause() {
         var tracker = SyncNoticeTracker()
         let paused = with(.paused(.needsConfirmation(summary: "12 deletes")), from: settled())
         let update = tracker.observe(paused)
         #expect(update.post.count == 1 && update.post.first?.kind == .pause)
-        #expect(update.post.first?.destination == .confirmation && update.post.first?.body == "12 deletes")
+        #expect(
+            update.post.first?.destination == .confirmation
+                && update.post.first?.body == "12 deletes")
         #expect(tracker.observe(paused).isEmpty)
 
         // The engine passes through "running" on every re-check; that must not re-announce the same pause.
         #expect(tracker.observe(with(.running(.planning), from: paused)).isEmpty)
         #expect(tracker.observe(paused).isEmpty)
 
-        #expect(tracker.observe(with(.paused(.needsConfirmation(summary: "40 updates")), from: paused)).post.count == 1)
+        #expect(
+            tracker.observe(with(.paused(.needsConfirmation(summary: "40 updates")), from: paused))
+                .post.count == 1)
         #expect(tracker.observe(settled(run: 2)).retract == [.pause])
         #expect(tracker.observe(settled(run: 3)).retract.isEmpty)
     }
@@ -107,7 +123,9 @@ struct SyncNoticeTests {
         for reason in [PauseReason.accountChanged, .containerChanged, .googleEmpty] {
             var tracker = SyncNoticeTracker()
             let update = tracker.observe(with(.paused(reason), from: settled()))
-            #expect(update.post.first?.title == "Syncing is paused" && update.post.first?.body == reason.explanation)
+            #expect(
+                update.post.first?.title == "Syncing is paused"
+                    && update.post.first?.body == reason.explanation)
             #expect(update.post.first?.destination == .status)
         }
         var tracker = SyncNoticeTracker()
@@ -132,7 +150,9 @@ struct SyncNoticeTests {
         #expect(tracker.observe(with(.running(.readingGoogle), from: failed)).isEmpty)
         failed.nextAttemptAt = Self.t0
         let second = tracker.observe(with(.failed("offline"), from: failed))
-        #expect(second.post.count == 1 && second.post.first?.kind == .failing && second.post.first?.body == "offline")
+        #expect(
+            second.post.count == 1 && second.post.first?.kind == .failing
+                && second.post.first?.body == "offline")
         #expect(tracker.observe(with(.running(.readingGoogle), from: failed)).isEmpty)
         #expect(tracker.observe(with(.failed("offline"), from: failed)).isEmpty)
 
@@ -154,7 +174,7 @@ struct SyncNoticeTests {
     func haltedRuns() {
         var tracker = SyncNoticeTracker()
         #expect(tracker.observe(settled(run: 1, halted: "rate limited")).isEmpty)
-        #expect(tracker.observe(settled(run: 1, halted: "rate limited")).isEmpty) // same run again
+        #expect(tracker.observe(settled(run: 1, halted: "rate limited")).isEmpty)  // same run again
         #expect(tracker.observe(settled(run: 2)).isEmpty)
         #expect(tracker.observe(settled(run: 3, halted: "rate limited")).isEmpty)
         let update = tracker.observe(settled(run: 4, halted: "signed out"))
@@ -166,7 +186,10 @@ struct SyncNoticeTests {
     @Test("Starting up, setup problems and a disabled engine say nothing")
     func quietStates() {
         var tracker = SyncNoticeTracker()
-        for status in [SyncStatus.notStarted, .disabled("another copy"), .notReady("sign in"), .idle, .running(.applying)] {
+        for status in [
+            SyncStatus.notStarted, .disabled("another copy"), .notReady("sign in"), .idle,
+            .running(.applying),
+        ] {
             #expect(tracker.observe(with(status)).isEmpty)
         }
     }

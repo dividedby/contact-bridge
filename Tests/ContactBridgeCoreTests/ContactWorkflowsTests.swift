@@ -1,6 +1,7 @@
 import Foundation
 import Synchronization
 import Testing
+
 @testable import ContactBridgeCore
 
 struct ContactWorkflowsTests {
@@ -28,7 +29,8 @@ struct ContactWorkflowsTests {
 
         func workflows(containerID: String?) -> ContactWorkflows {
             ContactWorkflows(
-                store: store, google: google, notes: notesForWorkflows, backups: backups, links: links, dismissals: dismissals,
+                store: store, google: google, notes: notesForWorkflows, backups: backups,
+                links: links, dismissals: dismissals,
                 containerID: containerID
             )
         }
@@ -38,22 +40,28 @@ struct ContactWorkflowsTests {
         ///   - writerNotes: the backup writer includes notes (defaults to `withNotes`).
         ///   - writerGoogle: the backup writer includes Google.
         init(
-            records: [ContactRecord], people: [GooglePerson] = [], others: [GooglePerson] = [], notes: [String: String] = [:],
+            records: [ContactRecord], people: [GooglePerson] = [], others: [GooglePerson] = [],
+            notes: [String: String] = [:],
             withNotes: Bool = true, writerNotes: Bool? = nil, writerGoogle: Bool = true
         ) throws {
-            directory = FileManager.default.temporaryDirectory.appendingPathComponent("workflow-tests-\(UUID().uuidString)", isDirectory: true)
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+                "workflow-tests-\(UUID().uuidString)", isDirectory: true)
+            try FileManager.default.createDirectory(
+                at: directory, withIntermediateDirectories: true)
             store = InMemoryContactStore(records: records)
             google = FakeGoogleClient(people: people, otherContacts: others)
             self.notes = InMemoryNotesStore(notes: notes)
-            let store = store, google = google, directory = directory
+            let store = store
+            let google = google
+            let directory = directory
             let notesStore = self.notes
             let box = container
             let includeNotes = writerNotes ?? withNotes
             backups = BackupCoordinator(makeSetup: {
                 BackupSetup(
                     writer: BackupWriter(
-                        store: store, google: writerGoogle ? google : nil, notes: includeNotes ? notesStore : nil, baseDirectory: directory
+                        store: store, google: writerGoogle ? google : nil,
+                        notes: includeNotes ? notesStore : nil, baseDirectory: directory
                     ),
                     containerID: box.current
                 )
@@ -62,20 +70,28 @@ struct ContactWorkflowsTests {
         }
 
         var backupFolders: Int {
-            ((try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []).filter { !$0.hasPrefix(".") }.count
+            ((try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []).filter {
+                !$0.hasPrefix(".")
+            }.count
         }
         func cleanUp() { try? FileManager.default.removeItem(at: directory) }
     }
 
-    private func icloud(_ id: String, _ given: String, _ family: String, phone: String? = nil, email: String? = nil) -> ContactRecord {
+    private func icloud(
+        _ id: String, _ given: String, _ family: String, phone: String? = nil, email: String? = nil
+    ) -> ContactRecord {
         ContactRecord(
             id: id, source: .icloud, sourceIdentifier: id, givenName: given, familyName: family,
-            phones: phone.map { [Labeled(label: "mobile", value: $0)] } ?? [], emails: email.map { [Labeled(label: "home", value: $0)] } ?? []
+            phones: phone.map { [Labeled(label: "mobile", value: $0)] } ?? [],
+            emails: email.map { [Labeled(label: "home", value: $0)] } ?? []
         )
     }
 
-    private func gperson(_ given: String, _ family: String, phone: String? = nil, email: String? = nil) -> GooglePerson {
-        GooglePersonMapper.createPayload(for: icloud("x", given, family, phone: phone, email: email))
+    private func gperson(
+        _ given: String, _ family: String, phone: String? = nil, email: String? = nil
+    ) -> GooglePerson {
+        GooglePersonMapper.createPayload(
+            for: icloud("x", given, family, phone: phone, email: email))
     }
 
     // MARK: import
@@ -84,20 +100,31 @@ struct ContactWorkflowsTests {
     func importPlan() async throws {
         let rig = try Rig(
             records: [icloud("i1", "Ann", "Lee", phone: "415-555-2671")],
-            people: [gperson("Ann", "Lee", phone: "+14155552671"), gperson("Bob", "Stone", phone: "415-555-0002")],
+            people: [
+                gperson("Ann", "Lee", phone: "+14155552671"),
+                gperson("Bob", "Stone", phone: "415-555-0002"),
+            ],
             others: [gperson("Cara", "Dune", email: "cara@example.com")]
         )
         defer { rig.cleanUp() }
         let plan = try await rig.workflows.loadImportPlan()
-        #expect(plan.links.count == 1 && plan.toImport.map(\.record.givenName) == ["Bob"] && plan.otherContactCandidates.map(\.record.givenName) == ["Cara"])
+        #expect(
+            plan.links.count == 1 && plan.toImport.map(\.record.givenName) == ["Bob"]
+                && plan.otherContactCandidates.map(\.record.givenName) == ["Cara"])
     }
 
-    @Test("The import plan uses saved links: an imported contact is never offered again, even if it no longer matches")
+    @Test(
+        "The import plan uses saved links: an imported contact is never offered again, even if it no longer matches"
+    )
     func importPlanUsesSavedLinks() async throws {
-        let rig = try Rig(records: [icloud("i9", "", "")], people: [gperson("Ann", "Lee", phone: "415-555-2671")])
+        let rig = try Rig(
+            records: [icloud("i9", "", "")], people: [gperson("Ann", "Lee", phone: "415-555-2671")])
         defer { rig.cleanUp() }
-        let resourceName = try #require(try await rig.google.listConnections(syncToken: nil, pageToken: nil).people.first?.resourceName)
-        try rig.links.add([ImportedLink(icloudID: "i9", googleResourceName: resourceName)], at: Date())
+        let resourceName = try #require(
+            try await rig.google.listConnections(syncToken: nil, pageToken: nil).people.first?
+                .resourceName)
+        try rig.links.add(
+            [ImportedLink(icloudID: "i9", googleResourceName: resourceName)], at: Date())
         let plan = try await rig.workflows.loadImportPlan()
         #expect(plan.toImport.isEmpty)
         #expect(plan.links.map(\.icloudID) == ["i9"])
@@ -109,15 +136,26 @@ struct ContactWorkflowsTests {
         defer { rig.cleanUp() }
         let workflows = ContactWorkflows(
             store: rig.store, google: nil, notes: nil,
-            backups: BackupCoordinator(makeWriter: { BackupWriter(store: rig.store, baseDirectory: rig.directory) }),
+            backups: BackupCoordinator(makeWriter: {
+                BackupWriter(store: rig.store, baseDirectory: rig.directory)
+            }),
             links: rig.links, dismissals: rig.dismissals
         )
-        await #expect(throws: GoogleAuthError.notSignedIn) { _ = try await workflows.loadImportPlan() }
+        await #expect(throws: GoogleAuthError.notSignedIn) {
+            _ = try await workflows.loadImportPlan()
+        }
     }
 
-    @Test("Running an import takes a backup first, creates the selection and records links; a second run reuses the backup")
+    @Test(
+        "Running an import takes a backup first, creates the selection and records links; a second run reuses the backup"
+    )
     func runImport() async throws {
-        let rig = try Rig(records: [], people: [gperson("Ann", "Lee", phone: "415-555-2671"), gperson("Bob", "Stone", phone: "415-555-0002")])
+        let rig = try Rig(
+            records: [],
+            people: [
+                gperson("Ann", "Lee", phone: "415-555-2671"),
+                gperson("Bob", "Stone", phone: "415-555-0002"),
+            ])
         defer { rig.cleanUp() }
         let plan = try await rig.workflows.loadImportPlan()
         #expect(rig.backupFolders == 0)
@@ -136,8 +174,10 @@ struct ContactWorkflowsTests {
     @Test("Duplicate scan hides dismissed clusters and counts them")
     func scanHidesDismissed() async throws {
         let rig = try Rig(records: [
-            icloud("a1", "Ann", "Lee", phone: "415-555-2671"), icloud("a2", "Ann", "Lee", phone: "415-555-2671"),
-            icloud("b1", "Bob", "Stone", email: "bob@example.com"), icloud("b2", "Bob", "Stone", email: "bob@example.com"),
+            icloud("a1", "Ann", "Lee", phone: "415-555-2671"),
+            icloud("a2", "Ann", "Lee", phone: "415-555-2671"),
+            icloud("b1", "Bob", "Stone", email: "bob@example.com"),
+            icloud("b2", "Bob", "Stone", email: "bob@example.com"),
         ])
         defer { rig.cleanUp() }
         let first = try await rig.workflows.loadDuplicates()
@@ -155,7 +195,10 @@ struct ContactWorkflowsTests {
     @Test("Merging takes a backup, merges contacts and notes, and reports the outcome")
     func runMerge() async throws {
         let rig = try Rig(
-            records: [icloud("a1", "Ann", "Lee", phone: "415-555-2671"), icloud("a2", "Ann", "Lee", phone: "415-555-2671", email: "ann@example.com")],
+            records: [
+                icloud("a1", "Ann", "Lee", phone: "415-555-2671"),
+                icloud("a2", "Ann", "Lee", phone: "415-555-2671", email: "ann@example.com"),
+            ],
             notes: ["a1": "First note", "a2": "Second note"]
         )
         defer { rig.cleanUp() }
@@ -167,13 +210,19 @@ struct ContactWorkflowsTests {
         #expect(run.survivor.id == "a1" && run.deleted.map(\.id) == ["a2"])
         #expect(rig.backupFolders == 1)
         let remaining = try await rig.store.fetchAll()
-        #expect(remaining.map(\.id) == ["a1"] && remaining[0].emails.map(\.value) == ["ann@example.com"])
+        #expect(
+            remaining.map(\.id) == ["a1"] && remaining[0].emails.map(\.value) == ["ann@example.com"]
+        )
         #expect(rig.notes.writes.map(\.note) == ["First note\n\nSecond note"])
     }
 
     @Test("A notes failure before the merge leaves every contact in place")
     func mergeAbortsWhenNotesUnreadable() async throws {
-        let rig = try Rig(records: [icloud("a1", "Ann", "Lee", phone: "415-555-2671"), icloud("a2", "Ann", "Lee", phone: "415-555-2671")], withNotes: true)
+        let rig = try Rig(
+            records: [
+                icloud("a1", "Ann", "Lee", phone: "415-555-2671"),
+                icloud("a2", "Ann", "Lee", phone: "415-555-2671"),
+            ], withNotes: true)
         defer { rig.cleanUp() }
         let scan = try await rig.workflows.loadDuplicates()
         let draft = MergeDraft(cluster: try #require(scan.clusters.first))
@@ -189,14 +238,22 @@ struct ContactWorkflowsTests {
         #expect(try await rig.workflows.loadNotes(ids: ["a1", "a2"]) == ["a1": "x"])
     }
 
-    @Test("Without a notes store the preview has no notes and a merge is refused before anything happens")
+    @Test(
+        "Without a notes store the preview has no notes and a merge is refused before anything happens"
+    )
     func noNotesStore() async throws {
-        let rig = try Rig(records: [icloud("a1", "Ann", "Lee", phone: "415-555-2671"), icloud("a2", "Ann", "Lee", phone: "415-555-2671")], withNotes: false)
+        let rig = try Rig(
+            records: [
+                icloud("a1", "Ann", "Lee", phone: "415-555-2671"),
+                icloud("a2", "Ann", "Lee", phone: "415-555-2671"),
+            ], withNotes: false)
         defer { rig.cleanUp() }
         #expect(try await rig.workflows.loadNotes(ids: ["a1"]).isEmpty)
         let scan = try await rig.workflows.loadDuplicates()
         let draft = MergeDraft(cluster: try #require(scan.clusters.first))
-        await #expect(throws: WorkflowError.notesUnavailable) { _ = try await rig.workflows.runMerge(draft) }
+        await #expect(throws: WorkflowError.notesUnavailable) {
+            _ = try await rig.workflows.runMerge(draft)
+        }
         #expect(try await rig.store.fetchAll().count == 2)
         #expect(rig.backupFolders == 0)
     }
@@ -204,22 +261,31 @@ struct ContactWorkflowsTests {
     @Test("A merge is refused if the backup could not include notes, and nothing is merged")
     func mergeNeedsNotesInBackup() async throws {
         let rig = try Rig(
-            records: [icloud("a1", "Ann", "Lee", phone: "415-555-2671"), icloud("a2", "Ann", "Lee", phone: "415-555-2671")],
+            records: [
+                icloud("a1", "Ann", "Lee", phone: "415-555-2671"),
+                icloud("a2", "Ann", "Lee", phone: "415-555-2671"),
+            ],
             writerNotes: false
         )
         defer { rig.cleanUp() }
         let scan = try await rig.workflows.loadDuplicates()
         let draft = MergeDraft(cluster: try #require(scan.clusters.first))
-        await #expect(throws: BackupCoordinatorError.self) { _ = try await rig.workflows.runMerge(draft) }
+        await #expect(throws: BackupCoordinatorError.self) {
+            _ = try await rig.workflows.runMerge(draft)
+        }
         #expect(try await rig.store.fetchAll().count == 2)
     }
 
     @Test("An import is refused if the backup did not include Google")
     func importNeedsGoogleInBackup() async throws {
-        let rig = try Rig(records: [], people: [gperson("Bob", "Stone", phone: "415-555-0002")], writerGoogle: false)
+        let rig = try Rig(
+            records: [], people: [gperson("Bob", "Stone", phone: "415-555-0002")],
+            writerGoogle: false)
         defer { rig.cleanUp() }
         let plan = try await rig.workflows.loadImportPlan()
-        await #expect(throws: BackupCoordinatorError.self) { _ = try await rig.workflows.runImport(plan.toImport) }
+        await #expect(throws: BackupCoordinatorError.self) {
+            _ = try await rig.workflows.runImport(plan.toImport)
+        }
         #expect(try await rig.store.fetchAll().isEmpty)
     }
 
@@ -235,10 +301,12 @@ struct ContactWorkflowsTests {
         #expect(rig.backupFolders == 2)
     }
 
-    @Test("Not duplicates dismisses the members that remain in the draft, not ones the user removed")
+    @Test(
+        "Not duplicates dismisses the members that remain in the draft, not ones the user removed")
     func dismissUsesRemainingMembers() async throws {
         let rig = try Rig(records: [
-            icloud("m1", "Maria", "Garcia", email: "m@example.com"), icloud("m2", "Maria", "Garcia", email: "m@example.com"),
+            icloud("m1", "Maria", "Garcia", email: "m@example.com"),
+            icloud("m2", "Maria", "Garcia", email: "m@example.com"),
             icloud("m3", "Maria", "Garcia", email: "m@example.com"),
         ])
         defer { rig.cleanUp() }

@@ -54,7 +54,9 @@ struct DynamicCodingKey: CodingKey {
 
 /// Reads and writes the keys a DTO does not declare.
 enum GoogleExtras {
-    static func decode(from decoder: Decoder, excluding known: Set<String>) throws -> [String: JSONValue] {
+    static func decode(from decoder: Decoder, excluding known: Set<String>) throws -> [String:
+        JSONValue]
+    {
         let container = try decoder.container(keyedBy: DynamicCodingKey.self)
         var extras: [String: JSONValue] = [:]
         for key in container.allKeys where !known.contains(key.stringValue) {
@@ -66,6 +68,8 @@ enum GoogleExtras {
     static func encode(_ extras: [String: JSONValue], to encoder: Encoder) throws {
         guard !extras.isEmpty else { return }
         var container = encoder.container(keyedBy: DynamicCodingKey.self)
-        for key in extras.keys.sorted() { try container.encode(extras[key], forKey: DynamicCodingKey(key)) }
+        for key in extras.keys.sorted() {
+            try container.encode(extras[key], forKey: DynamicCodingKey(key))
+        }
     }
 }

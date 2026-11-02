@@ -37,47 +37,92 @@ public struct PhotoReviewDraft: Sendable, Hashable {
         switch reason {
         case .bothChanged:
             title = "Photo changed in both places"
-            explanation = "The photo was changed in iCloud and in Google to different pictures. Pick the one to keep; the other side gets it."
+            explanation =
+                "The photo was changed in iCloud and in Google to different pictures. Pick the one to keep; the other side gets it."
             options = [
-                Option(choice: .keepICloud, title: "Keep iCloud's photo", detail: "Google gets iCloud's photo.", isDestructive: false),
-                Option(choice: .keepGoogle, title: "Keep Google's photo", detail: "iCloud gets Google's photo.", isDestructive: false),
+                Option(
+                    choice: .keepICloud, title: "Keep iCloud's photo",
+                    detail: "Google gets iCloud's photo.", isDestructive: false),
+                Option(
+                    choice: .keepGoogle, title: "Keep Google's photo",
+                    detail: "iCloud gets Google's photo.", isDestructive: false),
             ]
         case .firstSightDiffers:
             title = "Photo differs"
-            explanation = "These two contacts have different photos, and this is the first time they are compared. Pick the one to keep; the other side gets it."
+            explanation =
+                "These two contacts have different photos, and this is the first time they are compared. Pick the one to keep; the other side gets it."
             options = [
-                Option(choice: .keepICloud, title: "Keep iCloud's photo", detail: "Google gets iCloud's photo.", isDestructive: false),
-                Option(choice: .keepGoogle, title: "Keep Google's photo", detail: "iCloud gets Google's photo.", isDestructive: false),
+                Option(
+                    choice: .keepICloud, title: "Keep iCloud's photo",
+                    detail: "Google gets iCloud's photo.", isDestructive: false),
+                Option(
+                    choice: .keepGoogle, title: "Keep Google's photo",
+                    detail: "iCloud gets Google's photo.", isDestructive: false),
             ]
         case .removedOneChangedOther:
             title = "Photo removed on one side, changed on the other"
-            explanation = "One side removed its photo while the other changed it. Keeping a side with no photo removes the other side's photo too."
+            explanation =
+                "One side removed its photo while the other changed it. Keeping a side with no photo removes the other side's photo too."
             options = [
-                Option(choice: .keepICloud, title: "Keep iCloud's version", detail: "Google gets iCloud's photo, or loses its own if iCloud has none.", isDestructive: true),
-                Option(choice: .keepGoogle, title: "Keep Google's version", detail: "iCloud gets Google's photo, or loses its own if Google has none.", isDestructive: true),
+                Option(
+                    choice: .keepICloud, title: "Keep iCloud's version",
+                    detail: "Google gets iCloud's photo, or loses its own if iCloud has none.",
+                    isDestructive: true),
+                Option(
+                    choice: .keepGoogle, title: "Keep Google's version",
+                    detail: "iCloud gets Google's photo, or loses its own if Google has none.",
+                    isDestructive: true),
             ]
         case .removedInICloud:
             title = "Photo removed in iCloud"
-            explanation = "The photo was removed from the iCloud contact; the Google contact still has its own. Nothing is removed without asking."
+            explanation =
+                "The photo was removed from the iCloud contact; the Google contact still has its own. Nothing is removed without asking."
             options = [
-                Option(choice: .keepGoogle, title: "Add Google's photo back to iCloud", detail: "iCloud gets Google's photo again.", isDestructive: false),
-                Option(choice: .keepICloud, title: "Delete it from Google too", detail: "Google's photo is removed. It is saved to the photo history first.", isDestructive: true),
-                Option(choice: .doNothing, title: "Do nothing", detail: "Leave both as they are. You are asked again only if either photo changes.", isDestructive: false),
+                Option(
+                    choice: .keepGoogle, title: "Add Google's photo back to iCloud",
+                    detail: "iCloud gets Google's photo again.", isDestructive: false),
+                Option(
+                    choice: .keepICloud, title: "Delete it from Google too",
+                    detail: "Google's photo is removed. It is saved to the photo history first.",
+                    isDestructive: true),
+                Option(
+                    choice: .doNothing, title: "Do nothing",
+                    detail:
+                        "Leave both as they are. You are asked again only if either photo changes.",
+                    isDestructive: false),
             ]
         case .removedInGoogle:
             title = "Photo removed in Google"
-            explanation = "The photo was removed from the Google contact; the iCloud contact still has one. Nothing is removed without asking."
+            explanation =
+                "The photo was removed from the Google contact; the iCloud contact still has one. Nothing is removed without asking."
             options = [
-                Option(choice: .keepICloud, title: "Add iCloud's photo back to Google", detail: "Google gets iCloud's photo again.", isDestructive: false),
-                Option(choice: .keepGoogle, title: "Delete it from iCloud too", detail: "iCloud's photo is removed, after a backup is taken.", isDestructive: true),
-                Option(choice: .doNothing, title: "Do nothing", detail: "Leave both as they are. You are asked again only if either photo changes.", isDestructive: false),
+                Option(
+                    choice: .keepICloud, title: "Add iCloud's photo back to Google",
+                    detail: "Google gets iCloud's photo again.", isDestructive: false),
+                Option(
+                    choice: .keepGoogle, title: "Delete it from iCloud too",
+                    detail: "iCloud's photo is removed, after a backup is taken.",
+                    isDestructive: true),
+                Option(
+                    choice: .doNothing, title: "Do nothing",
+                    detail:
+                        "Leave both as they are. You are asked again only if either photo changes.",
+                    isDestructive: false),
             ]
         case .profileRemovedInICloud:
             title = "Google profile photo removed in iCloud"
-            explanation = "The photo on this iCloud contact was a copy of their Google profile picture, and you removed it. It is their own Google picture, so it can't be removed from Google."
+            explanation =
+                "The photo on this iCloud contact was a copy of their Google profile picture, and you removed it. It is their own Google picture, so it can't be removed from Google."
             options = [
-                Option(choice: .keepGoogle, title: "Add their Google profile photo back", detail: "iCloud gets their profile picture again, and keeps it up to date.", isDestructive: false),
-                Option(choice: .doNothing, title: "Do nothing (stop using their profile photo for this contact)", detail: "No profile photo is copied to this contact any more.", isDestructive: false),
+                Option(
+                    choice: .keepGoogle, title: "Add their Google profile photo back",
+                    detail: "iCloud gets their profile picture again, and keeps it up to date.",
+                    isDestructive: false),
+                Option(
+                    choice: .doNothing,
+                    title: "Do nothing (stop using their profile photo for this contact)",
+                    detail: "No profile photo is copied to this contact any more.",
+                    isDestructive: false),
             ]
         }
     }

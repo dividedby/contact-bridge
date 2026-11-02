@@ -15,20 +15,32 @@ public enum GoogleAPIError: Error, Sendable, Hashable {
     ///
     /// A precondition failure is an etag mismatch only when its message says so (Google also uses
     /// `FAILED_PRECONDITION` for things like a full contact group); anything unrecognised stays `.other`.
-    public static func parse(status: Int, body: Data, retryAfter: TimeInterval? = nil) -> GoogleAPIError {
+    public static func parse(status: Int, body: Data, retryAfter: TimeInterval? = nil)
+        -> GoogleAPIError
+    {
         let envelope = try? JSONDecoder().decode(GoogleErrorEnvelope.self, from: body)
-        let reasons = (envelope?.error.details?.compactMap(\.reason) ?? []) + (envelope?.error.errors?.compactMap(\.reason) ?? [])
+        let reasons =
+            (envelope?.error.details?.compactMap(\.reason) ?? [])
+            + (envelope?.error.errors?.compactMap(\.reason) ?? [])
         let message = envelope?.error.message ?? String(decoding: body, as: UTF8.self)
         let lowered = message.lowercased()
 
         // Expired sync tokens arrive as 410 or as 400 FAILED_PRECONDITION, with or without ErrorInfo.
-        if status == 410 || reasons.contains("EXPIRED_SYNC_TOKEN") || lowered.contains("sync token") { return .syncTokenExpired }
-        let rateLimitReasons: Set<String> = ["RATE_LIMIT_EXCEEDED", "rateLimitExceeded", "userRateLimitExceeded"]
-        if status == 429 || reasons.contains(where: rateLimitReasons.contains) { return .rateLimited(retryAfter: retryAfter) }
+        if status == 410 || reasons.contains("EXPIRED_SYNC_TOKEN") || lowered.contains("sync token")
+        {
+            return .syncTokenExpired
+        }
+        let rateLimitReasons: Set<String> = [
+            "RATE_LIMIT_EXCEEDED", "rateLimitExceeded", "userRateLimitExceeded",
+        ]
+        if status == 429 || reasons.contains(where: rateLimitReasons.contains) {
+            return .rateLimited(retryAfter: retryAfter)
+        }
         switch status {
         case 401: return .unauthorized
         case 404: return .notFound
-        case 400 where envelope?.error.status == "FAILED_PRECONDITION" && lowered.contains("etag"): return .etagMismatch
+        case 400 where envelope?.error.status == "FAILED_PRECONDITION" && lowered.contains("etag"):
+            return .etagMismatch
         default: return .other(status: status, message: message)
         }
     }
@@ -44,14 +56,17 @@ public enum GoogleAPIError: Error, Sendable, Hashable {
             formatter.locale = Locale(identifier: "en_US_POSIX")
             formatter.timeZone = TimeZone(secondsFromGMT: 0)
             formatter.dateFormat = format
-            if let date = formatter.date(from: trimmed) { return max(date.timeIntervalSince(now), 0) }
+            if let date = formatter.date(from: trimmed) {
+                return max(date.timeIntervalSince(now), 0)
+            }
         }
         return nil
     }
 
     /// IMF-fixdate, obsolete RFC 850, and asctime: the three forms HTTP allows.
     private static let httpDateFormats = [
-        "EEE, dd MMM yyyy HH:mm:ss 'GMT'", "EEEE, dd-MMM-yy HH:mm:ss 'GMT'", "EEE MMM d HH:mm:ss yyyy",
+        "EEE, dd MMM yyyy HH:mm:ss 'GMT'", "EEEE, dd-MMM-yy HH:mm:ss 'GMT'",
+        "EEE MMM d HH:mm:ss yyyy",
     ]
 }
 

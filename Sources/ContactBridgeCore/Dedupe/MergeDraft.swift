@@ -21,8 +21,11 @@ public struct MergeDraft: Sendable, Hashable {
     /// The member with the most filled-in data; ties go to the lowest id.
     public static func suggestedSurvivor(in members: [ContactRecord]) -> ContactRecord {
         func richness(_ record: ContactRecord) -> Int {
-            [record.givenName, record.middleName, record.familyName, record.nickname, record.organization, record.jobTitle]
-                .filter { !$0.isBlank }.count
+            [
+                record.givenName, record.middleName, record.familyName, record.nickname,
+                record.organization, record.jobTitle,
+            ]
+            .filter { !$0.isBlank }.count
                 + record.phones.filter { !$0.value.isBlank }.count
                 + record.emails.filter { !$0.value.isBlank }.count
                 + record.postalAddresses.filter { !$0.value.isEmpty }.count
@@ -36,7 +39,9 @@ public struct MergeDraft: Sendable, Hashable {
     // MARK: members
 
     public var members: [ContactRecord] { cluster.members.filter { !removedIDs.contains($0.id) } }
-    public var removedMembers: [ContactRecord] { cluster.members.filter { removedIDs.contains($0.id) } }
+    public var removedMembers: [ContactRecord] {
+        cluster.members.filter { removedIDs.contains($0.id) }
+    }
     public var survivor: ContactRecord { members.first { $0.id == survivorID } ?? members[0] }
     /// The members that would be deleted.
     public var others: [ContactRecord] { members.filter { $0.id != survivor.id } }
@@ -47,13 +52,15 @@ public struct MergeDraft: Sendable, Hashable {
     public mutating func chooseSurvivor(_ id: String) {
         guard id != survivorID, members.contains(where: { $0.id == id }) else { return }
         survivorID = id
-        picks = [:] // the proposed defaults were relative to the old survivor
+        picks = [:]  // the proposed defaults were relative to the old survivor
     }
 
     /// False (and no change) for an unknown member, one already removed, or when only two members remain.
     @discardableResult
     public mutating func remove(memberID: String) -> Bool {
-        guard members.count > 2, members.contains(where: { $0.id == memberID }) else { return false }
+        guard members.count > 2, members.contains(where: { $0.id == memberID }) else {
+            return false
+        }
         removedIDs.insert(memberID)
         if survivorID == memberID {
             survivorID = Self.suggestedSurvivor(in: members).id
@@ -79,14 +86,16 @@ public struct MergeDraft: Sendable, Hashable {
     /// does not conflict.
     public func selectedRecordID(for field: MergeField) -> String? {
         guard let conflict = conflicts.first(where: { $0.field == field }) else { return nil }
-        if let pick = picks[field], conflict.candidates.contains(where: { $0.recordID == pick }) { return pick }
+        if let pick = picks[field], conflict.candidates.contains(where: { $0.recordID == pick }) {
+            return pick
+        }
         return conflict.proposedRecordID
     }
 
     /// Ignored unless `recordID` is one of the field's candidates.
     public mutating func pick(_ field: MergeField, recordID: String) {
         guard let conflict = conflicts.first(where: { $0.field == field }),
-              conflict.candidates.contains(where: { $0.recordID == recordID })
+            conflict.candidates.contains(where: { $0.recordID == recordID })
         else { return }
         picks[field] = recordID
     }
@@ -94,7 +103,8 @@ public struct MergeDraft: Sendable, Hashable {
     private mutating func normalizePicks() {
         let current = conflicts
         picks = picks.filter { field, recordID in
-            current.first { $0.field == field }?.candidates.contains { $0.recordID == recordID } ?? false
+            current.first { $0.field == field }?.candidates.contains { $0.recordID == recordID }
+                ?? false
         }
     }
 
@@ -115,16 +125,24 @@ public struct MergeDraft: Sendable, Hashable {
 
     /// Scored pairs among the remaining members, strongest first.
     public var edges: [ClusterEdge] {
-        cluster.edges.filter { !removedIDs.contains($0.firstID) && !removedIDs.contains($0.secondID) }
+        cluster.edges.filter {
+            !removedIDs.contains($0.firstID) && !removedIDs.contains($0.secondID)
+        }
     }
 
     /// Links to records outside the draft: the matcher's own, plus every link to a removed member.
     public var relatedEdges: [ClusterEdge] {
         let ids = Set(members.map(\.id))
-        let removedLinks = cluster.edges.filter { ids.contains($0.firstID) != ids.contains($0.secondID) }
-        let outside = cluster.relatedEdges.filter { ids.contains($0.firstID) || ids.contains($0.secondID) }
+        let removedLinks = cluster.edges.filter {
+            ids.contains($0.firstID) != ids.contains($0.secondID)
+        }
+        let outside = cluster.relatedEdges.filter {
+            ids.contains($0.firstID) || ids.contains($0.secondID)
+        }
         return (removedLinks + outside).sorted {
-            if $0.match.confidence != $1.match.confidence { return $0.match.confidence > $1.match.confidence }
+            if $0.match.confidence != $1.match.confidence {
+                return $0.match.confidence > $1.match.confidence
+            }
             return ($0.firstID, $0.secondID) < ($1.firstID, $1.secondID)
         }
     }
@@ -143,7 +161,9 @@ public struct MergeDraft: Sendable, Hashable {
     public var reasons: [String] {
         if removedIDs.isEmpty { return cluster.reasons }
         var seen: [String] = []
-        for reason in edges.flatMap(\.match.reasons) where !seen.contains(reason) { seen.append(reason) }
+        for reason in edges.flatMap(\.match.reasons) where !seen.contains(reason) {
+            seen.append(reason)
+        }
         return seen
     }
 
@@ -164,7 +184,8 @@ public struct MergeDraft: Sendable, Hashable {
             return current
         }
         for edge in edges where edge.joinsCluster {
-            let a = root(edge.firstID), b = root(edge.secondID)
+            let a = root(edge.firstID)
+            let b = root(edge.secondID)
             if a != b { parent[b] = a }
         }
         var groups: [String: [String]] = [:]

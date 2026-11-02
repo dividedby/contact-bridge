@@ -31,7 +31,9 @@ public enum ActivationRules {
     }
 
     /// While a launch at login keeps the window away, any app window that is on screen is put away again.
-    public static func shouldHideForLaunch(_ window: WindowTraits, isOnScreen: Bool, suppressing: Bool) -> Bool {
+    public static func shouldHideForLaunch(
+        _ window: WindowTraits, isOnScreen: Bool, suppressing: Bool
+    ) -> Bool {
         suppressing && isOnScreen && window.isTitled && !window.isPanel
     }
 

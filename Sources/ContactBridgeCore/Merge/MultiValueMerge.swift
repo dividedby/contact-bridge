@@ -22,8 +22,12 @@ extension MergePlan {
             }
             guard let label = entry.label, !label.isBlank else { continue }
             if let kept = result[index].label, !kept.isBlank {
-                let note = DroppedLabel(field: field, value: describe(result[index].value), keptLabel: kept, droppedLabel: label)
-                if kept.lowercased() != label.lowercased(), !dropped.contains(note) { dropped.append(note) }
+                let note = DroppedLabel(
+                    field: field, value: describe(result[index].value), keptLabel: kept,
+                    droppedLabel: label)
+                if kept.lowercased() != label.lowercased(), !dropped.contains(note) {
+                    dropped.append(note)
+                }
             } else {
                 result[index].label = label
             }
@@ -62,9 +66,13 @@ extension MergePlan {
         guard !address.isEmpty else { return nil }
         let parts = [address.street, address.city, address.state, address.postalCode].map { part in
             let folded = NameNormalizer.foldedKey(part)
-            return folded.isEmpty ? part.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() : folded
+            return folded.isEmpty
+                ? part.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() : folded
         }
-        return (parts + [CountryNormalizer.key(country: address.country, isoCode: address.isoCountryCode)]).joined(separator: "|")
+        return
+            (parts + [
+                CountryNormalizer.key(country: address.country, isoCode: address.isoCountryCode)
+            ]).joined(separator: "|")
     }
 
     static func describe(_ address: PostalAddress) -> String {

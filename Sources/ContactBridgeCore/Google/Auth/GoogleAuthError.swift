@@ -29,9 +29,11 @@ public enum GoogleAuthError: Error, Sendable, Hashable, CustomStringConvertible 
         case .browserUnavailable: "Could not open the browser for sign-in."
         case .listenerFailed(let reason): "Could not start the local sign-in listener: \(reason)"
         case .secureRandomUnavailable: "Could not generate secure random data for sign-in."
-        case .missingScopes(let scopes): "Google did not grant the required access: \(scopes.joined(separator: ", "))."
+        case .missingScopes(let scopes):
+            "Google did not grant the required access: \(scopes.joined(separator: ", "))."
         case .tokenEndpoint(let status, let error, let description):
-            "Google token endpoint error \(status): \(error)" + (description.map { " (\($0))" } ?? "")
+            "Google token endpoint error \(status): \(error)"
+                + (description.map { " (\($0))" } ?? "")
         case .invalidResponse: "Unexpected response from Google."
         }
     }

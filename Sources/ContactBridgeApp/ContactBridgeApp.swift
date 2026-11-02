@@ -32,9 +32,13 @@ struct RootView: View {
             }
         }
         // The window can always hand over its own opener, so reopening never depends on the menu-bar label.
-        .task { ActivationPolicyController.shared.openMainWindow = { openWindow(id: MainWindow.id) } }
+        .task {
+            ActivationPolicyController.shared.openMainWindow = { openWindow(id: MainWindow.id) }
+        }
         .alert(item: $model.alert) { info in
-            Alert(title: Text(info.title), message: Text(info.message), dismissButton: .default(Text("OK")))
+            Alert(
+                title: Text(info.title), message: Text(info.message),
+                dismissButton: .default(Text("OK")))
         }
     }
 }
@@ -81,7 +85,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let policy = ActivationPolicyController.shared
         policy.start()
         let atLogin = LaunchContext.launchedAtLogin()
-        if !ActivationRules.showsWindowAtLaunch(launchedAtLogin: atLogin, startInMenuBar: model.shell.startInMenuBar) {
+        if !ActivationRules.showsWindowAtLaunch(
+            launchedAtLogin: atLogin, startInMenuBar: model.shell.startInMenuBar)
+        {
             policy.suppressLaunchWindow()
         }
         Task { await model.start() }
@@ -91,7 +97,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
     /// A click on the Dock icon (or opening the app again) with no window open brings the window back.
-    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool)
+        -> Bool
+    {
         if !flag { Self.model?.showWindow() }
         return true
     }

@@ -43,7 +43,8 @@ public struct URLSessionTransport: HTTPTransport {
 }
 
 enum FormEncoding {
-    private static let unreserved = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+    private static let unreserved = CharacterSet(
+        charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
 
     /// Percent-encodes everything outside the RFC 3986 unreserved set (spaces become %20, `+` becomes %2B).
     static func escape(_ value: String) -> String {

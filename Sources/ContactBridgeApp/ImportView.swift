@@ -36,7 +36,8 @@ struct ImportView: View {
         }
         .task(id: model.blockReason) { await model.loadIfNeeded() }
         .sheet(isPresented: $model.showingConfirmation, onDismiss: { model.result = nil }) {
-            ImportConfirmationSheet(model: model, containerName: app.setup.selectedContainer?.name ?? "iCloud")
+            ImportConfirmationSheet(
+                model: model, containerName: app.setup.selectedContainer?.name ?? "iCloud")
         }
     }
 
@@ -58,19 +59,28 @@ struct ImportView: View {
                 HStack {
                     Text("Not in iCloud yet (\(plan.toImport.count))")
                     Spacer()
-                    Button("Select all") { model.selectedConnections = Set(plan.toImport.map(\.id)) }.buttonStyle(.link)
+                    Button("Select all") {
+                        model.selectedConnections = Set(plan.toImport.map(\.id))
+                    }.buttonStyle(.link)
                     Button("Select none") { model.selectedConnections = [] }.buttonStyle(.link)
-                    Button("People only") { model.selectedConnections = ImportSelection.peopleOnly(plan.toImport) }.buttonStyle(.link)
+                    Button("People only") {
+                        model.selectedConnections = ImportSelection.peopleOnly(plan.toImport)
+                    }.buttonStyle(.link)
                     Button("Exclude text-message senders") {
-                        model.selectedConnections = ImportSelection.excludingTextMessageSenders(model.selectedConnections, from: plan.toImport)
+                        model.selectedConnections = ImportSelection.excludingTextMessageSenders(
+                            model.selectedConnections, from: plan.toImport)
                     }.buttonStyle(.link)
                 }
             }
             if !plan.otherContactCandidates.isEmpty {
                 Section {
-                    DisclosureGroup("Other contacts (\(plan.otherContactCandidates.count)), not selected by default") {
-                        Text("Addresses Google saved from your email. They are not part of your own Google contacts.")
-                            .font(.caption).foregroundStyle(.secondary)
+                    DisclosureGroup(
+                        "Other contacts (\(plan.otherContactCandidates.count)), not selected by default"
+                    ) {
+                        Text(
+                            "Addresses Google saved from your email. They are not part of your own Google contacts."
+                        )
+                        .font(.caption).foregroundStyle(.secondary)
                         ForEach(plan.otherContactCandidates) { candidate in
                             Toggle(isOn: binding($model.selectedOthers, candidate.id)) {
                                 candidateRow(candidate, plan: plan)
@@ -82,16 +92,21 @@ struct ImportView: View {
             if !plan.possibleMatches.isEmpty {
                 Section {
                     DisclosureGroup("Possible matches to look at (\(plan.possibleMatches.count))") {
-                        Text("These pairs might be the same person, but not convincingly. Both stay as they are; read-only.")
-                            .font(.caption).foregroundStyle(.secondary)
+                        Text(
+                            "These pairs might be the same person, but not convincingly. Both stay as they are; read-only."
+                        )
+                        .font(.caption).foregroundStyle(.secondary)
                         ForEach(plan.possibleMatches) { match in
                             VStack(alignment: .leading, spacing: 2) {
                                 HStack {
                                     Text("Google \(match.googleName) ↔ iCloud \(match.icloudName)")
                                     ConfidenceBadge(confidence: match.confidence)
                                 }
-                                Text(match.reasons.joined(separator: ", ")).font(.caption).foregroundStyle(.secondary)
-                                ForEach(match.flags, id: \.self) { FlagLabel(flag: $0).font(.caption) }
+                                Text(match.reasons.joined(separator: ", ")).font(.caption)
+                                    .foregroundStyle(.secondary)
+                                ForEach(match.flags, id: \.self) {
+                                    FlagLabel(flag: $0).font(.caption)
+                                }
                             }
                         }
                     }
@@ -100,8 +115,10 @@ struct ImportView: View {
             if !plan.links.isEmpty {
                 Section {
                     DisclosureGroup("Already in iCloud (\(plan.links.count))") {
-                        Text("Nothing here is imported unless you tick “Import anyway”. Matches by name alone are the ones worth a look: a common name can hide a different person.")
-                            .font(.caption).foregroundStyle(.secondary)
+                        Text(
+                            "Nothing here is imported unless you tick “Import anyway”. Matches by name alone are the ones worth a look: a common name can hide a different person."
+                        )
+                        .font(.caption).foregroundStyle(.secondary)
                         ForEach(plan.links, id: \.googleResourceName) { link in
                             HStack(alignment: .firstTextBaseline) {
                                 VStack(alignment: .leading, spacing: 2) {
@@ -110,13 +127,17 @@ struct ImportView: View {
                                         ConfidenceBadge(confidence: link.confidence)
                                     }
                                     if link.isNameOnly {
-                                        Text("Matched by name only: no shared phone or email.").font(.caption).foregroundStyle(.orange)
+                                        Text("Matched by name only: no shared phone or email.")
+                                            .font(.caption).foregroundStyle(.orange)
                                     }
                                 }
                                 Spacer()
                                 if link.isNameOnly {
-                                    Toggle("Import anyway", isOn: binding($model.importAnyway, link.googleResourceName))
-                                        .toggleStyle(.checkbox)
+                                    Toggle(
+                                        "Import anyway",
+                                        isOn: binding($model.importAnyway, link.googleResourceName)
+                                    )
+                                    .toggleStyle(.checkbox)
                                 }
                             }
                         }
@@ -146,8 +167,11 @@ struct ImportView: View {
                 Text("Automated text-message sender").font(.caption).foregroundStyle(.secondary)
             }
             if !plan.possibleMatches(forGoogleID: candidate.id).isEmpty {
-                Label("Might already be in iCloud (see possible matches)", systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption).foregroundStyle(.orange)
+                Label(
+                    "Might already be in iCloud (see possible matches)",
+                    systemImage: "exclamationmark.triangle.fill"
+                )
+                .font(.caption).foregroundStyle(.orange)
             }
         }
     }
@@ -188,16 +212,23 @@ struct ImportConfirmationSheet: View {
     private var confirmation: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Import into iCloud?").font(.title2)
-            Text("This will create \(ContactText.count(model.selectedConnectionCount, "contact")) from your Google contacts and \(ContactText.count(model.selectedOtherCount, "contact")) from Other contacts in “\(containerName)”.")
-            Text("Nothing is deleted or changed in Google. If the last backup is older than an hour, a new one is taken first.")
-                .foregroundStyle(.secondary)
+            Text(
+                "This will create \(ContactText.count(model.selectedConnectionCount, "contact")) from your Google contacts and \(ContactText.count(model.selectedOtherCount, "contact")) from Other contacts in “\(containerName)”."
+            )
+            Text(
+                "Nothing is deleted or changed in Google. If the last backup is older than an hour, a new one is taken first."
+            )
+            .foregroundStyle(.secondary)
             HStack {
                 Spacer()
                 if model.isImporting { ProgressView().controlSize(.small) }
-                Button("Cancel", role: .cancel) { model.showingConfirmation = false }.disabled(model.isImporting)
-                Button("Import \(ContactText.count(model.selectedCandidates.count, "contact"))") { Task { await model.runImport() } }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(model.isImporting || model.selectedCandidates.isEmpty)
+                Button("Cancel", role: .cancel) { model.showingConfirmation = false }.disabled(
+                    model.isImporting)
+                Button("Import \(ContactText.count(model.selectedCandidates.count, "contact"))") {
+                    Task { await model.runImport() }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(model.isImporting || model.selectedCandidates.isEmpty)
             }
         }
     }
@@ -206,15 +237,22 @@ struct ImportConfirmationSheet: View {
         Text(result.isComplete ? "Import finished" : "Import stopped").font(.title2)
         Text("Created \(ContactText.count(result.created.count, "contact")) in “\(containerName)”.")
         if case .failed(let id, let reason) = result.stopped {
-            Label("Stopped at \(id): \(reason)", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-            Text("\(result.notAttempted.count) more were not attempted. Fix the problem and import again; contacts already created will show as already in iCloud.")
-                .foregroundStyle(.secondary)
+            Label("Stopped at \(id): \(reason)", systemImage: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+            Text(
+                "\(result.notAttempted.count) more were not attempted. Fix the problem and import again; contacts already created will show as already in iCloud."
+            )
+            .foregroundStyle(.secondary)
         }
         if case .cancelled = result.stopped {
-            Text("Cancelled. \(result.notAttempted.count) were not attempted.").foregroundStyle(.secondary)
+            Text("Cancelled. \(result.notAttempted.count) were not attempted.").foregroundStyle(
+                .secondary)
         }
         if let error = result.linkSaveError {
-            Label("The contacts were created, but the link file could not be saved: \(error)", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+            Label(
+                "The contacts were created, but the link file could not be saved: \(error)",
+                systemImage: "exclamationmark.triangle.fill"
+            ).foregroundStyle(.orange)
         }
         HStack {
             Spacer()

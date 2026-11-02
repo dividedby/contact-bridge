@@ -1,6 +1,7 @@
 import Foundation
 import Synchronization
 import Testing
+
 @testable import ContactBridgeCore
 
 /// What a Dedupe merge does with the Google links of the contacts it deletes.
@@ -36,7 +37,9 @@ struct MergeLinkCarryTests {
             return try inner.load()
         }
         func save(_ state: SyncState) throws { try inner.save(state) }
-        func update(_ change: (inout SyncState) throws -> Void) throws -> SyncState { try inner.update(change) }
+        func update(_ change: (inout SyncState) throws -> Void) throws -> SyncState {
+            try inner.update(change)
+        }
     }
 
     private struct Rig {
@@ -47,17 +50,23 @@ struct MergeLinkCarryTests {
         let workflows: ContactWorkflows
 
         init(records: [ContactRecord], state: SyncState = SyncState()) throws {
-            directory = FileManager.default.temporaryDirectory.appendingPathComponent("merge-link-tests-\(UUID().uuidString)", isDirectory: true)
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+                "merge-link-tests-\(UUID().uuidString)", isDirectory: true)
+            try FileManager.default.createDirectory(
+                at: directory, withIntermediateDirectories: true)
             store = InMemoryContactStore(records: records)
             self.state = FlakyState(state)
             let notes = InMemoryNotesStore()
-            let store = store, directory = directory
+            let store = store
+            let directory = directory
             let backups = BackupCoordinator(makeSetup: {
-                BackupSetup(writer: BackupWriter(store: store, notes: notes, baseDirectory: directory), containerID: "A")
+                BackupSetup(
+                    writer: BackupWriter(store: store, notes: notes, baseDirectory: directory),
+                    containerID: "A")
             })
             workflows = ContactWorkflows(
-                store: store, google: nil, notes: notes, backups: backups, links: links, syncState: self.state,
+                store: store, google: nil, notes: notes, backups: backups, links: links,
+                syncState: self.state,
                 dismissals: InMemoryDismissalStore(), containerID: "A"
             )
         }
@@ -73,7 +82,10 @@ struct MergeLinkCarryTests {
         var mergedAnything: Bool { !store.mutationLog.isEmpty }
     }
 
-    private func person(_ id: String, _ given: String = "Ann", _ family: String = "Lee", phone: String = "415-555-0101") -> ContactRecord {
+    private func person(
+        _ id: String, _ given: String = "Ann", _ family: String = "Lee",
+        phone: String = "415-555-0101"
+    ) -> ContactRecord {
         ContactRecord(
             id: id, source: .icloud, sourceIdentifier: id, givenName: given, familyName: family,
             phones: [Labeled(label: "mobile", value: phone)]
@@ -82,8 +94,12 @@ struct MergeLinkCarryTests {
 
     private func baseline(for record: ContactRecord, etag: String = "e1") -> SyncBaseline {
         SyncBaseline(
-            icloud: record, google: ContactRecord(id: "people/c1", source: .google, sourceIdentifier: "people/c1", givenName: record.givenName, familyName: record.familyName, phones: record.phones),
-            googleEtag: etag, icloudNoteHash: NoteHash.hash(""), googleNoteHash: NoteHash.hash(""), syncedAt: t0
+            icloud: record,
+            google: ContactRecord(
+                id: "people/c1", source: .google, sourceIdentifier: "people/c1",
+                givenName: record.givenName, familyName: record.familyName, phones: record.phones),
+            googleEtag: etag, icloudNoteHash: NoteHash.hash(""), googleNoteHash: NoteHash.hash(""),
+            syncedAt: t0
         )
     }
 
@@ -92,9 +108,14 @@ struct MergeLinkCarryTests {
     }
 
     /// One duplicate pair: the draft's survivor and its single loser.
-    private func pair(_ rig: Rig) async throws -> (survivor: String, loser: String, draft: MergeDraft) {
+    private func pair(_ rig: Rig) async throws -> (
+        survivor: String, loser: String, draft: MergeDraft
+    ) {
         let draft = try #require(try await rig.drafts().first)
-        return (draft.survivor.sourceIdentifier, try #require(draft.others.first).sourceIdentifier, draft)
+        return (
+            draft.survivor.sourceIdentifier, try #require(draft.others.first).sourceIdentifier,
+            draft
+        )
     }
 
     // MARK: the pure helper
@@ -107,39 +128,55 @@ struct MergeLinkCarryTests {
             "z": LinkEntry(googleResourceName: "people/c3", linkedAt: t0.addingTimeInterval(-100)),
         ])
         func mover(_ state: SyncState?) -> String? {
-            ContactWorkflows.linkCarryOver(survivorID: "s", loserIDs: ["z", "y", "x"], table: table, state: state).moved?.from
+            ContactWorkflows.linkCarryOver(
+                survivorID: "s", loserIDs: ["z", "y", "x"], table: table, state: state
+            ).moved?.from
         }
         #expect(mover(nil) == "y", "oldest link; the lower id of the two oldest")
         let state = approved(["x": baseline(for: person("x"))])
         #expect(mover(state) == "x", "a baseline beats an older link")
-        #expect(ContactWorkflows.linkCarryOver(survivorID: "s", loserIDs: ["z", "y", "x"], table: table, state: state).keptForSync.isEmpty)
+        #expect(
+            ContactWorkflows.linkCarryOver(
+                survivorID: "s", loserIDs: ["z", "y", "x"], table: table, state: state
+            ).keptForSync.isEmpty)
     }
 
     @Test("A deleted contact that is not linked changes nothing")
     func nothingLinked() {
-        let plan = ContactWorkflows.linkCarryOver(survivorID: "s", loserIDs: ["a"], table: LinkTable(), state: approved())
+        let plan = ContactWorkflows.linkCarryOver(
+            survivorID: "s", loserIDs: ["a"], table: LinkTable(), state: approved())
         #expect(plan == LinkCarryPlan())
     }
 
     // MARK: survivor unlinked, loser linked
 
-    @Test("Sync off: the loser's link moves to the survivor, keeping its origin; Google is not involved")
+    @Test(
+        "Sync off: the loser's link moves to the survivor, keeping its origin; Google is not involved"
+    )
     func movesLinkSyncOff() async throws {
         let rig = try Rig(records: [person("a1"), person("a2")])
         defer { rig.cleanUp() }
         let (survivor, loser, draft) = try await pair(rig)
-        try rig.links.inner.add([ImportedLink(icloudID: loser, googleResourceName: "people/c1", origin: .matched)], at: t0)
+        try rig.links.inner.add(
+            [ImportedLink(icloudID: loser, googleResourceName: "people/c1", origin: .matched)],
+            at: t0)
 
         let run = try await rig.workflows.runMerge(draft)
-        #expect(run.linksMoved == 1 && run.googleCopiesLeft == 0 && run.googleRemovalsPending == 0 && run.followUpWarnings.isEmpty)
+        #expect(
+            run.linksMoved == 1 && run.googleCopiesLeft == 0 && run.googleRemovalsPending == 0
+                && run.followUpWarnings.isEmpty)
         let table = try rig.linkTable
-        #expect(table.keys.sorted() == [survivor] && table[survivor]?.googleResourceName == "people/c1" && table[survivor]?.origin == .matched)
+        #expect(
+            table.keys.sorted() == [survivor] && table[survivor]?.googleResourceName == "people/c1"
+                && table[survivor]?.origin == .matched)
         #expect(table[survivor]?.displayName == run.survivor.displayName)
         #expect(try rig.baselines.isEmpty)
         #expect(try await rig.store.fetchAll().map(\.sourceIdentifier) == [survivor])
     }
 
-    @Test("Sync on: the loser's baseline moves to the survivor with the survivor's ids, so the next sync pushes the merged data as an update")
+    @Test(
+        "Sync on: the loser's baseline moves to the survivor with the survivor's ids, so the next sync pushes the merged data as an update"
+    )
     func movesLinkAndBaselineSyncOn() async throws {
         // a1 is richer (it has an email), so it survives; a2, the loser, is the synced one and lacks the email.
         var rich = person("a1")
@@ -150,25 +187,33 @@ struct MergeLinkCarryTests {
         try #require(draft.survivor.sourceIdentifier == "a1")
         let synced = baseline(for: person("a2"))
         try rig.state.inner.save(approved(["a2": synced]))
-        try rig.links.inner.add([ImportedLink(icloudID: "a2", googleResourceName: "people/c1", origin: .matched)], at: t0)
+        try rig.links.inner.add(
+            [ImportedLink(icloudID: "a2", googleResourceName: "people/c1", origin: .matched)],
+            at: t0)
 
         let run = try await rig.workflows.runMerge(draft)
-        #expect(run.linksMoved == 1 && run.googleRemovalsPending == 0 && run.followUpWarnings.isEmpty)
+        #expect(
+            run.linksMoved == 1 && run.googleRemovalsPending == 0 && run.followUpWarnings.isEmpty)
         #expect(try rig.linkTable.keys.sorted() == ["a1"])
         #expect(try rig.baselines.keys.sorted() == ["a1"], "the loser's baseline is gone")
         let moved = try #require(try rig.baselines["a1"])
         #expect(moved.icloud.id == "a1" && moved.icloud.sourceIdentifier == "a1")
-        #expect(moved.icloud.phones == synced.icloud.phones && moved.icloud.emails.isEmpty && moved.googleEtag == "e1" && moved.google == synced.google)
+        #expect(
+            moved.icloud.phones == synced.icloud.phones && moved.icloud.emails.isEmpty
+                && moved.googleEtag == "e1" && moved.google == synced.google)
 
         // Against that baseline the merged contact is an ordinary iCloud edit: the record ids play no part in the diff.
         let merged = try #require(try await rig.store.fetchAll().first)
         let diff = ThreeWayDiff.diff(
-            icloud: merged, google: moved.google, base: moved, icloudNoteHash: NoteHash.hash(""), googleNoteHash: NoteHash.hash(""), at: t0
+            icloud: merged, google: moved.google, base: moved, icloudNoteHash: NoteHash.hash(""),
+            googleNoteHash: NoteHash.hash(""), at: t0
         )
         #expect(diff.needsPush && diff.pushFields == [.emails] && !diff.needsReview)
     }
 
-    @Test("Sync on: the baseline's photo half and the loser's profile-photo opt-out move to the survivor with it")
+    @Test(
+        "Sync on: the baseline's photo half and the loser's profile-photo opt-out move to the survivor with it"
+    )
     func movesPhotoBaselineAndOptOut() async throws {
         var rich = person("a1")
         rich.emails = [Labeled(label: "home", value: "ann@example.com")]
@@ -181,20 +226,27 @@ struct MergeLinkCarryTests {
         var state = approved(["a2": synced])
         state.profilePhotoOptOut = ["a2", "someone-else"]
         try rig.state.inner.save(state)
-        try rig.links.inner.add([ImportedLink(icloudID: "a2", googleResourceName: "people/c1", origin: .matched)], at: t0)
+        try rig.links.inner.add(
+            [ImportedLink(icloudID: "a2", googleResourceName: "people/c1", origin: .matched)],
+            at: t0)
 
         _ = try await rig.workflows.runMerge(draft)
         let after = try rig.state.inner.load()
-        #expect(after.baselines["a1"]?.photo == synced.photo, "the survivor keeps the inherited photo baseline, then compares as usual")
+        #expect(
+            after.baselines["a1"]?.photo == synced.photo,
+            "the survivor keeps the inherited photo baseline, then compares as usual")
         #expect(after.profilePhotoOptOut == ["a1", "someone-else"])
     }
 
-    @Test("A loser's link with no baseline yet moves too; the survivor is adopted like any earlier import")
+    @Test(
+        "A loser's link with no baseline yet moves too; the survivor is adopted like any earlier import"
+    )
     func movesUnbaselinedLinkSyncOn() async throws {
         let rig = try Rig(records: [person("a1"), person("a2")], state: approved())
         defer { rig.cleanUp() }
         let (survivor, loser, draft) = try await pair(rig)
-        try rig.links.inner.add([ImportedLink(icloudID: loser, googleResourceName: "people/c1")], at: t0)
+        try rig.links.inner.add(
+            [ImportedLink(icloudID: loser, googleResourceName: "people/c1")], at: t0)
         let run = try await rig.workflows.runMerge(draft)
         #expect(run.linksMoved == 1 && run.googleCopiesLeft == 0)
         #expect(try rig.linkTable.keys.sorted() == [survivor] && rig.baselines.isEmpty)
@@ -202,64 +254,89 @@ struct MergeLinkCarryTests {
 
     // MARK: both linked
 
-    @Test("Both linked, sync off: the survivor's link wins, the loser's is removed, and Google is left alone")
+    @Test(
+        "Both linked, sync off: the survivor's link wins, the loser's is removed, and Google is left alone"
+    )
     func bothLinkedSyncOff() async throws {
         let rig = try Rig(records: [person("a1"), person("a2")])
         defer { rig.cleanUp() }
         let (survivor, loser, draft) = try await pair(rig)
-        try rig.links.inner.add([
-            ImportedLink(icloudID: survivor, googleResourceName: "people/c1"), ImportedLink(icloudID: loser, googleResourceName: "people/c2"),
-        ], at: t0)
+        try rig.links.inner.add(
+            [
+                ImportedLink(icloudID: survivor, googleResourceName: "people/c1"),
+                ImportedLink(icloudID: loser, googleResourceName: "people/c2"),
+            ], at: t0)
 
         let run = try await rig.workflows.runMerge(draft)
-        #expect(run.linksMoved == 0 && run.googleCopiesLeft == 1 && run.googleRemovalsPending == 0 && run.followUpWarnings.isEmpty)
+        #expect(
+            run.linksMoved == 0 && run.googleCopiesLeft == 1 && run.googleRemovalsPending == 0
+                && run.followUpWarnings.isEmpty)
         let table = try rig.linkTable
-        #expect(table.keys.sorted() == [survivor] && table[survivor]?.googleResourceName == "people/c1")
+        #expect(
+            table.keys.sorted() == [survivor] && table[survivor]?.googleResourceName == "people/c1")
     }
 
-    @Test("Both linked, sync on: the loser's link and baseline stay, so the next sync deletes its Google copy through the guarded delete")
+    @Test(
+        "Both linked, sync on: the loser's link and baseline stay, so the next sync deletes its Google copy through the guarded delete"
+    )
     func bothLinkedSyncOn() async throws {
         let rig = try Rig(records: [person("a1"), person("a2")])
         defer { rig.cleanUp() }
         let (survivor, loser, draft) = try await pair(rig)
         let loserBaseline = baseline(for: person(loser))
-        try rig.state.inner.save(approved([survivor: baseline(for: person(survivor)), loser: loserBaseline]))
-        try rig.links.inner.add([
-            ImportedLink(icloudID: survivor, googleResourceName: "people/c1"), ImportedLink(icloudID: loser, googleResourceName: "people/c2"),
-        ], at: t0)
+        try rig.state.inner.save(
+            approved([survivor: baseline(for: person(survivor)), loser: loserBaseline]))
+        try rig.links.inner.add(
+            [
+                ImportedLink(icloudID: survivor, googleResourceName: "people/c1"),
+                ImportedLink(icloudID: loser, googleResourceName: "people/c2"),
+            ], at: t0)
 
         let run = try await rig.workflows.runMerge(draft)
         #expect(run.linksMoved == 0 && run.googleCopiesLeft == 0 && run.googleRemovalsPending == 1)
-        #expect(try rig.linkTable.keys.sorted() == [survivor, loser].sorted() && rig.baselines[loser] == loserBaseline)
+        #expect(
+            try rig.linkTable.keys.sorted() == [survivor, loser].sorted()
+                && rig.baselines[loser] == loserBaseline)
     }
 
-    @Test("Both linked, sync on, but the loser's link was never baselined: nothing safe to delete, so the link goes and Google is left alone")
+    @Test(
+        "Both linked, sync on, but the loser's link was never baselined: nothing safe to delete, so the link goes and Google is left alone"
+    )
     func bothLinkedSyncOnUnbaselined() async throws {
         let rig = try Rig(records: [person("a1"), person("a2")], state: approved())
         defer { rig.cleanUp() }
         let (survivor, loser, draft) = try await pair(rig)
-        try rig.links.inner.add([
-            ImportedLink(icloudID: survivor, googleResourceName: "people/c1"), ImportedLink(icloudID: loser, googleResourceName: "people/c2"),
-        ], at: t0)
+        try rig.links.inner.add(
+            [
+                ImportedLink(icloudID: survivor, googleResourceName: "people/c1"),
+                ImportedLink(icloudID: loser, googleResourceName: "people/c2"),
+            ], at: t0)
         let run = try await rig.workflows.runMerge(draft)
         #expect(run.googleCopiesLeft == 1 && run.googleRemovalsPending == 0)
         #expect(try rig.linkTable.keys.sorted() == [survivor])
     }
 
-    @Test("Two linked losers and an unlinked survivor: one link moves (the tie-break), the other follows the survivor-wins rule")
+    @Test(
+        "Two linked losers and an unlinked survivor: one link moves (the tie-break), the other follows the survivor-wins rule"
+    )
     func twoLinkedLosers() async throws {
         let rig = try Rig(records: [person("a1"), person("a2"), person("a3")])
         defer { rig.cleanUp() }
         let draft = try #require(try await rig.drafts().first)
         let survivor = draft.survivor.sourceIdentifier
         let losers = draft.others.map(\.sourceIdentifier).sorted()
-        try rig.links.inner.add([ImportedLink(icloudID: losers[0], googleResourceName: "people/c1")], at: t0.addingTimeInterval(100))
-        try rig.links.inner.add([ImportedLink(icloudID: losers[1], googleResourceName: "people/c2")], at: t0)
+        try rig.links.inner.add(
+            [ImportedLink(icloudID: losers[0], googleResourceName: "people/c1")],
+            at: t0.addingTimeInterval(100))
+        try rig.links.inner.add(
+            [ImportedLink(icloudID: losers[1], googleResourceName: "people/c2")], at: t0)
 
         let run = try await rig.workflows.runMerge(draft)
         #expect(run.linksMoved == 1 && run.googleCopiesLeft == 1)
         let table = try rig.linkTable
-        #expect(table.keys.sorted() == [survivor] && table[survivor]?.googleResourceName == "people/c2", "the older link moves")
+        #expect(
+            table.keys.sorted() == [survivor] && table[survivor]?.googleResourceName == "people/c2",
+            "the older link moves")
     }
 
     // MARK: failures
@@ -269,29 +346,42 @@ struct MergeLinkCarryTests {
         let rig = try Rig(records: [person("a1"), person("a2")])
         defer { rig.cleanUp() }
         let (_, loser, draft) = try await pair(rig)
-        try rig.links.inner.add([ImportedLink(icloudID: loser, googleResourceName: "people/c1")], at: t0)
+        try rig.links.inner.add(
+            [ImportedLink(icloudID: loser, googleResourceName: "people/c1")], at: t0)
         rig.links.failAdd.withLock { $0 = true }
 
         let run = try await rig.workflows.runMerge(draft)
         #expect(try await rig.store.fetchAll().count == 1)
-        #expect(run.linksMoved == 0 && run.followUpWarnings.count == 1 && run.followUpWarnings[0].contains("disk full"))
-        #expect(try rig.linkTable.keys.sorted() == [loser], "left as it was; a later sync releases and re-matches it")
+        #expect(
+            run.linksMoved == 0 && run.followUpWarnings.count == 1
+                && run.followUpWarnings[0].contains("disk full"))
+        #expect(
+            try rig.linkTable.keys.sorted() == [loser],
+            "left as it was; a later sync releases and re-matches it")
     }
 
-    @Test("A bulk merge stops on a group whose links could not be written; later groups are not run")
+    @Test(
+        "A bulk merge stops on a group whose links could not be written; later groups are not run")
     func bulkStopsOnLinkFailure() async throws {
         let rig = try Rig(records: [
-            person("a1"), person("a2"), person("b1", "Bob", "Stone", phone: "415-555-0202"), person("b2", "Bob", "Stone", phone: "415-555-0202"),
+            person("a1"), person("a2"), person("b1", "Bob", "Stone", phone: "415-555-0202"),
+            person("b2", "Bob", "Stone", phone: "415-555-0202"),
         ])
         defer { rig.cleanUp() }
         let drafts = try await rig.drafts()
         for draft in drafts {
-            try rig.links.inner.add([ImportedLink(icloudID: try #require(draft.others.first).sourceIdentifier, googleResourceName: "people/c\(draft.members[0].id)")], at: t0)
+            try rig.links.inner.add(
+                [
+                    ImportedLink(
+                        icloudID: try #require(draft.others.first).sourceIdentifier,
+                        googleResourceName: "people/c\(draft.members[0].id)")
+                ], at: t0)
         }
         rig.links.failAdd.withLock { $0 = true }
 
         let report = try await rig.workflows.runBulkMerge(drafts)
-        #expect(report.stop == .stoppedOnProblem && report.mergedCount == 1 && report.notRunCount == 1)
+        #expect(
+            report.stop == .stoppedOnProblem && report.mergedCount == 1 && report.notRunCount == 1)
         guard case .merged(_, _, _, let links) = report.entries[0].outcome else {
             Issue.record("unexpected outcomes \(report.entries.map(\.outcome))")
             return
@@ -305,7 +395,8 @@ struct MergeLinkCarryTests {
         let rig = try Rig(records: [person("a1"), person("a2")])
         defer { rig.cleanUp() }
         let (survivor, loser, draft) = try await pair(rig)
-        try rig.links.inner.add([ImportedLink(icloudID: loser, googleResourceName: "people/c1")], at: t0)
+        try rig.links.inner.add(
+            [ImportedLink(icloudID: loser, googleResourceName: "people/c1")], at: t0)
         let report = try await rig.workflows.runBulkMerge([draft])
         guard case .merged(_, _, _, let links) = report.entries[0].outcome else {
             Issue.record("unexpected outcomes \(report.entries.map(\.outcome))")
@@ -320,13 +411,18 @@ struct MergeLinkCarryTests {
         let rig = try Rig(records: [person("a1"), person("a2")])
         defer { rig.cleanUp() }
         let (_, loser, draft) = try await pair(rig)
-        try rig.links.inner.add([ImportedLink(icloudID: loser, googleResourceName: "people/c1")], at: t0)
+        try rig.links.inner.add(
+            [ImportedLink(icloudID: loser, googleResourceName: "people/c1")], at: t0)
 
         rig.links.failLoad.withLock { $0 = true }
-        await #expect(throws: LinkStoreError.unreadable("locked")) { try await rig.workflows.runMerge(draft) }
+        await #expect(throws: LinkStoreError.unreadable("locked")) {
+            try await rig.workflows.runMerge(draft)
+        }
         rig.links.failLoad.withLock { $0 = false }
         rig.state.failLoad.withLock { $0 = true }
-        await #expect(throws: SyncStateStoreError.unreadable("locked")) { try await rig.workflows.runMerge(draft) }
+        await #expect(throws: SyncStateStoreError.unreadable("locked")) {
+            try await rig.workflows.runMerge(draft)
+        }
         let remaining = try await rig.store.fetchAll().count
         #expect(!rig.mergedAnything && remaining == 2)
 

@@ -8,7 +8,9 @@ struct ContactsAppLauncher: ContactsAppLaunching {
     /// The running Contacts processes. Launch Services can keep listing one that is gone (pid -1, not terminated, seen
     /// after Contacts was killed); it does not count.
     static func running() -> [NSRunningApplication] {
-        NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).filter { $0.processIdentifier > 0 && !$0.isTerminated }
+        NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).filter {
+            $0.processIdentifier > 0 && !$0.isTerminated
+        }
     }
 
     func isRunning() async -> Bool {
@@ -16,7 +18,8 @@ struct ContactsAppLauncher: ContactsAppLaunching {
     }
 
     func openHidden() async throws {
-        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: Self.bundleID) else {
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: Self.bundleID)
+        else {
             throw CocoaError(.fileNoSuchFile)
         }
         let configuration = NSWorkspace.OpenConfiguration()

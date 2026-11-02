@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+
 @testable import ContactBridgeCore
 
 struct ContactRecordTests {
@@ -51,7 +52,13 @@ struct ContactRecordTests {
         let record = ContactRecord(
             id: "1", source: .googleOther, sourceIdentifier: "otherContacts/c9",
             givenName: "Zoë", organization: "Acme",
-            postalAddresses: [Labeled(label: "home", value: PostalAddress(street: "1 Main St", city: "Austin", state: "TX", postalCode: "78701", country: "US"))],
+            postalAddresses: [
+                Labeled(
+                    label: "home",
+                    value: PostalAddress(
+                        street: "1 Main St", city: "Austin", state: "TX", postalCode: "78701",
+                        country: "US"))
+            ],
             urls: [Labeled(label: nil, value: "https://example.com")],
             birthday: DateComponents(year: 1990, month: 1, day: 2)
         )

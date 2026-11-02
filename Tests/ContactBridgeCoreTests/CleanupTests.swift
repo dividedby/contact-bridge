@@ -1,20 +1,25 @@
 import Foundation
 import Synchronization
 import Testing
+
 @testable import ContactBridgeCore
 
 struct CleanupTests {
     private static func person(
-        _ id: String, _ given: String = "", _ family: String = "", org: String = "", nickname: String = "", phones: [String] = [],
+        _ id: String, _ given: String = "", _ family: String = "", org: String = "",
+        nickname: String = "", phones: [String] = [],
         emails: [String] = []
     ) -> ContactRecord {
         ContactRecord(
-            id: id, source: .icloud, sourceIdentifier: id, givenName: given, familyName: family, nickname: nickname, organization: org,
-            phones: phones.map { Labeled(label: "mobile", value: $0) }, emails: emails.map { Labeled(label: "home", value: $0) }
+            id: id, source: .icloud, sourceIdentifier: id, givenName: given, familyName: family,
+            nickname: nickname, organization: org,
+            phones: phones.map { Labeled(label: "mobile", value: $0) },
+            emails: emails.map { Labeled(label: "home", value: $0) }
         )
     }
 
-    private static func rows(_ records: [ContactRecord], imported: Set<String> = []) -> [CleanupRow] {
+    private static func rows(_ records: [ContactRecord], imported: Set<String> = []) -> [CleanupRow]
+    {
         records.map { CleanupRow(record: $0, isImported: imported.contains($0.sourceIdentifier)) }
     }
 
@@ -34,9 +39,12 @@ struct CleanupTests {
 
     // MARK: rows
 
-    @Test("A row's name is the person, else the nickname, else the organization, else No name; detail is the first phone or email")
+    @Test(
+        "A row's name is the person, else the nickname, else the organization, else No name; detail is the first phone or email"
+    )
     func rowFields() {
-        let rows = Self.rows(Self.book + [Self.person("nick", nickname: "Bunny", emails: ["b@example.com"])])
+        let rows = Self.rows(
+            Self.book + [Self.person("nick", nickname: "Bunny", emails: ["b@example.com"])])
         let byID = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0) })
         #expect(byID["ann"]?.displayName == "Ann Lee" && byID["ann"]?.detail == "(415) 555-2671")
         #expect(byID["sms"]?.displayName == "Acme Rewards" && byID["sms"]?.detail == "72727")
@@ -60,7 +68,8 @@ struct CleanupTests {
     @Test("No phone or email: neither a phone nor an email; blank entries do not count")
     func noPhoneOrEmail() {
         #expect(ids(CleanupFilter(noPhoneOrEmail: true)) == ["blank", "bare"])
-        let blankEntries = CleanupRow(record: Self.person("x", "Xi", phones: [" "], emails: [""]), isImported: false)
+        let blankEntries = CleanupRow(
+            record: Self.person("x", "Xi", phones: [" "], emails: [""]), isImported: false)
         #expect(blankEntries.hasNoPhoneOrEmail)
     }
 
@@ -77,7 +86,11 @@ struct CleanupTests {
         #expect(ids(CleanupFilter(noName: true, noPhoneOrEmail: true)) == ["blank"])
         #expect(ids(CleanupFilter(textMessageSenders: true, noName: true)) == [])
         #expect(ids(CleanupFilter(noPhoneOrEmail: true, importedByContactBridge: true)) == [])
-        #expect(ids(CleanupFilter(textMessageSenders: true, noName: true, noPhoneOrEmail: true, importedByContactBridge: true)) == [])
+        #expect(
+            ids(
+                CleanupFilter(
+                    textMessageSenders: true, noName: true, noPhoneOrEmail: true,
+                    importedByContactBridge: true)) == [])
     }
 
     // MARK: search
@@ -132,8 +145,12 @@ struct CleanupTests {
     private final class FailingDismissals: DismissalStoring {
         let inner = InMemoryDismissalStore()
         func load() throws -> DismissalTable { try inner.load() }
-        func dismiss(memberIDs: [String], at date: Date) throws { try inner.dismiss(memberIDs: memberIDs, at: date) }
-        func dismiss(groups: [[String]], at date: Date) throws { try inner.dismiss(groups: groups, at: date) }
+        func dismiss(memberIDs: [String], at date: Date) throws {
+            try inner.dismiss(memberIDs: memberIDs, at: date)
+        }
+        func dismiss(groups: [[String]], at date: Date) throws {
+            try inner.dismiss(groups: groups, at: date)
+        }
         func clear() throws { try inner.clear() }
         func forget(ids: [String]) throws -> Int { throw Failure() }
     }
@@ -149,30 +166,45 @@ struct CleanupTests {
         let workflows: ContactWorkflows
 
         init(
-            records: [ContactRecord] = CleanupTests.book, links: any LinkStoring = InMemoryLinkStore(),
-            dismissals: any DismissalStoring = InMemoryDismissalStore(), withNotes: Bool = true, writerNotes: Bool = true
+            records: [ContactRecord] = CleanupTests.book,
+            links: any LinkStoring = InMemoryLinkStore(),
+            dismissals: any DismissalStoring = InMemoryDismissalStore(), withNotes: Bool = true,
+            writerNotes: Bool = true
         ) throws {
-            directory = FileManager.default.temporaryDirectory.appendingPathComponent("cleanup-tests-\(UUID().uuidString)", isDirectory: true)
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+                "cleanup-tests-\(UUID().uuidString)", isDirectory: true)
+            try FileManager.default.createDirectory(
+                at: directory, withIntermediateDirectories: true)
             store = InMemoryContactStore(records: records)
-            notes = InMemoryNotesStore(notes: ["sms": "Verification codes", "blank": "Who is this?"])
+            notes = InMemoryNotesStore(notes: [
+                "sms": "Verification codes", "blank": "Who is this?",
+            ])
             self.links = links
             self.dismissals = dismissals
-            let store = store, notesStore = notes, directory = directory, clock = clock
-            backups = BackupCoordinator(makeSetup: {
-                BackupSetup(
-                    writer: BackupWriter(store: store, notes: writerNotes ? notesStore : nil, baseDirectory: directory, now: { clock.now() }),
-                    containerID: "A"
-                )
-            }, now: { clock.now() })
+            let store = store
+            let notesStore = notes
+            let directory = directory
+            let clock = clock
+            backups = BackupCoordinator(
+                makeSetup: {
+                    BackupSetup(
+                        writer: BackupWriter(
+                            store: store, notes: writerNotes ? notesStore : nil,
+                            baseDirectory: directory, now: { clock.now() }),
+                        containerID: "A"
+                    )
+                }, now: { clock.now() })
             workflows = ContactWorkflows(
-                store: store, google: nil, notes: withNotes ? notesStore : nil, backups: backups, links: links, dismissals: dismissals,
+                store: store, google: nil, notes: withNotes ? notesStore : nil, backups: backups,
+                links: links, dismissals: dismissals,
                 containerID: "A", now: { clock.now() }
             )
         }
 
         var backupFolders: Int {
-            ((try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []).filter { !$0.hasPrefix(".") }.count
+            ((try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []).filter {
+                !$0.hasPrefix(".")
+            }.count
         }
         func cleanUp() { try? FileManager.default.removeItem(at: directory) }
     }
@@ -185,22 +217,36 @@ struct CleanupTests {
         defer { rig.cleanUp() }
         let rows = try await rig.workflows.loadCleanupRows()
         #expect(rows.count == Self.book.count)
-        #expect(rows.map(\.displayName) == ["Acme Rewards", "Ann Lee", "Henry Walsh", "No name", "No name", "Zoë Müller"])
+        #expect(
+            rows.map(\.displayName) == [
+                "Acme Rewards", "Ann Lee", "Henry Walsh", "No name", "No name", "Zoë Müller",
+            ])
         #expect(rows.filter(\.isImported).map(\.id) == ["ann"])
     }
 
-    @Test("A delete takes a brand-new backup with notes even when a recent one exists, then deletes in one call")
+    @Test(
+        "A delete takes a brand-new backup with notes even when a recent one exists, then deletes in one call"
+    )
     func deletes() async throws {
         let rig = try Rig()
         defer { rig.cleanUp() }
         let earlier = try await rig.backups.backUpNow()
         rig.clock.advance(10)
         let phases = Mutex<[CleanupPhase]>([])
-        let run = try await rig.workflows.deleteContacts(ids: ["sms", "blank", "sms"], progress: { phase in phases.withLock { $0.append(phase) } })
-        #expect(run.deletedIDs == ["sms", "blank"] && run.deletedCount == 2 && run.followUpWarnings.isEmpty)
-        #expect(run.receipt.id != earlier.id && run.receipt.manifest.notesIncluded && rig.backupFolders == 2)
+        let run = try await rig.workflows.deleteContacts(
+            ids: ["sms", "blank", "sms"],
+            progress: { phase in phases.withLock { $0.append(phase) } })
+        #expect(
+            run.deletedIDs == ["sms", "blank"] && run.deletedCount == 2
+                && run.followUpWarnings.isEmpty)
+        #expect(
+            run.receipt.id != earlier.id && run.receipt.manifest.notesIncluded
+                && rig.backupFolders == 2)
         #expect(try await rig.store.fetchAll().map(\.id) == ["nameless", "bare", "ann", "zoe"])
-        #expect(rig.store.mutationLog == [StoreMutation(kind: .delete, ids: ["sms", "blank"], receiptID: run.receipt.id)])
+        #expect(
+            rig.store.mutationLog == [
+                StoreMutation(kind: .delete, ids: ["sms", "blank"], receiptID: run.receipt.id)
+            ])
         #expect(phases.withLock { $0 } == [.backingUp, .deleting])
     }
 
@@ -208,36 +254,52 @@ struct CleanupTests {
     func backupFailureDeletesNothing() async throws {
         let rig = try Rig(writerNotes: false)
         defer { rig.cleanUp() }
-        await #expect(throws: BackupCoordinatorError.requirementNotMet("notes")) { _ = try await rig.workflows.deleteContacts(ids: ["sms"]) }
-        #expect(try await rig.store.fetchAll().count == Self.book.count && rig.store.mutationLog.isEmpty)
+        await #expect(throws: BackupCoordinatorError.requirementNotMet("notes")) {
+            _ = try await rig.workflows.deleteContacts(ids: ["sms"])
+        }
+        #expect(
+            try await rig.store.fetchAll().count == Self.book.count && rig.store.mutationLog.isEmpty
+        )
     }
 
     @Test("Without notes access, or with nothing chosen, it is refused before any backup")
     func refusals() async throws {
         let rig = try Rig(withNotes: false)
         defer { rig.cleanUp() }
-        await #expect(throws: WorkflowError.notesUnavailable) { _ = try await rig.workflows.deleteContacts(ids: ["sms"]) }
+        await #expect(throws: WorkflowError.notesUnavailable) {
+            _ = try await rig.workflows.deleteContacts(ids: ["sms"])
+        }
         let ready = try Rig()
         defer { ready.cleanUp() }
-        await #expect(throws: WorkflowError.nothingToDelete) { _ = try await ready.workflows.deleteContacts(ids: []) }
+        await #expect(throws: WorkflowError.nothingToDelete) {
+            _ = try await ready.workflows.deleteContacts(ids: [])
+        }
         #expect(rig.backupFolders == 0 && ready.backupFolders == 0)
         #expect(rig.store.mutationLog.isEmpty && ready.store.mutationLog.isEmpty)
     }
 
-    @Test("A contact that has gone since the list was loaded stops everything: no backup, no deletion")
+    @Test(
+        "A contact that has gone since the list was loaded stops everything: no backup, no deletion"
+    )
     func missingIDs() async throws {
         let rig = try Rig()
         defer { rig.cleanUp() }
-        await #expect(throws: ContactStoreError.notFound(["ghost"])) { _ = try await rig.workflows.deleteContacts(ids: ["sms", "ghost"]) }
-        #expect(try await rig.store.fetchAll().count == Self.book.count && rig.store.mutationLog.isEmpty && rig.backupFolders == 0)
+        await #expect(throws: ContactStoreError.notFound(["ghost"])) {
+            _ = try await rig.workflows.deleteContacts(ids: ["sms", "ghost"])
+        }
+        #expect(
+            try await rig.store.fetchAll().count == Self.book.count && rig.store.mutationLog.isEmpty
+                && rig.backupFolders == 0)
     }
 
     @Test("Deleted contacts leave the import links; other links stay")
     func linksRemoved() async throws {
         let links = InMemoryLinkStore()
-        try links.add([
-            ImportedLink(icloudID: "sms", googleResourceName: "people/c1"), ImportedLink(icloudID: "ann", googleResourceName: "people/c2"),
-        ], at: Date())
+        try links.add(
+            [
+                ImportedLink(icloudID: "sms", googleResourceName: "people/c1"),
+                ImportedLink(icloudID: "ann", googleResourceName: "people/c2"),
+            ], at: Date())
         let rig = try Rig(links: links)
         defer { rig.cleanUp() }
         let run = try await rig.workflows.deleteContacts(ids: ["sms", "blank"])
@@ -256,15 +318,20 @@ struct CleanupTests {
         defer { rig.cleanUp() }
         let run = try await rig.workflows.deleteContacts(ids: ["sms"])
         #expect(run.dismissalsPruned == 2 && run.followUpWarnings.isEmpty)
-        #expect(try dismissals.load().dismissed.map(\.memberIDs).sorted { $0.joined() < $1.joined() } == [["ann", "bare"], ["nameless", "zoe"]])
+        #expect(
+            try dismissals.load().dismissed.map(\.memberIDs).sorted { $0.joined() < $1.joined() }
+                == [["ann", "bare"], ["nameless", "zoe"]])
     }
 
-    @Test("The file-backed dismissal store trims sets and leaves the file alone when nothing matches")
+    @Test(
+        "The file-backed dismissal store trims sets and leaves the file alone when nothing matches")
     func fileStoreForget() throws {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("cleanup-dismiss-\(UUID().uuidString).json")
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "cleanup-dismiss-\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: url) }
         let store = DismissalStore(url: url)
-        try store.dismiss(groups: [["a", "b", "c"], ["c", "d"]], at: Date(timeIntervalSince1970: 1_800_000_000))
+        try store.dismiss(
+            groups: [["a", "b", "c"], ["c", "d"]], at: Date(timeIntervalSince1970: 1_800_000_000))
         #expect(try store.forget(ids: ["c"]) == 2)
         #expect(try store.load().dismissed.map(\.memberIDs) == [["a", "b"]])
         let before = try Data(contentsOf: url)
@@ -272,7 +339,9 @@ struct CleanupTests {
         #expect(try Data(contentsOf: url) == before)
     }
 
-    @Test("If tidying up fails after the delete, the contacts stay deleted and the run says what failed")
+    @Test(
+        "If tidying up fails after the delete, the contacts stay deleted and the run says what failed"
+    )
     func followUpFailures() async throws {
         let links = FailingLinks()
         try links.add([ImportedLink(icloudID: "sms", googleResourceName: "people/c1")], at: Date())
@@ -280,8 +349,14 @@ struct CleanupTests {
         defer { rig.cleanUp() }
         let run = try await rig.workflows.deleteContacts(ids: ["sms", "blank"])
         #expect(run.deletedCount == 2 && run.linksRemoved == 0 && run.dismissalsPruned == 0)
-        #expect(run.followUpWarnings.count == 2 && run.followUpWarnings.allSatisfy { $0.contains("deleted") && $0.contains("disk full") })
-        #expect(run.followUpWarnings[0].contains("import links") && run.followUpWarnings[1].contains("not duplicates"))
+        #expect(
+            run.followUpWarnings.count == 2
+                && run.followUpWarnings.allSatisfy {
+                    $0.contains("deleted") && $0.contains("disk full")
+                })
+        #expect(
+            run.followUpWarnings[0].contains("import links")
+                && run.followUpWarnings[1].contains("not duplicates"))
         #expect(try await rig.store.fetchAll().map(\.id) == ["nameless", "bare", "ann", "zoe"])
     }
 }

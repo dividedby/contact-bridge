@@ -79,9 +79,11 @@ public final class LoginItemSettings {
         if let errorMessage { return errorMessage }
         switch status {
         case .requiresApproval:
-            return "macOS needs your OK first: turn on Contact Bridge in System Settings > General > Login Items."
+            return
+                "macOS needs your OK first: turn on Contact Bridge in System Settings > General > Login Items."
         case .notFound where registerLeftNotFound:
-            return "macOS can't find Contact Bridge to register it. Open it from the Applications folder and try again."
+            return
+                "macOS can't find Contact Bridge to register it. Open it from the Applications folder and try again."
         case .notFound, .notRegistered, .enabled:
             return nil
         }
@@ -108,10 +110,15 @@ public final class LoginItemSettings {
                 try service.unregister()
             }
         } catch {
-            errorMessage = "Could not \(enabled ? "turn on" : "turn off") open at login: \(error.localizedDescription)"
+            errorMessage =
+                "Could not \(enabled ? "turn on" : "turn off") open at login: \(error.localizedDescription)"
         }
         status = service.status
-        if registered { registerLeftNotFound = status == .notFound } else if status != .notFound { registerLeftNotFound = false }
+        if registered {
+            registerLeftNotFound = status == .notFound
+        } else if status != .notFound {
+            registerLeftNotFound = false
+        }
     }
 
     public func openSystemSettings() { service.openSystemSettings() }

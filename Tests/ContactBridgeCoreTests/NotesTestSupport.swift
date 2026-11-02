@@ -1,11 +1,16 @@
 import Foundation
+
 @testable import ContactBridgeCore
 
 enum ScriptValue {
-    static func string(_ text: String) -> NSAppleEventDescriptor { NSAppleEventDescriptor(string: text) }
+    static func string(_ text: String) -> NSAppleEventDescriptor {
+        NSAppleEventDescriptor(string: text)
+    }
     /// AppleScript's `missing value`, as NSAppleScript really returns it: a type descriptor holding 'msng', not typeNull
     /// (verified against `return missing value`; `realMissingValueShape` in the provider tests keeps this honest).
-    static func missing() -> NSAppleEventDescriptor { NSAppleEventDescriptor(typeCode: 0x6D73_6E67) }
+    static func missing() -> NSAppleEventDescriptor {
+        NSAppleEventDescriptor(typeCode: 0x6D73_6E67)
+    }
 
     static func list(_ items: [NSAppleEventDescriptor]) -> NSAppleEventDescriptor {
         let list = NSAppleEventDescriptor.list()

@@ -27,11 +27,15 @@ extension GooglePhotoFetching {
 
     /// Throws `notAllowed` unless `url` is https on a host under googleusercontent.com (default port, no credentials).
     static func validate(_ url: URL) throws {
-        guard url.scheme?.lowercased() == "https" else { throw GooglePhotoError.notAllowed("the address is not https") }
+        guard url.scheme?.lowercased() == "https" else {
+            throw GooglePhotoError.notAllowed("the address is not https")
+        }
         guard url.user == nil, url.password == nil, url.port == nil || url.port == 443 else {
             throw GooglePhotoError.notAllowed("the address has credentials or a port")
         }
-        guard let host = url.host?.lowercased(), host.hasSuffix(hostSuffix), host.count > hostSuffix.count else {
+        guard let host = url.host?.lowercased(), host.hasSuffix(hostSuffix),
+            host.count > hostSuffix.count
+        else {
             throw GooglePhotoError.notAllowed("the address is not on googleusercontent.com")
         }
     }
@@ -95,10 +99,12 @@ public struct GooglePhotoDownloadTransport: HTTPTransport {
 
     private final class RedirectPolicy: NSObject, URLSessionTaskDelegate {
         func urlSession(
-            _ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+            _ session: URLSession, task: URLSessionTask,
+            willPerformHTTPRedirection response: HTTPURLResponse,
             newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void
         ) {
-            guard let url = request.url, (try? URLSessionGooglePhotoFetcher.validate(url)) != nil else {
+            guard let url = request.url, (try? URLSessionGooglePhotoFetcher.validate(url)) != nil
+            else {
                 completionHandler(nil)
                 return
             }
@@ -126,7 +132,9 @@ public actor FakeGooglePhotoFetcher: GooglePhotoFetching {
         requested.append(url)
         try Self.validate(url)
         if !failures.isEmpty { throw failures.removeFirst() }
-        guard let bytes = await client.photoBytes(forURL: url) else { throw GooglePhotoError.http(404) }
+        guard let bytes = await client.photoBytes(forURL: url) else {
+            throw GooglePhotoError.http(404)
+        }
         return bytes
     }
 }

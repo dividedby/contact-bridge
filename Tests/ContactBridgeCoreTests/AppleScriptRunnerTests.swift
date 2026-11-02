@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+
 @testable import ContactBridgeCore
 
 /// Runs real NSAppleScript, but only scripts that target no application, so no Apple Event leaves the test process.
@@ -46,20 +47,24 @@ struct AppleScriptRunnerTests {
     func handlerRoundTrip() async throws {
         let nasty = "say \"hi\" \\ \\\" \\n\nline\r\nTab\t ☕️ 日本語 'x' ¶"
         let values = [nasty, "", "plain"]
-        let result = try await runner.call(handler: "echo", in: echo, arguments: values.map(ScriptValue.string))
+        let result = try await runner.call(
+            handler: "echo", in: echo, arguments: values.map(ScriptValue.string))
         #expect(ScriptValue.strings(result) == values)
     }
 
     @Test("Handler names are matched case-insensitively, like AppleScript does")
     func handlerCase() async throws {
-        let result = try await runner.call(handler: "setNote", in: "on setNote(a, b, c)\nreturn b\nend setNote", arguments: ["1", "2", "3"].map(ScriptValue.string))
+        let result = try await runner.call(
+            handler: "setNote", in: "on setNote(a, b, c)\nreturn b\nend setNote",
+            arguments: ["1", "2", "3"].map(ScriptValue.string))
         #expect(result.stringValue == "2")
     }
 
     @Test("Errors raised inside a handler keep their number")
     func handlerError() async {
         await #expect(throws: AppleScriptError(number: -600, message: "nope")) {
-            try await runner.call(handler: "fail", in: echo, arguments: [NSAppleEventDescriptor(int32: -600)])
+            try await runner.call(
+                handler: "fail", in: echo, arguments: [NSAppleEventDescriptor(int32: -600)])
         }
     }
 

@@ -30,7 +30,9 @@ public struct MenuBarState: Sendable, Hashable {
     public var reviewLine: String? { pendingReviews > 0 ? "\(pendingReviews) to review" : nil }
 
     /// - Parameter timeText: how a time of day reads in the status line ("3:41 PM"; other days carry the date).
-    public init(_ snapshot: SyncSnapshot, timeText: (Date) -> String = { MenuBarState.defaultTimeText($0) }) {
+    public init(
+        _ snapshot: SyncSnapshot, timeText: (Date) -> String = { MenuBarState.defaultTimeText($0) }
+    ) {
         pendingReviews = snapshot.pendingReviews
         needsConfirmation = snapshot.confirmationSummary != nil
         statusLine = Self.statusLine(snapshot, timeText: timeText)
@@ -40,7 +42,9 @@ public struct MenuBarState: Sendable, Hashable {
         case .notStarted, .disabled: usable = false
         default: usable = true
         }
-        canSyncNow = usable && snapshot.firstSyncApproved && !snapshot.isRunning && !snapshot.isUserPaused && !needsConfirmation
+        canSyncNow =
+            usable && snapshot.firstSyncApproved && !snapshot.isRunning && !snapshot.isUserPaused
+            && !needsConfirmation
         if !usable || !snapshot.firstSyncApproved {
             pauseControl = .none
         } else {
@@ -79,7 +83,9 @@ public struct MenuBarState: Sendable, Hashable {
     }
 
     /// Today's times as "3:41 PM", other days with the date (as the Sync screen shows them).
-    public static func defaultTimeText(_ date: Date, now: Date = Date(), calendar: Calendar = .current) -> String {
+    public static func defaultTimeText(
+        _ date: Date, now: Date = Date(), calendar: Calendar = .current
+    ) -> String {
         calendar.isDate(date, inSameDayAs: now)
             ? date.formatted(date: .omitted, time: .shortened)
             : date.formatted(date: .abbreviated, time: .shortened)

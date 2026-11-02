@@ -90,7 +90,8 @@ extension PhotoEncodingError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .undecodable: "The photo could not be read as a picture, so it was left alone."
-        case .tooLarge: "The photo is too large to send to Google even after shrinking it, so it was left alone."
+        case .tooLarge:
+            "The photo is too large to send to Google even after shrinking it, so it was left alone."
         }
     }
 }

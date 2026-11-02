@@ -51,14 +51,17 @@ public struct GoogleName: Sendable, Hashable, GoogleMetadataCarrying {
 
 extension GoogleName: Codable {
     private enum CodingKeys: String, CodingKey, CaseIterable {
-        case metadata, displayName, displayNameLastFirst, unstructuredName, givenName, familyName, middleName, honorificPrefix, honorificSuffix, phoneticGivenName, phoneticMiddleName, phoneticFamilyName
+        case metadata, displayName, displayNameLastFirst, unstructuredName, givenName, familyName,
+            middleName, honorificPrefix, honorificSuffix, phoneticGivenName, phoneticMiddleName,
+            phoneticFamilyName
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         metadata = try container.decodeIfPresent(GoogleFieldMetadata.self, forKey: .metadata)
         displayName = try container.decodeIfPresent(String.self, forKey: .displayName)
-        displayNameLastFirst = try container.decodeIfPresent(String.self, forKey: .displayNameLastFirst)
+        displayNameLastFirst = try container.decodeIfPresent(
+            String.self, forKey: .displayNameLastFirst)
         unstructuredName = try container.decodeIfPresent(String.self, forKey: .unstructuredName)
         givenName = try container.decodeIfPresent(String.self, forKey: .givenName)
         familyName = try container.decodeIfPresent(String.self, forKey: .familyName)
@@ -68,7 +71,8 @@ extension GoogleName: Codable {
         phoneticGivenName = try container.decodeIfPresent(String.self, forKey: .phoneticGivenName)
         phoneticMiddleName = try container.decodeIfPresent(String.self, forKey: .phoneticMiddleName)
         phoneticFamilyName = try container.decodeIfPresent(String.self, forKey: .phoneticFamilyName)
-        extras = try GoogleExtras.decode(from: decoder, excluding: Set(CodingKeys.allCases.map(\.rawValue)))
+        extras = try GoogleExtras.decode(
+            from: decoder, excluding: Set(CodingKeys.allCases.map(\.rawValue)))
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -107,7 +111,8 @@ extension GoogleNickname: Codable {
         metadata = try container.decodeIfPresent(GoogleFieldMetadata.self, forKey: .metadata)
         value = try container.decodeIfPresent(String.self, forKey: .value)
         type = try container.decodeIfPresent(String.self, forKey: .type)
-        extras = try GoogleExtras.decode(from: decoder, excluding: Set(CodingKeys.allCases.map(\.rawValue)))
+        extras = try GoogleExtras.decode(
+            from: decoder, excluding: Set(CodingKeys.allCases.map(\.rawValue)))
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -145,7 +150,8 @@ extension GoogleOrganization: Codable {
         title = try container.decodeIfPresent(String.self, forKey: .title)
         department = try container.decodeIfPresent(String.self, forKey: .department)
         current = try container.decodeIfPresent(Bool.self, forKey: .current)
-        extras = try GoogleExtras.decode(from: decoder, excluding: Set(CodingKeys.allCases.map(\.rawValue)))
+        extras = try GoogleExtras.decode(
+            from: decoder, excluding: Set(CodingKeys.allCases.map(\.rawValue)))
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -184,7 +190,8 @@ extension GooglePhoneNumber: Codable {
         canonicalForm = try container.decodeIfPresent(String.self, forKey: .canonicalForm)
         type = try container.decodeIfPresent(String.self, forKey: .type)
         formattedType = try container.decodeIfPresent(String.self, forKey: .formattedType)
-        extras = try GoogleExtras.decode(from: decoder, excluding: Set(CodingKeys.allCases.map(\.rawValue)))
+        extras = try GoogleExtras.decode(
+            from: decoder, excluding: Set(CodingKeys.allCases.map(\.rawValue)))
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -220,7 +227,8 @@ extension GoogleEmailAddress: Codable {
         type = try container.decodeIfPresent(String.self, forKey: .type)
         formattedType = try container.decodeIfPresent(String.self, forKey: .formattedType)
         displayName = try container.decodeIfPresent(String.self, forKey: .displayName)
-        extras = try GoogleExtras.decode(from: decoder, excluding: Set(CodingKeys.allCases.map(\.rawValue)))
+        extras = try GoogleExtras.decode(
+            from: decoder, excluding: Set(CodingKeys.allCases.map(\.rawValue)))
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -253,7 +261,8 @@ public struct GoogleAddress: Sendable, Hashable, GoogleMetadataCarrying {
 
 extension GoogleAddress: Codable {
     private enum CodingKeys: String, CodingKey, CaseIterable {
-        case metadata, type, formattedType, formattedValue, streetAddress, extendedAddress, poBox, city, region, postalCode, country, countryCode
+        case metadata, type, formattedType, formattedValue, streetAddress, extendedAddress, poBox,
+            city, region, postalCode, country, countryCode
     }
 
     public init(from decoder: Decoder) throws {
@@ -270,7 +279,8 @@ extension GoogleAddress: Codable {
         postalCode = try container.decodeIfPresent(String.self, forKey: .postalCode)
         country = try container.decodeIfPresent(String.self, forKey: .country)
         countryCode = try container.decodeIfPresent(String.self, forKey: .countryCode)
-        extras = try GoogleExtras.decode(from: decoder, excluding: Set(CodingKeys.allCases.map(\.rawValue)))
+        extras = try GoogleExtras.decode(
+            from: decoder, excluding: Set(CodingKeys.allCases.map(\.rawValue)))
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -311,7 +321,8 @@ extension GoogleUrl: Codable {
         value = try container.decodeIfPresent(String.self, forKey: .value)
         type = try container.decodeIfPresent(String.self, forKey: .type)
         formattedType = try container.decodeIfPresent(String.self, forKey: .formattedType)
-        extras = try GoogleExtras.decode(from: decoder, excluding: Set(CodingKeys.allCases.map(\.rawValue)))
+        extras = try GoogleExtras.decode(
+            from: decoder, excluding: Set(CodingKeys.allCases.map(\.rawValue)))
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -343,7 +354,8 @@ extension GoogleBirthday: Codable {
         metadata = try container.decodeIfPresent(GoogleFieldMetadata.self, forKey: .metadata)
         date = try container.decodeIfPresent(GoogleDate.self, forKey: .date)
         text = try container.decodeIfPresent(String.self, forKey: .text)
-        extras = try GoogleExtras.decode(from: decoder, excluding: Set(CodingKeys.allCases.map(\.rawValue)))
+        extras = try GoogleExtras.decode(
+            from: decoder, excluding: Set(CodingKeys.allCases.map(\.rawValue)))
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -377,7 +389,8 @@ public struct GooglePerson: Sendable, Hashable {
 
 extension GooglePerson: Codable {
     private enum CodingKeys: String, CodingKey, CaseIterable {
-        case resourceName, etag, metadata, names, nicknames, organizations, phoneNumbers, emailAddresses, addresses, urls, birthdays, memberships, clientData
+        case resourceName, etag, metadata, names, nicknames, organizations, phoneNumbers,
+            emailAddresses, addresses, urls, birthdays, memberships, clientData
     }
 
     public init(from decoder: Decoder) throws {
@@ -387,15 +400,19 @@ extension GooglePerson: Codable {
         metadata = try container.decodeIfPresent(GooglePersonMetadata.self, forKey: .metadata)
         names = try container.decodeIfPresent([GoogleName].self, forKey: .names)
         nicknames = try container.decodeIfPresent([GoogleNickname].self, forKey: .nicknames)
-        organizations = try container.decodeIfPresent([GoogleOrganization].self, forKey: .organizations)
-        phoneNumbers = try container.decodeIfPresent([GooglePhoneNumber].self, forKey: .phoneNumbers)
-        emailAddresses = try container.decodeIfPresent([GoogleEmailAddress].self, forKey: .emailAddresses)
+        organizations = try container.decodeIfPresent(
+            [GoogleOrganization].self, forKey: .organizations)
+        phoneNumbers = try container.decodeIfPresent(
+            [GooglePhoneNumber].self, forKey: .phoneNumbers)
+        emailAddresses = try container.decodeIfPresent(
+            [GoogleEmailAddress].self, forKey: .emailAddresses)
         addresses = try container.decodeIfPresent([GoogleAddress].self, forKey: .addresses)
         urls = try container.decodeIfPresent([GoogleUrl].self, forKey: .urls)
         birthdays = try container.decodeIfPresent([GoogleBirthday].self, forKey: .birthdays)
         memberships = try container.decodeIfPresent([GoogleMembership].self, forKey: .memberships)
         clientData = try container.decodeIfPresent([GoogleClientData].self, forKey: .clientData)
-        extras = try GoogleExtras.decode(from: decoder, excluding: Set(CodingKeys.allCases.map(\.rawValue)))
+        extras = try GoogleExtras.decode(
+            from: decoder, excluding: Set(CodingKeys.allCases.map(\.rawValue)))
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -472,17 +489,22 @@ public struct GooglePeoplePage: Sendable, Hashable {
     public var nextPageToken: String?
     public var nextSyncToken: String?
 
-    public init(people: [GooglePerson], nextPageToken: String? = nil, nextSyncToken: String? = nil) {
+    public init(people: [GooglePerson], nextPageToken: String? = nil, nextSyncToken: String? = nil)
+    {
         self.people = people
         self.nextPageToken = nextPageToken
         self.nextSyncToken = nextSyncToken
     }
 
     public init(_ response: GoogleConnectionsResponse) {
-        self.init(people: response.connections ?? [], nextPageToken: response.nextPageToken, nextSyncToken: response.nextSyncToken)
+        self.init(
+            people: response.connections ?? [], nextPageToken: response.nextPageToken,
+            nextSyncToken: response.nextSyncToken)
     }
 
     public init(_ response: GoogleOtherContactsResponse) {
-        self.init(people: response.otherContacts ?? [], nextPageToken: response.nextPageToken, nextSyncToken: response.nextSyncToken)
+        self.init(
+            people: response.otherContacts ?? [], nextPageToken: response.nextPageToken,
+            nextSyncToken: response.nextSyncToken)
     }
 }

@@ -86,5 +86,7 @@ extension ContactStoring {
     /// Stores without photo access (test doubles) have no photos and refuse to write one.
     public func photoSignatures(ids: [String]) async throws -> [String: PhotoSignature] { [:] }
     public func photoData(id: String) async throws -> Data? { nil }
-    public func setPhoto(id: String, data: Data?, backup: BackupReceipt) async throws { throw ContactStoreError.photosUnsupported }
+    public func setPhoto(id: String, data: Data?, backup: BackupReceipt) async throws {
+        throw ContactStoreError.photosUnsupported
+    }
 }

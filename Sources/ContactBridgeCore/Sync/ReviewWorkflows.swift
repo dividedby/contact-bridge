@@ -24,8 +24,11 @@ extension ReviewWorkflowError: LocalizedError {
         case .contactGone(let what):
             "\(what) is no longer there, so nothing was changed. The next sync lists what is left to decide."
         case .googleWriteFailed(let reason, let icloudSaved):
-            (icloudSaved ? "Your choices were saved in iCloud, but Google was not updated: " : "Google was not updated: ")
-                + reason + (icloudSaved ? " The next sync will try to settle it." : " Nothing was changed.")
+            (icloudSaved
+                ? "Your choices were saved in iCloud, but Google was not updated: "
+                : "Google was not updated: ")
+                + reason
+                + (icloudSaved ? " The next sync will try to settle it." : " Nothing was changed.")
         case .importFailed(let reason):
             "The contact could not be copied into iCloud: \(reason)"
         case .wrongKind: "That choice does not apply to this kind of item."
@@ -135,9 +138,12 @@ public struct ReviewWorkflows: Sendable {
     ///   - gate: the write gate shared with the sync engine and the other workflows.
     ///   - photos: what deciding on photo questions needs (downloads, photo history). Nil: those decisions are refused.
     public init(
-        store: any ContactStoring, google: any GoogleContactsClient, notes: (any NotesStoring)?, backups: BackupCoordinator,
-        links: any LinkStoring, state: any SyncStateStoring, reviews: any ReviewStoring, journal: any SyncJournalStoring,
-        history: any SyncHistoryStoring, gate: WriteGate, containerID: String? = nil, now: @escaping @Sendable () -> Date = { Date() },
+        store: any ContactStoring, google: any GoogleContactsClient, notes: (any NotesStoring)?,
+        backups: BackupCoordinator,
+        links: any LinkStoring, state: any SyncStateStoring, reviews: any ReviewStoring,
+        journal: any SyncJournalStoring,
+        history: any SyncHistoryStoring, gate: WriteGate, containerID: String? = nil,
+        now: @escaping @Sendable () -> Date = { Date() },
         photos: SyncPhotoSupport? = nil
     ) {
         self.photos = photos
@@ -166,7 +172,8 @@ public struct ReviewWorkflows: Sendable {
     public func loadDetail(_ item: ReviewItem) async throws -> ReviewDetail {
         if item.kind == .photoConflict { return try await loadPhotoDetail(item) }
         let live = try await fetchLive(item)
-        let detail = makeDetail(item, live, baseline: try item.icloudID.flatMap { try state.load().baselines[$0] })
+        let detail = makeDetail(
+            item, live, baseline: try item.icloudID.flatMap { try state.load().baselines[$0] })
         try refresh(item, with: detail)
         return detail
     }
@@ -176,7 +183,9 @@ public struct ReviewWorkflows: Sendable {
     /// Saves the draft's result to iCloud, then copies it to Google and sets both baselines.
     @concurrent
     public func apply(_ detail: ReviewDetail) async throws -> ReviewOutcome {
-        guard detail.item.kind == .googleEdited || detail.item.kind == .bothEdited else { throw ReviewWorkflowError.wrongKind(detail.item.kind) }
+        guard detail.item.kind == .googleEdited || detail.item.kind == .bothEdited else {
+            throw ReviewWorkflowError.wrongKind(detail.item.kind)
+        }
         return try await exclusively {
             guard notes != nil else { throw ReviewWorkflowError.notesUnavailable }
             let baseline = try detail.item.icloudID.flatMap { try state.load().baselines[$0] }
@@ -186,10 +195,14 @@ public struct ReviewWorkflows: Sendable {
                 try refresh(detail.item, with: fresh)
                 return .changedSinceShown(fresh.draft == nil ? nil : fresh)
             }
-            guard let icloud = live.icloud, let person = live.person, let google = live.google, let baseline else {
+            guard let icloud = live.icloud, let person = live.person, let google = live.google,
+                let baseline
+            else {
                 throw ReviewWorkflowError.contactGone(detail.name)
             }
-            return try await commit(draft, item: detail.item, icloud: icloud, person: person, google: google, live: live, baseline: baseline)
+            return try await commit(
+                draft, item: detail.item, icloud: icloud, person: person, google: google,
+                live: live, baseline: baseline)
         }
     }
 
@@ -206,30 +219,36 @@ public struct ReviewWorkflows: Sendable {
 
             _ = try await executor().recoverInterruptedRun()
             let icloud = Dictionary(
-                try await store.fetchAll().map { ($0.sourceIdentifier, $0) }, uniquingKeysWith: { first, _ in first }
+                try await store.fetchAll().map { ($0.sourceIdentifier, $0) },
+                uniquingKeysWith: { first, _ in first }
             )
             let noteTexts = try? await notes?.fetchNotes(ids: candidates.compactMap(\.icloudID))
-            let feed = try await GoogleChangeFeed(client: google).fetch(state: SyncState(), requireFullListing: true)
+            let feed = try await GoogleChangeFeed(client: google).fetch(
+                state: SyncState(), requireFullListing: true)
             let baselines = try state.load().baselines
 
             var updates: [PlannedUpdate] = []
             var baselineOnly: [String: SyncBaseline] = [:]
             var itemByID: [String: ReviewItem] = [:]
             for item in candidates {
-                guard item.pinned, let id = item.icloudID, let name = item.resourceName, let record = icloud[id], let person = feed.people[name],
-                      let google = GooglePersonMapper.record(from: person, source: .google), let baseline = baselines[id]
+                guard item.pinned, let id = item.icloudID, let name = item.resourceName,
+                    let record = icloud[id], let person = feed.people[name],
+                    let google = GooglePersonMapper.record(from: person, source: .google),
+                    let baseline = baselines[id]
                 else {
                     report.skipped.append(item.id)
                     continue
                 }
                 var draft = SyncReviewDraft(
                     icloud: record, google: google, base: baseline, reviewFields: item.fields,
-                    icloudNote: noteTexts.flatMap { $0[id] }, googleNote: GooglePersonMapper.note(of: person)
+                    icloudNote: noteTexts.flatMap { $0[id] },
+                    googleNote: GooglePersonMapper.note(of: person)
                 )
                 // Only what the user was shown is settled: either contact moving on, or a wider conflict (a Google edit since
                 // linking shows up as one more group), is for a look one by one.
-                guard person.etag == item.googleEtag, ContactFingerprint.of(record) == item.icloudFingerprint,
-                      Set(draft.reviewFields) == Set(item.fields)
+                guard person.etag == item.googleEtag,
+                    ContactFingerprint.of(record) == item.icloudFingerprint,
+                    Set(draft.reviewFields) == Set(item.fields)
                 else {
                     report.changedSinceShown.append(item.id)
                     continue
@@ -248,7 +267,8 @@ public struct ReviewWorkflows: Sendable {
                 }
                 itemByID[id] = item
                 switch googleStep(
-                    icloudID: id, resourceName: name, resolved: resolved, baseline: baseline, icloud: record, person: person, google: google
+                    icloudID: id, resourceName: name, resolved: resolved, baseline: baseline,
+                    icloud: record, person: person, google: google
                 ) {
                 case .update(let update): updates.append(update)
                 case .baselineOnly(let settled): baselineOnly[id] = settled
@@ -263,10 +283,12 @@ public struct ReviewWorkflows: Sendable {
                 for skipped in run.leftForNextRun {
                     failedIDs.insert(skipped.icloudID)
                     let item = itemByID[skipped.icloudID]
-                    report.failed.append(BulkKeepReport.Failure(
-                        itemID: item?.id ?? skipped.icloudID, name: baselines[skipped.icloudID]?.icloud.displayName ?? "Contact",
-                        reason: skipped.reason.text
-                    ))
+                    report.failed.append(
+                        BulkKeepReport.Failure(
+                            itemID: item?.id ?? skipped.icloudID,
+                            name: baselines[skipped.icloudID]?.icloud.displayName ?? "Contact",
+                            reason: skipped.reason.text
+                        ))
                 }
                 report.warnings += run.warnings
             }
@@ -289,28 +311,39 @@ public struct ReviewWorkflows: Sendable {
     /// Copies the Google contact (and its note) into iCloud and links the two.
     @concurrent
     public func importToICloud(_ detail: ReviewDetail) async throws -> ReviewOutcome {
-        guard detail.item.kind == .newInGoogle else { throw ReviewWorkflowError.wrongKind(detail.item.kind) }
+        guard detail.item.kind == .newInGoogle else {
+            throw ReviewWorkflowError.wrongKind(detail.item.kind)
+        }
         return try await exclusively {
             guard let notes else { throw ReviewWorkflowError.notesUnavailable }
             let live = try await fetchLive(detail.item)
             let fresh = makeDetail(detail.item, live, baseline: nil)
-            guard fresh.stamp == detail.stamp, let person = live.person, let record = live.google, let resourceName = person.resourceName,
-                  try links.load().links.values.allSatisfy({ $0.googleResourceName != resourceName })
+            guard fresh.stamp == detail.stamp, let person = live.person, let record = live.google,
+                let resourceName = person.resourceName,
+                try links.load().links.values.allSatisfy({ $0.googleResourceName != resourceName })
             else {
                 try refresh(detail.item, with: fresh)
                 return .changedSinceShown(live.person == nil ? nil : fresh)
             }
 
-            let receipt = try await backups.freshReceipt(requiring: BackupRequirement(containerID: containerID, needsNotes: true, needsGoogle: true))
+            let receipt = try await backups.freshReceipt(
+                requiring: BackupRequirement(
+                    containerID: containerID, needsNotes: true, needsGoogle: true))
             let tokenBefore = try await store.changeToken()
             let result = try await ImportExecutor(store: store, receipt: receipt, links: links)
                 .execute([ImportCandidate(record: record, isSelected: true)], now: now())
             if let stopped = result.stopped {
-                if case .failed(_, let reason) = stopped { throw ReviewWorkflowError.importFailed(reason) }
+                if case .failed(_, let reason) = stopped {
+                    throw ReviewWorkflowError.importFailed(reason)
+                }
                 throw CancellationError()
             }
-            if let linkError = result.linkSaveError { throw ReviewWorkflowError.importFailed("the link could not be saved (\(linkError))") }
-            guard let created = result.created.first else { throw ReviewWorkflowError.importFailed("nothing was created") }
+            if let linkError = result.linkSaveError {
+                throw ReviewWorkflowError.importFailed("the link could not be saved (\(linkError))")
+            }
+            guard let created = result.created.first else {
+                throw ReviewWorkflowError.importFailed("nothing was created")
+            }
 
             var warnings: [String] = []
             let googleNote = live.googleNote
@@ -320,12 +353,15 @@ public struct ReviewWorkflows: Sendable {
                     try await notes.setNote(googleNote, forID: created.record.sourceIdentifier)
                     icloudNoteHash = NoteHash.hash(googleNote)
                 } catch {
-                    warnings.append("The contact was copied, but its note was not: \(error.localizedDescription)")
+                    warnings.append(
+                        "The contact was copied, but its note was not: \(error.localizedDescription)"
+                    )
                 }
             }
             let stored = try await reread(created.record.sourceIdentifier) ?? created.record
             let baseline = SyncBaseline(
-                icloud: stored, google: record, googleEtag: person.etag ?? "", icloudNoteHash: icloudNoteHash,
+                icloud: stored, google: record, googleEtag: person.etag ?? "",
+                icloudNoteHash: icloudNoteHash,
                 googleNoteHash: NoteHash.hash(googleNote), syncedAt: now()
             )
             try state.update { $0.baselines[stored.sourceIdentifier] = baseline }
@@ -338,7 +374,9 @@ public struct ReviewWorkflows: Sendable {
     /// Leaves the Google contact alone and never offers it again, until `unignore`.
     @concurrent
     public func ignore(_ item: ReviewItem) async throws {
-        guard item.kind == .newInGoogle, let resourceName = item.resourceName else { throw ReviewWorkflowError.wrongKind(item.kind) }
+        guard item.kind == .newInGoogle, let resourceName = item.resourceName else {
+            throw ReviewWorkflowError.wrongKind(item.kind)
+        }
         try await exclusively {
             try state.update { $0.ignoredGoogle.insert(resourceName) }
             try reviews.remove(ids: [item.id])
@@ -352,15 +390,22 @@ public struct ReviewWorkflows: Sendable {
         for name in try state.load().ignoredGoogle.sorted() {
             do {
                 let person = try await google.getPerson(resourceName: name)
-                guard let record = GooglePersonMapper.record(from: person, source: .google) else { throw GoogleAPIError.notFound }
-                let line = [record.emails.first?.value, record.phones.first?.value].compactMap { $0 }.filter { !$0.isBlank }.first
-                result.append(IgnoredContact(resourceName: name, name: record.displayName, detail: line))
+                guard let record = GooglePersonMapper.record(from: person, source: .google) else {
+                    throw GoogleAPIError.notFound
+                }
+                let line = [record.emails.first?.value, record.phones.first?.value].compactMap {
+                    $0
+                }.filter { !$0.isBlank }.first
+                result.append(
+                    IgnoredContact(resourceName: name, name: record.displayName, detail: line))
             } catch is CancellationError {
                 throw CancellationError()
             } catch GoogleAPIError.notFound {
-                result.append(IgnoredContact(resourceName: name, name: "Deleted from Google", detail: name))
+                result.append(
+                    IgnoredContact(resourceName: name, name: "Deleted from Google", detail: name))
             } catch {
-                result.append(IgnoredContact(resourceName: name, name: "Unknown contact", detail: name))
+                result.append(
+                    IgnoredContact(resourceName: name, name: "Unknown contact", detail: name))
             }
         }
         return result
@@ -384,26 +429,32 @@ public struct ReviewWorkflows: Sendable {
     /// contact as it was is kept in the sync history.
     @concurrent
     public func deleteFromGoogle(_ detail: ReviewDetail) async throws -> ReviewOutcome {
-        guard detail.item.kind == .newInGoogle, let name = detail.item.resourceName else { throw ReviewWorkflowError.wrongKind(detail.item.kind) }
+        guard detail.item.kind == .newInGoogle, let name = detail.item.resourceName else {
+            throw ReviewWorkflowError.wrongKind(detail.item.kind)
+        }
         return try await exclusively {
             let live = try await fetchLive(detail.item)
             let fresh = makeDetail(detail.item, live, baseline: nil)
             guard fresh.stamp == detail.stamp, let person = live.person,
-                  try links.load().links.values.allSatisfy({ $0.googleResourceName != name })
+                try links.load().links.values.allSatisfy({ $0.googleResourceName != name })
             else {
                 try refresh(detail.item, with: fresh)
                 return .changedSinceShown(live.person == nil ? nil : fresh)
             }
-            _ = try await backups.freshReceipt(requiring: BackupRequirement(containerID: containerID, needsGoogle: true))
+            _ = try await backups.freshReceipt(
+                requiring: BackupRequirement(containerID: containerID, needsGoogle: true))
             // A backup can take a while: only the version that was shown is deleted.
             guard try await google.getPerson(resourceName: name).etag == person.etag else {
                 let again = makeDetail(detail.item, try await fetchLive(detail.item), baseline: nil)
                 try refresh(detail.item, with: again)
                 return .changedSinceShown(again)
             }
-            try history.append([SyncHistoryEntry(
-                at: now(), operation: .delete, icloudID: "", resourceName: name, before: person, after: nil, confirmed: false
-            )])
+            try history.append([
+                SyncHistoryEntry(
+                    at: now(), operation: .delete, icloudID: "", resourceName: name, before: person,
+                    after: nil, confirmed: false
+                )
+            ])
             do {
                 try await google.deleteContact(resourceName: name)
             } catch GoogleAPIError.notFound {
@@ -411,10 +462,14 @@ public struct ReviewWorkflows: Sendable {
             } catch is CancellationError {
                 throw CancellationError()
             } catch {
-                throw ReviewWorkflowError.googleWriteFailed(reason: error.localizedDescription, icloudSaved: false)
+                throw ReviewWorkflowError.googleWriteFailed(
+                    reason: error.localizedDescription, icloudSaved: false)
             }
             try state.update { $0.ignoredGoogle.remove(name) }
-            try reviews.remove(ids: try reviews.items(concerning: nil, resourceName: name).map(\.id) + [detail.item.id])
+            try reviews.remove(
+                ids: try reviews.items(concerning: nil, resourceName: name).map(\.id) + [
+                    detail.item.id
+                ])
             return .done(warnings: [])
         }
     }
@@ -424,7 +479,9 @@ public struct ReviewWorkflows: Sendable {
     @concurrent
     public func deleteFromBoth(_ detail: ReviewDetail) async throws -> ReviewOutcome {
         let item = detail.item
-        guard Self.iCloudSideKinds.contains(item.kind), let id = item.icloudID, let name = item.resourceName else {
+        guard Self.iCloudSideKinds.contains(item.kind), let id = item.icloudID,
+            let name = item.resourceName
+        else {
             throw ReviewWorkflowError.wrongKind(item.kind)
         }
         return try await exclusively {
@@ -432,13 +489,16 @@ public struct ReviewWorkflows: Sendable {
             let baseline = try state.load().baselines[id]
             let live = try await fetchLive(item)
             let fresh = makeDetail(item, live, baseline: baseline)
-            guard fresh.stamp == detail.stamp, live.icloud != nil, let etag = live.person?.etag, let baseline,
-                  try links.load().links[id]?.googleResourceName == name
+            guard fresh.stamp == detail.stamp, live.icloud != nil, let etag = live.person?.etag,
+                let baseline,
+                try links.load().links[id]?.googleResourceName == name
             else {
                 try refresh(item, with: fresh)
                 return .changedSinceShown(live.icloud == nil || live.person == nil ? nil : fresh)
             }
-            let receipt = try await backups.freshReceipt(requiring: BackupRequirement(containerID: containerID, needsNotes: true, needsGoogle: true))
+            let receipt = try await backups.freshReceipt(
+                requiring: BackupRequirement(
+                    containerID: containerID, needsNotes: true, needsGoogle: true))
             let again = try await fetchLive(item)
             guard stamp(of: again) == stamp(of: live) else {
                 let shown = makeDetail(item, again, baseline: baseline)
@@ -453,14 +513,19 @@ public struct ReviewWorkflows: Sendable {
             plan.deletes = [PlannedDelete(icloudID: id, resourceName: name, baseline: baseline)]
             let run = try await executor().execute(plan: plan, approvedDeletes: [id: etag])
             // The other questions about this pair are moot; one the delete itself raised is not.
-            let moot = try reviews.items(concerning: id, resourceName: name).map(\.id).filter { !run.reviewsAdded.contains($0) }
+            let moot = try reviews.items(concerning: id, resourceName: name).map(\.id).filter {
+                !run.reviewsAdded.contains($0)
+            }
             try reviews.remove(ids: moot + [item.id])
             if !run.reviewsAdded.isEmpty {
-                return .done(warnings: ["The contact was deleted from iCloud. Google's copy changed meanwhile, so it was kept; the review list asks about it."])
+                return .done(warnings: [
+                    "The contact was deleted from iCloud. Google's copy changed meanwhile, so it was kept; the review list asks about it."
+                ])
             }
             try Self.requireWritten(run, icloudSaved: true)
             guard run.deleted + run.alreadyGone > 0 else {
-                throw ReviewWorkflowError.googleWriteFailed(reason: "the Google contact was not deleted.", icloudSaved: true)
+                throw ReviewWorkflowError.googleWriteFailed(
+                    reason: "the Google contact was not deleted.", icloudSaved: true)
             }
             // Only once both are gone: until then the next sync must see the iCloud deletion and carry it over.
             try await advanceICloudToken(from: tokenBefore)
@@ -474,7 +539,8 @@ public struct ReviewWorkflows: Sendable {
     @concurrent
     public func deleteFromICloud(_ detail: ReviewDetail) async throws -> ReviewOutcome {
         try await decideDeletedInGoogle(detail) { live, id, tokenBefore in
-            let receipt = try await backups.freshReceipt(requiring: BackupRequirement(containerID: containerID, needsNotes: true))
+            let receipt = try await backups.freshReceipt(
+                requiring: BackupRequirement(containerID: containerID, needsNotes: true))
             try await store.delete(ids: [id], backup: receipt)
             try forget(id)
             try clear(detail.item)
@@ -487,21 +553,33 @@ public struct ReviewWorkflows: Sendable {
     @concurrent
     public func putBackInGoogle(_ detail: ReviewDetail) async throws -> ReviewOutcome {
         try await decideDeletedInGoogle(detail) { live, id, _ in
-            guard let record = live.icloud else { throw ReviewWorkflowError.contactGone(detail.name) }
+            guard let record = live.icloud else {
+                throw ReviewWorkflowError.contactGone(detail.name)
+            }
             // A Google contact already made from this one would be doubled by a create; the sync links it by its tag instead.
-            let feed = try await GoogleChangeFeed(client: google).fetch(state: SyncState(), requireFullListing: true)
+            let feed = try await GoogleChangeFeed(client: google).fetch(
+                state: SyncState(), requireFullListing: true)
             try forget(id)
             guard feed.ownershipIndex[id] == nil else {
                 try clear(detail.item)
-                return ["A Google contact made from this one already exists. It is linked on the next sync."]
+                return [
+                    "A Google contact made from this one already exists. It is linked on the next sync."
+                ]
             }
             let note = live.icloudNote ?? ""
             var plan = SyncPlan(isPreview: false)
-            plan.creates = [PlannedCreate(icloudID: id, record: record, note: note.isBlank ? nil : note, icloudNoteHash: NoteHash.hash(note))]
+            plan.creates = [
+                PlannedCreate(
+                    icloudID: id, record: record, note: note.isBlank ? nil : note,
+                    icloudNoteHash: NoteHash.hash(note))
+            ]
             plan.createsVerifiedAgainstFullListing = true
             let run = try await executor().execute(plan: plan)
             try Self.requireWritten(run, icloudSaved: false)
-            guard run.created > 0 else { throw ReviewWorkflowError.googleWriteFailed(reason: "the contact was not created.", icloudSaved: false) }
+            guard run.created > 0 else {
+                throw ReviewWorkflowError.googleWriteFailed(
+                    reason: "the contact was not created.", icloudSaved: false)
+            }
             try clear(detail.item)
             return []
         }
@@ -512,7 +590,9 @@ public struct ReviewWorkflows: Sendable {
     private func decideDeletedInGoogle(
         _ detail: ReviewDetail, _ act: @Sendable (Live, String, Data?) async throws -> [String]
     ) async throws -> ReviewOutcome {
-        guard detail.item.kind == .deletedInGoogle, let id = detail.item.icloudID else { throw ReviewWorkflowError.wrongKind(detail.item.kind) }
+        guard detail.item.kind == .deletedInGoogle, let id = detail.item.icloudID else {
+            throw ReviewWorkflowError.wrongKind(detail.item.kind)
+        }
         return try await exclusively {
             guard notes != nil else { throw ReviewWorkflowError.notesUnavailable }
             let live = try await fetchLive(detail.item)
@@ -531,21 +611,24 @@ public struct ReviewWorkflows: Sendable {
     @concurrent
     public func keepDeleted(_ detail: ReviewDetail) async throws -> ReviewOutcome {
         try await decideDeletedInICloud(detail) { live, id, name in
-            guard let baseline = try state.load().baselines[id], try links.load().links[id]?.googleResourceName == name,
-                  let etag = live.person?.etag
+            guard let baseline = try state.load().baselines[id],
+                try links.load().links[id]?.googleResourceName == name,
+                let etag = live.person?.etag
             else { throw ReviewWorkflowError.contactGone(detail.name) }
             var plan = SyncPlan(isPreview: false)
             plan.deletes = [PlannedDelete(icloudID: id, resourceName: name, baseline: baseline)]
             // Only the version the user saw is approved: a Google edit made while the backup was taken is not deleted.
             let run = try await executor().execute(plan: plan, approvedDeletes: [id: etag])
             if run.reviewsAdded.contains(detail.item.id) {
-                let fresh = makeDetail(detail.item, try await fetchLive(detail.item), baseline: baseline)
+                let fresh = makeDetail(
+                    detail.item, try await fetchLive(detail.item), baseline: baseline)
                 try refresh(detail.item, with: fresh)
                 return .changedSinceShown(fresh)
             }
             try Self.requireWritten(run, icloudSaved: false)
             guard run.deleted + run.alreadyGone > 0 else {
-                throw ReviewWorkflowError.googleWriteFailed(reason: "the contact was not deleted.", icloudSaved: false)
+                throw ReviewWorkflowError.googleWriteFailed(
+                    reason: "the contact was not deleted.", icloudSaved: false)
             }
             try clear(detail.item)
             return .done(warnings: [])
@@ -556,20 +639,33 @@ public struct ReviewWorkflows: Sendable {
     @concurrent
     public func restoreToICloud(_ detail: ReviewDetail) async throws -> ReviewOutcome {
         try await decideDeletedInICloud(detail) { live, id, name in
-            guard let notes, let person = live.person, let record = live.google else { throw ReviewWorkflowError.contactGone(detail.name) }
+            guard let notes, let person = live.person, let record = live.google else {
+                throw ReviewWorkflowError.contactGone(detail.name)
+            }
             let origin = try links.load().links[id]?.effectiveOrigin ?? .imported
-            let receipt = try await backups.freshReceipt(requiring: BackupRequirement(containerID: containerID, needsNotes: true, needsGoogle: true))
+            let receipt = try await backups.freshReceipt(
+                requiring: BackupRequirement(
+                    containerID: containerID, needsNotes: true, needsGoogle: true))
             let tokenBefore = try await store.changeToken()
             let result = try await ImportExecutor(store: store, receipt: receipt, links: links)
                 .execute([ImportCandidate(record: record, isSelected: true)], now: now())
             if let stopped = result.stopped {
-                if case .failed(_, let reason) = stopped { throw ReviewWorkflowError.importFailed(reason) }
+                if case .failed(_, let reason) = stopped {
+                    throw ReviewWorkflowError.importFailed(reason)
+                }
                 throw CancellationError()
             }
-            guard let created = result.created.first else { throw ReviewWorkflowError.importFailed("nothing was created") }
+            guard let created = result.created.first else {
+                throw ReviewWorkflowError.importFailed("nothing was created")
+            }
             let newID = created.record.sourceIdentifier
             // The import linked it as imported, replacing the old entry; keep how the pair originally came about.
-            try links.add([ImportedLink(icloudID: newID, googleResourceName: name, origin: origin, displayName: created.record.displayName)], at: now())
+            try links.add(
+                [
+                    ImportedLink(
+                        icloudID: newID, googleResourceName: name, origin: origin,
+                        displayName: created.record.displayName)
+                ], at: now())
 
             var warnings: [String] = []
             var icloudNoteHash = NoteHash.hash("")
@@ -578,13 +674,16 @@ public struct ReviewWorkflows: Sendable {
                     try await notes.setNote(live.googleNote, forID: newID)
                     icloudNoteHash = NoteHash.hash(live.googleNote)
                 } catch {
-                    warnings.append("The contact was restored, but its note was not: \(error.localizedDescription)")
+                    warnings.append(
+                        "The contact was restored, but its note was not: \(error.localizedDescription)"
+                    )
                 }
             }
             // No photo baseline: the restored contact is new and photo-less, so the next run looks at the pair's photos afresh.
             let stored = try await reread(newID) ?? created.record
             let baseline = SyncBaseline(
-                icloud: stored, google: record, googleEtag: person.etag ?? "", icloudNoteHash: icloudNoteHash,
+                icloud: stored, google: record, googleEtag: person.etag ?? "",
+                icloudNoteHash: icloudNoteHash,
                 googleNoteHash: NoteHash.hash(live.googleNote), syncedAt: now()
             )
             try state.update { state in
@@ -600,9 +699,12 @@ public struct ReviewWorkflows: Sendable {
     }
 
     private func decideDeletedInICloud(
-        _ detail: ReviewDetail, _ act: @Sendable (Live, String, String) async throws -> ReviewOutcome
+        _ detail: ReviewDetail,
+        _ act: @Sendable (Live, String, String) async throws -> ReviewOutcome
     ) async throws -> ReviewOutcome {
-        guard detail.item.kind == .deletedInICloudEditedInGoogle, let id = detail.item.icloudID, let name = detail.item.resourceName else {
+        guard detail.item.kind == .deletedInICloudEditedInGoogle, let id = detail.item.icloudID,
+            let name = detail.item.resourceName
+        else {
             throw ReviewWorkflowError.wrongKind(detail.item.kind)
         }
         return try await exclusively {
@@ -633,7 +735,9 @@ public struct ReviewWorkflows: Sendable {
     /// sides as they are and asks about any field that differs.
     @concurrent
     public func link(_ detail: ReviewDetail) async throws -> ReviewOutcome {
-        guard detail.item.kind == .possibleLink, let id = detail.item.icloudID, let name = detail.item.resourceName else {
+        guard detail.item.kind == .possibleLink, let id = detail.item.icloudID,
+            let name = detail.item.resourceName
+        else {
             throw ReviewWorkflowError.wrongKind(detail.item.kind)
         }
         return try await exclusively {
@@ -643,10 +747,18 @@ public struct ReviewWorkflows: Sendable {
             let fresh = makeDetail(detail.item, live, baseline: nil)
             guard fresh.stamp == detail.stamp, live.icloud != nil, live.person != nil, free else {
                 try refresh(detail.item, with: fresh)
-                if live.icloud == nil || live.person == nil || !free { try reviews.remove(ids: [detail.item.id]) }
-                return .changedSinceShown(live.icloud == nil || live.person == nil || !free ? nil : fresh)
+                if live.icloud == nil || live.person == nil || !free {
+                    try reviews.remove(ids: [detail.item.id])
+                }
+                return .changedSinceShown(
+                    live.icloud == nil || live.person == nil || !free ? nil : fresh)
             }
-            try links.add([ImportedLink(icloudID: id, googleResourceName: name, origin: .matched, displayName: live.icloud?.displayName)], at: now())
+            try links.add(
+                [
+                    ImportedLink(
+                        icloudID: id, googleResourceName: name, origin: .matched,
+                        displayName: live.icloud?.displayName)
+                ], at: now())
             // A link without a baseline is adopted by a full scan; an unchanged iCloud token would skip it.
             try state.update { $0.icloudChangeToken = nil }
             try clear(detail.item)
@@ -657,7 +769,8 @@ public struct ReviewWorkflows: Sendable {
     /// Remembers that these are different people. The iCloud contact is created in Google by the next sync.
     @concurrent
     public func keepSeparate(_ item: ReviewItem) async throws {
-        guard item.kind == .possibleLink, let id = item.icloudID, let name = item.resourceName else { throw ReviewWorkflowError.wrongKind(item.kind) }
+        guard item.kind == .possibleLink, let id = item.icloudID, let name = item.resourceName
+        else { throw ReviewWorkflowError.wrongKind(item.kind) }
         try await exclusively {
             try state.update { $0.keepSeparate.insert(id + "|" + name) }
             try reviews.remove(ids: [item.id])
@@ -711,7 +824,9 @@ public struct ReviewWorkflows: Sendable {
     }
 
     /// A Google photo at 1024 px. Nil when it cannot be downloaded (the screen then shows no picture).
-    private func downloadGoogle(_ ref: GooglePhotoRef?, _ support: SyncPhotoSupport) async throws -> Data? {
+    private func downloadGoogle(_ ref: GooglePhotoRef?, _ support: SyncPhotoSupport) async throws
+        -> Data?
+    {
         guard let url = ref?.sizedURL(PhotoExecutor.copySize) else { return nil }
         do {
             return try await support.fetcher.fetch(url)
@@ -724,7 +839,9 @@ public struct ReviewWorkflows: Sendable {
 
     /// The open photo question: both pictures, as they are now, and the words for the choices.
     private func loadPhotoDetail(_ item: ReviewItem) async throws -> ReviewDetail {
-        guard let support = photos, let id = item.icloudID, let name = item.resourceName else { throw ReviewWorkflowError.photosUnavailable }
+        guard let support = photos, let id = item.icloudID, let name = item.resourceName else {
+            throw ReviewWorkflowError.photosUnavailable
+        }
         let baseline = try state.load().baselines[id]
         let record = try await reread(id)
         let live = try await readPhotoLive(icloudID: id, resourceName: name)
@@ -735,21 +852,31 @@ public struct ReviewWorkflows: Sendable {
         if live.icloudExists, live.person != nil {
             let icloud: Data? = live.icloudHasPhoto ? try await store.photoData(id: id) : nil
             pictures = PhotoReviewDetail(
-                draft: PhotoReviewDraft(reason: reason), icloud: icloud, google: try await downloadGoogle(live.photos.contact, support),
-                profile: reason == .profileRemovedInICloud ? try await downloadGoogle(live.photos.profile, support) : nil,
+                draft: PhotoReviewDraft(reason: reason), icloud: icloud,
+                google: try await downloadGoogle(live.photos.contact, support),
+                profile: reason == .profileRemovedInICloud
+                    ? try await downloadGoogle(live.photos.profile, support) : nil,
                 googleContactUpdatedAt: live.photos.contactUpdatedAt
             )
         }
         if try reviews.load().contains(where: { $0.id == item.id }), item.photoStamp != live.stamp {
-            try reviews.add([ReviewCandidate(
-                kind: .photoConflict, icloudID: id, resourceName: name, photoStamp: live.stamp, photoReason: item.photoReason
-            )], at: now())
+            try reviews.add(
+                [
+                    ReviewCandidate(
+                        kind: .photoConflict, icloudID: id, resourceName: name,
+                        photoStamp: live.stamp, photoReason: item.photoReason
+                    )
+                ], at: now())
         }
         return ReviewDetail(
-            item: item, name: (record ?? google ?? baseline?.icloud)?.displayName ?? "Unknown contact", icloud: record, google: google,
-            googleBefore: baseline?.google, icloudNote: nil, googleNote: "", draft: nil, photos: pictures,
+            item: item,
+            name: (record ?? google ?? baseline?.icloud)?.displayName ?? "Unknown contact",
+            icloud: record, google: google,
+            googleBefore: baseline?.google, icloudNote: nil, googleNote: "", draft: nil,
+            photos: pictures,
             stamp: ReviewStamp(
-                googleEtag: nil, icloudFingerprint: nil, icloudNoteHash: nil, hasICloud: live.icloudExists, hasGoogle: live.person != nil,
+                googleEtag: nil, icloudFingerprint: nil, icloudNoteHash: nil,
+                hasICloud: live.icloudExists, hasGoogle: live.person != nil,
                 photoStamp: live.stamp
             )
         )
@@ -758,23 +885,30 @@ public struct ReviewWorkflows: Sendable {
     /// Decides one photo question, with the live state of both sides re-read and compared with what was shown. Nothing is
     /// removed without a choice that says so; Google's old photo is saved to the photo history before it is replaced or deleted.
     @concurrent
-    public func applyPhoto(_ detail: ReviewDetail, choice: PhotoChoice) async throws -> ReviewOutcome {
+    public func applyPhoto(_ detail: ReviewDetail, choice: PhotoChoice) async throws
+        -> ReviewOutcome
+    {
         let item = detail.item
-        guard item.kind == .photoConflict, let id = item.icloudID, let name = item.resourceName else { throw ReviewWorkflowError.wrongKind(item.kind) }
+        guard item.kind == .photoConflict, let id = item.icloudID, let name = item.resourceName
+        else { throw ReviewWorkflowError.wrongKind(item.kind) }
         guard let support = photos else { throw ReviewWorkflowError.photosUnavailable }
         return try await exclusively {
             let live = try await readPhotoLive(icloudID: id, resourceName: name)
-            guard let baseline = try state.load().baselines[id], try links.load().links[id]?.googleResourceName == name,
-                  live.icloudExists, live.person != nil
+            guard let baseline = try state.load().baselines[id],
+                try links.load().links[id]?.googleResourceName == name,
+                live.icloudExists, live.person != nil
             else {
                 // A contact is gone: nothing is left to ask.
                 try reviews.remove(ids: [item.id])
                 return .changedSinceShown(nil)
             }
-            guard live.stamp == detail.stamp.photoStamp else { return .changedSinceShown(try await loadPhotoDetail(item)) }
+            guard live.stamp == detail.stamp.photoStamp else {
+                return .changedSinceShown(try await loadPhotoDetail(item))
+            }
 
             let step = try await photoStep(
-                choice, reason: item.photoReason, icloudID: id, resourceName: name, baseline: baseline, live: live, support: support
+                choice, reason: item.photoReason, icloudID: id, resourceName: name,
+                baseline: baseline, live: live, support: support
             )
             let report = try await runPhotoOps([step.op], support)
             if report.completed.contains(id) {
@@ -784,12 +918,14 @@ public struct ReviewWorkflows: Sendable {
             }
             if let skipped = report.skipped.first(where: { $0.icloudID == id }) {
                 switch skipped.reason {
-                case .googleChanged, .icloudChanged: return .changedSinceShown(try await loadPhotoDetail(item))
+                case .googleChanged, .icloudChanged:
+                    return .changedSinceShown(try await loadPhotoDetail(item))
                 case .notLinked, .vanished:
                     try reviews.remove(ids: [item.id])
                     return .changedSinceShown(nil)
                 case .failed, .permanent, .couldNotSaveOld, .notAttempted:
-                    throw ReviewWorkflowError.photoFailed(skipped.reason.message ?? "nothing was written.")
+                    throw ReviewWorkflowError.photoFailed(
+                        skipped.reason.message ?? "nothing was written.")
                 }
             }
             throw ReviewWorkflowError.photoFailed(report.halted ?? "nothing was written.")
@@ -800,27 +936,37 @@ public struct ReviewWorkflows: Sendable {
     /// iCloud lacks is deleted from Google (saved to the photo history first). A mass change that exceeds the photo limits is
     /// not done until asked again with `confirmed`; at most 60 Google photo writes happen per call, the rest stay in the list.
     @concurrent
-    public func keepICloudPhotosForAll(_ items: [ReviewItem], confirmed: Bool = false) async throws -> BulkPhotoReport {
+    public func keepICloudPhotosForAll(_ items: [ReviewItem], confirmed: Bool = false) async throws
+        -> BulkPhotoReport
+    {
         try await keepPhotosForAll(items, choice: .keepICloud, confirmed: confirmed)
     }
 
     /// "Keep Google photos for all": the same with Google's state winning (a photo Google lacks is deleted from iCloud, after a
     /// backup).
     @concurrent
-    public func keepGooglePhotosForAll(_ items: [ReviewItem], confirmed: Bool = false) async throws -> BulkPhotoReport {
+    public func keepGooglePhotosForAll(_ items: [ReviewItem], confirmed: Bool = false) async throws
+        -> BulkPhotoReport
+    {
         try await keepPhotosForAll(items, choice: .keepGoogle, confirmed: confirmed)
     }
 
-    private func keepPhotosForAll(_ items: [ReviewItem], choice: PhotoChoice, confirmed: Bool) async throws -> BulkPhotoReport {
+    private func keepPhotosForAll(_ items: [ReviewItem], choice: PhotoChoice, confirmed: Bool)
+        async throws -> BulkPhotoReport
+    {
         guard let support = photos else { throw ReviewWorkflowError.photosUnavailable }
         return try await exclusively {
             var report = BulkPhotoReport()
-            let questions = items.filter { $0.kind == .photoConflict && $0.icloudID != nil && $0.resourceName != nil }
-                .sorted { $0.id < $1.id }
-            report.skipped = items.filter { item in !questions.contains { $0.id == item.id } }.map(\.id)
+            let questions = items.filter {
+                $0.kind == .photoConflict && $0.icloudID != nil && $0.resourceName != nil
+            }
+            .sorted { $0.id < $1.id }
+            report.skipped = items.filter { item in !questions.contains { $0.id == item.id } }.map(
+                \.id)
             guard !questions.isEmpty else { return report }
 
-            let feed = try await GoogleChangeFeed(client: google).fetch(state: SyncState(), requireFullListing: true)
+            let feed = try await GoogleChangeFeed(client: google).fetch(
+                state: SyncState(), requireFullListing: true)
             let signatures = try await store.photoSignatures(ids: questions.compactMap(\.icloudID))
             let current = try state.load()
             let table = try links.load().links
@@ -829,27 +975,36 @@ public struct ReviewWorkflows: Sendable {
             for item in questions {
                 guard let id = item.icloudID, let name = item.resourceName else { continue }
                 let live = Self.photoLive(signature: signatures[id], person: feed.people[name])
-                guard let baseline = current.baselines[id], table[id]?.googleResourceName == name, live.icloudExists, live.person != nil,
-                      item.photoStamp == live.stamp
+                guard let baseline = current.baselines[id], table[id]?.googleResourceName == name,
+                    live.icloudExists, live.person != nil,
+                    item.photoStamp == live.stamp
                 else {
                     report.changedSinceShown.append(item.id)
                     continue
                 }
                 do {
-                    steps.append((item, try await photoStep(
-                        choice, reason: item.photoReason, icloudID: id, resourceName: name, baseline: baseline, live: live, support: support
-                    )))
+                    steps.append(
+                        (
+                            item,
+                            try await photoStep(
+                                choice, reason: item.photoReason, icloudID: id, resourceName: name,
+                                baseline: baseline, live: live, support: support
+                            )
+                        ))
                 } catch is CancellationError {
                     throw CancellationError()
                 } catch {
-                    report.failed.append(BulkKeepReport.Failure(
-                        itemID: item.id, name: baseline.icloud.displayName, reason: error.localizedDescription
-                    ))
+                    report.failed.append(
+                        BulkKeepReport.Failure(
+                            itemID: item.id, name: baseline.icloud.displayName,
+                            reason: error.localizedDescription
+                        ))
                 }
             }
 
             let linked = max(table.count, current.baselines.count)
-            let reasons = SyncPlanner.photoGuardReasons(ops: steps.map(\.step.op), linkedCount: linked, limits: SyncPlanner.Limits())
+            let reasons = SyncPlanner.photoGuardReasons(
+                ops: steps.map(\.step.op), linkedCount: linked, limits: SyncPlanner.Limits())
             if !reasons.isEmpty, !confirmed {
                 report.needsConfirmation = "This would " + reasons.joined(separator: " and ")
                 return report
@@ -880,12 +1035,15 @@ public struct ReviewWorkflows: Sendable {
                     if entry.step.optOut { optOuts.insert(id) }
                 } else if let skipped = run.skipped.first(where: { $0.icloudID == id }) {
                     switch skipped.reason {
-                    case .googleChanged, .icloudChanged, .notLinked, .vanished: report.changedSinceShown.append(entry.item.id)
+                    case .googleChanged, .icloudChanged, .notLinked, .vanished:
+                        report.changedSinceShown.append(entry.item.id)
                     case .failed, .permanent, .couldNotSaveOld, .notAttempted:
-                        report.failed.append(BulkKeepReport.Failure(
-                            itemID: entry.item.id, name: current.baselines[id]?.icloud.displayName ?? "Contact",
-                            reason: skipped.reason.message ?? "nothing was written."
-                        ))
+                        report.failed.append(
+                            BulkKeepReport.Failure(
+                                itemID: entry.item.id,
+                                name: current.baselines[id]?.icloud.displayName ?? "Contact",
+                                reason: skipped.reason.message ?? "nothing was written."
+                            ))
                     }
                 }
             }
@@ -896,10 +1054,14 @@ public struct ReviewWorkflows: Sendable {
         }
     }
 
-    private func runPhotoOps(_ ops: [PlannedPhotoOp], _ support: SyncPhotoSupport) async throws -> PhotoRunReport {
+    private func runPhotoOps(_ ops: [PlannedPhotoOp], _ support: SyncPhotoSupport) async throws
+        -> PhotoRunReport
+    {
         try await PhotoExecutor(
-            google: google, store: store, links: links, state: state, reviews: reviews, history: support.history, backups: backups,
-            fetcher: support.fetcher, icloudFallback: support.icloudFallback, containerID: containerID, needsNotes: notes != nil, now: now,
+            google: google, store: store, links: links, state: state, reviews: reviews,
+            history: support.history, backups: backups,
+            fetcher: support.fetcher, icloudFallback: support.icloudFallback,
+            containerID: containerID, needsNotes: notes != nil, now: now,
             sleep: support.sleep
         ).execute(ops)
     }
@@ -907,7 +1069,8 @@ public struct ReviewWorkflows: Sendable {
     /// The op that carries out `choice` on the pair as it is now, with the baseline to store once it is done. The baseline
     /// records both sides as they will be, with any failure marker and waiting removal cleared.
     private func photoStep(
-        _ choice: PhotoChoice, reason: PhotoConflictReason?, icloudID: String, resourceName: String, baseline: SyncBaseline,
+        _ choice: PhotoChoice, reason: PhotoConflictReason?, icloudID: String, resourceName: String,
+        baseline: SyncBaseline,
         live: PhotoLive, support: SyncPhotoSupport
     ) async throws -> PhotoStep {
         var base = baseline.photo ?? PhotoBaseline(syncedAt: now())
@@ -917,9 +1080,12 @@ public struct ReviewWorkflows: Sendable {
         base.icloudOrigin = .user
         let contact = live.photos.contact
 
-        func op(_ kind: PlannedPhotoOp.Kind, _ result: PhotoBaseline, googleKey: String?) -> PlannedPhotoOp {
+        func op(_ kind: PlannedPhotoOp.Kind, _ result: PhotoBaseline, googleKey: String?)
+            -> PlannedPhotoOp
+        {
             PlannedPhotoOp(
-                icloudID: icloudID, resourceName: resourceName, kind: kind, baseline: result, expectedGoogleURLKey: googleKey,
+                icloudID: icloudID, resourceName: resourceName, kind: kind, baseline: result,
+                expectedGoogleURLKey: googleKey,
                 expectedICloudHint: live.icloudHint
             )
         }
@@ -944,13 +1110,17 @@ public struct ReviewWorkflows: Sendable {
             result.icloudHint = live.icloudHint
             result.google = try await googleFingerprint()
             result.googleURLKey = contact?.key
-            return PhotoStep(op: op(.recordBaseline, result, googleKey: contact?.key), optOut: optOut)
+            return PhotoStep(
+                op: op(.recordBaseline, result, googleKey: contact?.key), optOut: optOut)
         }
 
         if reason == .profileRemovedInICloud {
             guard choice == .keepGoogle else { return try await asTheyAre(optOut: true) }
-            guard let ref = live.photos.profile else { throw ReviewWorkflowError.photoFailed("their Google profile photo is gone.") }
-            let fingerprint = try fingerprint(try await downloadGoogle(ref, support), "Google profile")
+            guard let ref = live.photos.profile else {
+                throw ReviewWorkflowError.photoFailed("their Google profile photo is gone.")
+            }
+            let fingerprint = try fingerprint(
+                try await downloadGoogle(ref, support), "Google profile")
             var result = base
             result.icloud = fingerprint
             result.icloudHint = nil
@@ -959,7 +1129,8 @@ public struct ReviewWorkflows: Sendable {
             result.googleProfile = fingerprint
             result.googleProfileKey = ref.key
             result.icloudOrigin = .googleProfile
-            return PhotoStep(op: op(.copyToICloud(source: .googleProfile), result, googleKey: ref.key))
+            return PhotoStep(
+                op: op(.copyToICloud(source: .googleProfile), result, googleKey: ref.key))
         }
 
         switch choice {
@@ -978,7 +1149,9 @@ public struct ReviewWorkflows: Sendable {
             result.google = nil
             result.icloudHint = nil
             result.googleURLKey = nil
-            guard let contact else { return PhotoStep(op: op(.recordBaseline, result, googleKey: nil)) }
+            guard let contact else {
+                return PhotoStep(op: op(.recordBaseline, result, googleKey: nil))
+            }
             return PhotoStep(op: op(.deleteOnGoogle, result, googleKey: contact.key))
         case .keepGoogle:
             var result = base
@@ -987,44 +1160,53 @@ public struct ReviewWorkflows: Sendable {
                 result.google = theirs
                 result.icloudHint = nil
                 result.googleURLKey = contact.key
-                return PhotoStep(op: op(.copyToICloud(source: .googleContact), result, googleKey: contact.key))
+                return PhotoStep(
+                    op: op(.copyToICloud(source: .googleContact), result, googleKey: contact.key))
             }
             result.icloud = nil
             result.google = nil
             result.icloudHint = nil
             result.googleURLKey = nil
-            guard live.icloudHasPhoto else { return PhotoStep(op: op(.recordBaseline, result, googleKey: nil)) }
+            guard live.icloudHasPhoto else {
+                return PhotoStep(op: op(.recordBaseline, result, googleKey: nil))
+            }
             return PhotoStep(op: op(.deleteOnICloud, result, googleKey: nil))
         }
     }
 
     // MARK: writing
 
-    private func exclusively<T: Sendable>(_ body: @Sendable () async throws -> T) async throws -> T {
+    private func exclusively<T: Sendable>(_ body: @Sendable () async throws -> T) async throws -> T
+    {
         try await gate.withLock(body)
     }
 
     private func executor() -> SyncExecutor {
         SyncExecutor(
-            google: google, links: links, state: state, reviews: reviews, journal: journal, history: history, backups: backups,
+            google: google, links: links, state: state, reviews: reviews, journal: journal,
+            history: history, backups: backups,
             containerID: containerID, now: now
         )
     }
 
     /// Saves one draft: iCloud first (backup, contact, note), then Google, then the baseline.
     private func commit(
-        _ draft: SyncReviewDraft, item: ReviewItem, icloud: ContactRecord, person: GooglePerson, google: ContactRecord, live: Live,
+        _ draft: SyncReviewDraft, item: ReviewItem, icloud: ContactRecord, person: GooglePerson,
+        google: ContactRecord, live: Live,
         baseline: SyncBaseline
     ) async throws -> ReviewOutcome {
         let resolved = draft.resolve()
         let icloudID = icloud.sourceIdentifier
-        let writesNote = resolved.note.map { NoteHash.hash($0) != NoteHash.hash(live.icloudNote ?? "") } ?? false
+        let writesNote =
+            resolved.note.map { NoteHash.hash($0) != NoteHash.hash(live.icloudNote ?? "") } ?? false
         let tokenBefore = try await store.changeToken()
         _ = try await executor().recoverInterruptedRun()
 
         var saved = icloud
         if resolved.changesICloud || writesNote {
-            let receipt = try await backups.freshReceipt(requiring: BackupRequirement(containerID: containerID, needsNotes: true, needsGoogle: true))
+            let receipt = try await backups.freshReceipt(
+                requiring: BackupRequirement(
+                    containerID: containerID, needsNotes: true, needsGoogle: true))
             // A backup can take a while: look once more before writing over whatever happened meanwhile.
             let again = try await fetchLive(item)
             guard stamp(of: again) == stamp(of: live) else {
@@ -1033,13 +1215,16 @@ public struct ReviewWorkflows: Sendable {
                 return .changedSinceShown(fresh.draft == nil ? nil : fresh)
             }
             if resolved.changesICloud { try await store.update(resolved.icloud, backup: receipt) }
-            if writesNote, let note = resolved.note { try await notes?.setNote(note.isBlank ? nil : note, forID: icloudID) }
+            if writesNote, let note = resolved.note {
+                try await notes?.setNote(note.isBlank ? nil : note, forID: icloudID)
+            }
             saved = try await reread(icloudID) ?? resolved.icloud
         }
 
         let didWriteICloud = resolved.changesICloud || writesNote
         switch googleStep(
-            icloudID: icloudID, resourceName: person.resourceName ?? "", resolved: resolved, baseline: baseline, icloud: saved, person: person,
+            icloudID: icloudID, resourceName: person.resourceName ?? "", resolved: resolved,
+            baseline: baseline, icloud: saved, person: person,
             google: google
         ) {
         case .update(let update):
@@ -1064,30 +1249,37 @@ public struct ReviewWorkflows: Sendable {
     /// The Google half of a decision. The baseline carries the iCloud contact as saved and Google as it is; when an update is
     /// confirmed the executor replaces its Google half with what Google returns.
     private func googleStep(
-        icloudID: String, resourceName: String, resolved: SyncReviewDraft.Resolution, baseline: SyncBaseline, icloud: ContactRecord,
+        icloudID: String, resourceName: String, resolved: SyncReviewDraft.Resolution,
+        baseline: SyncBaseline, icloud: ContactRecord,
         person: GooglePerson, google: ContactRecord
     ) -> GoogleStep {
         let noteHash = resolved.note.map(NoteHash.hash)
         let settled = SyncBaseline(
             icloud: icloud, google: google, googleEtag: person.etag ?? baseline.googleEtag,
-            icloudNoteHash: noteHash ?? baseline.icloudNoteHash, googleNoteHash: noteHash ?? baseline.googleNoteHash, syncedAt: now(),
+            icloudNoteHash: noteHash ?? baseline.icloudNoteHash,
+            googleNoteHash: noteHash ?? baseline.googleNoteHash, syncedAt: now(),
             photo: baseline.photo
         )
         let pushesNote = noteHash.map { $0 != GooglePersonMapper.noteHash(of: person) } ?? false
         guard resolved.changesGoogle || pushesNote else { return .baselineOnly(settled) }
         var fields = Set(SyncField.recordFields)
         if pushesNote { fields.insert(.note) }
-        return .update(PlannedUpdate(
-            icloudID: icloudID, resourceName: resourceName, etag: person.etag ?? "", existing: person, fields: fields,
-            desired: resolved.google, note: pushesNote ? resolved.note : nil, baseline: settled
-        ))
+        return .update(
+            PlannedUpdate(
+                icloudID: icloudID, resourceName: resourceName, etag: person.etag ?? "",
+                existing: person, fields: fields,
+                desired: resolved.google, note: pushesNote ? resolved.note : nil, baseline: settled
+            ))
     }
 
     private static func requireWritten(_ run: SyncRunReport, icloudSaved: Bool) throws {
         if let skipped = run.leftForNextRun.first {
-            throw ReviewWorkflowError.googleWriteFailed(reason: skipped.reason.text, icloudSaved: icloudSaved)
+            throw ReviewWorkflowError.googleWriteFailed(
+                reason: skipped.reason.text, icloudSaved: icloudSaved)
         }
-        if let halted = run.halted { throw ReviewWorkflowError.googleWriteFailed(reason: halted, icloudSaved: icloudSaved) }
+        if let halted = run.halted {
+            throw ReviewWorkflowError.googleWriteFailed(reason: halted, icloudSaved: icloudSaved)
+        }
     }
 
     // MARK: shared
@@ -1099,7 +1291,9 @@ public struct ReviewWorkflows: Sendable {
         /// Nil when the note could not be read.
         var icloudNote: String?
 
-        var google: ContactRecord? { person.flatMap { GooglePersonMapper.record(from: $0, source: .google) } }
+        var google: ContactRecord? {
+            person.flatMap { GooglePersonMapper.record(from: $0, source: .google) }
+        }
         var googleNote: String { person.map(GooglePersonMapper.note(of:)) ?? "" }
     }
 
@@ -1131,44 +1325,62 @@ public struct ReviewWorkflows: Sendable {
         try await store.fetchAll().first { $0.sourceIdentifier == icloudID }
     }
 
-    private func makeDetail(_ item: ReviewItem, _ live: Live, baseline: SyncBaseline?) -> ReviewDetail {
+    private func makeDetail(_ item: ReviewItem, _ live: Live, baseline: SyncBaseline?)
+        -> ReviewDetail
+    {
         let google = live.google
         var draft: SyncReviewDraft?
         if iCloudSideKindsContain(item.kind), let icloud = live.icloud, let google, let baseline {
             draft = SyncReviewDraft(
-                icloud: icloud, google: google, base: baseline, reviewFields: item.fields, icloudNote: live.icloudNote,
+                icloud: icloud, google: google, base: baseline, reviewFields: item.fields,
+                icloudNote: live.icloudNote,
                 googleNote: live.googleNote
             )
         }
         return ReviewDetail(
-            item: item, name: (live.icloud ?? google ?? baseline?.icloud)?.displayName ?? "Unknown contact", icloud: live.icloud,
-            google: google, googleBefore: baseline?.google, icloudNote: live.icloudNote, googleNote: live.googleNote, draft: draft,
+            item: item,
+            name: (live.icloud ?? google ?? baseline?.icloud)?.displayName ?? "Unknown contact",
+            icloud: live.icloud,
+            google: google, googleBefore: baseline?.google, icloudNote: live.icloudNote,
+            googleNote: live.googleNote, draft: draft,
             stamp: stamp(of: live)
         )
     }
 
     private func stamp(of live: Live) -> ReviewStamp {
         ReviewStamp(
-            googleEtag: live.person?.etag, icloudFingerprint: live.icloud.map(ContactFingerprint.of),
-            icloudNoteHash: live.icloudNote.map(NoteHash.hash), hasICloud: live.icloud != nil, hasGoogle: live.person != nil
+            googleEtag: live.person?.etag,
+            icloudFingerprint: live.icloud.map(ContactFingerprint.of),
+            icloudNoteHash: live.icloudNote.map(NoteHash.hash), hasICloud: live.icloud != nil,
+            hasGoogle: live.person != nil
         )
     }
 
-    private func iCloudSideKindsContain(_ kind: ReviewKind) -> Bool { Self.iCloudSideKinds.contains(kind) }
+    private func iCloudSideKindsContain(_ kind: ReviewKind) -> Bool {
+        Self.iCloudSideKinds.contains(kind)
+    }
 
     /// Brings the stored item's etag, fingerprint and fields up to what was just read, unless it has been resolved meanwhile.
     private func refresh(_ item: ReviewItem, with detail: ReviewDetail) throws {
         guard try reviews.load().contains(where: { $0.id == item.id }) else { return }
         let hasEtag = item.kind != .deletedInGoogle
-        let hasFingerprint = item.kind != .newInGoogle && item.kind != .deletedInICloudEditedInGoogle
+        let hasFingerprint =
+            item.kind != .newInGoogle && item.kind != .deletedInICloudEditedInGoogle
         let fields = detail.draft?.reviewFields ?? item.fields
         let etag = hasEtag ? detail.stamp.googleEtag : nil
         let fingerprint = hasFingerprint ? detail.stamp.icloudFingerprint : nil
-        guard etag != item.googleEtag || fingerprint != item.icloudFingerprint || fields != item.fields else { return }
-        try reviews.add([ReviewCandidate(
-            kind: item.kind, icloudID: item.icloudID, resourceName: item.resourceName, googleEtag: etag, icloudFingerprint: fingerprint,
-            fields: fields
-        )], at: now())
+        guard
+            etag != item.googleEtag || fingerprint != item.icloudFingerprint
+                || fields != item.fields
+        else { return }
+        try reviews.add(
+            [
+                ReviewCandidate(
+                    kind: item.kind, icloudID: item.icloudID, resourceName: item.resourceName,
+                    googleEtag: etag, icloudFingerprint: fingerprint,
+                    fields: fields
+                )
+            ], at: now())
     }
 
     /// Removes the item that was decided, and nothing else, unless `covering` says what the user was shown: then also the
@@ -1177,7 +1389,10 @@ public struct ReviewWorkflows: Sendable {
         var doomed = [item.id]
         if !shown.isEmpty {
             doomed += try reviews.items(concerning: item.icloudID, resourceName: item.resourceName)
-                .filter { ($0.kind == .googleEdited || $0.kind == .bothEdited) && Set($0.fields).isSubset(of: shown) }.map(\.id)
+                .filter {
+                    ($0.kind == .googleEdited || $0.kind == .bothEdited)
+                        && Set($0.fields).isSubset(of: shown)
+                }.map(\.id)
         }
         try reviews.remove(ids: Array(Set(doomed)))
     }
@@ -1191,7 +1406,8 @@ public struct ReviewWorkflows: Sendable {
     /// Moves the stored iCloud change token past this app's own write, so the sync does not read it as an edit (see
     /// `ICloudTokenAdvance`).
     private func advanceICloudToken(from before: Data?) async throws {
-        try await ICloudTokenAdvance.advance(store: store, state: state, reviews: reviews, from: before)
+        try await ICloudTokenAdvance.advance(
+            store: store, state: state, reviews: reviews, from: before)
     }
 }
 

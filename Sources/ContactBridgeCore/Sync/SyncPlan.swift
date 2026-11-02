@@ -56,8 +56,10 @@ public struct ReviewCandidate: Sendable, Hashable, Identifiable {
     public var id: String { "\(kind.rawValue)|\(icloudID ?? "")|\(resourceName ?? "")" }
 
     public init(
-        kind: ReviewKind, icloudID: String? = nil, resourceName: String? = nil, googleEtag: String? = nil,
-        icloudFingerprint: String? = nil, fields: [SyncField] = [], photoStamp: String? = nil, photoReason: PhotoConflictReason? = nil
+        kind: ReviewKind, icloudID: String? = nil, resourceName: String? = nil,
+        googleEtag: String? = nil,
+        icloudFingerprint: String? = nil, fields: [SyncField] = [], photoStamp: String? = nil,
+        photoReason: PhotoConflictReason? = nil
     ) {
         self.kind = kind
         self.icloudID = icloudID
@@ -229,10 +231,14 @@ public struct SyncPlan: Sendable, Hashable {
     /// The dropped links that count towards the confirmation guard and the forget-links pause, sorted by name: those not
     /// released for re-matching.
     public var forgottenLinkInfo: [DroppedLinkInfo] {
-        droppedLinkInfo.values.filter { !$0.isReleased }.sorted { ($0.name, $0.icloudID) < ($1.name, $1.icloudID) }
+        droppedLinkInfo.values.filter { !$0.isReleased }.sorted {
+            ($0.name, $0.icloudID) < ($1.name, $1.icloudID)
+        }
     }
 
-    public var mutationCount: Int { creates.count + updates.count + deletes.count + googlePhotoWrites }
+    public var mutationCount: Int {
+        creates.count + updates.count + deletes.count + googlePhotoWrites
+    }
 
     /// Photo ops that change a Google contact.
     public var googlePhotoWrites: Int {
@@ -251,7 +257,9 @@ public struct SyncPlan: Sendable, Hashable {
     /// Nothing to write, link, refresh, drop or ask about, and nothing waiting for a full listing or for notes. A plan
     /// with contacts waiting is not settled, so a screen must not call it "up to date".
     public var isEmpty: Bool {
-        links.isEmpty && mutationCount == 0 && baselineRefreshes.isEmpty && droppedLinks.isEmpty && review.isEmpty && deferred.isEmpty
-            && photoOps.isEmpty && photosUnevaluated == 0 && waitingForNotes == 0 && unlinkedWaitingForFullListing == 0
+        links.isEmpty && mutationCount == 0 && baselineRefreshes.isEmpty && droppedLinks.isEmpty
+            && review.isEmpty && deferred.isEmpty
+            && photoOps.isEmpty && photosUnevaluated == 0 && waitingForNotes == 0
+            && unlinkedWaitingForFullListing == 0
     }
 }

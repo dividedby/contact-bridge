@@ -78,9 +78,13 @@ public final class SyncNotifier {
     /// - Parameters:
     ///   - delivery: nil when notifications must not run here; then `unavailableReason` says why.
     ///   - knownReviewIDs: the review items already stored, so a launch does not announce them again.
-    public init(delivery: (any NotificationDelivering)?, unavailableReason: String? = nil, defaults: UserDefaults, knownReviewIDs: Set<String> = []) {
+    public init(
+        delivery: (any NotificationDelivering)?, unavailableReason: String? = nil,
+        defaults: UserDefaults, knownReviewIDs: Set<String> = []
+    ) {
         self.delivery = delivery
-        self.unavailableReason = delivery == nil ? (unavailableReason ?? "Notifications are not available here.") : nil
+        self.unavailableReason =
+            delivery == nil ? (unavailableReason ?? "Notifications are not available here.") : nil
         self.defaults = defaults
         tracker = SyncNoticeTracker(knownReviewIDs: knownReviewIDs)
         isOn = delivery != nil && defaults.bool(forKey: Self.defaultsKey)
@@ -116,7 +120,9 @@ public final class SyncNotifier {
             return
         }
         var permission = await delivery.permission()
-        if permission == .notDetermined { permission = await delivery.requestPermission() ? .allowed : .denied }
+        if permission == .notDetermined {
+            permission = await delivery.requestPermission() ? .allowed : .denied
+        }
         if permission == .allowed {
             delivery.prepare()
             setRequested(true)
@@ -152,5 +158,6 @@ public final class SyncNotifier {
         defaults.set(on, forKey: Self.defaultsKey)
     }
 
-    static let blockedMessage = "macOS is not letting Contact Bridge show notifications. Allow them in System Settings > Notifications, then turn this on again."
+    static let blockedMessage =
+        "macOS is not letting Contact Bridge show notifications. Allow them in System Settings > Notifications, then turn this on again."
 }

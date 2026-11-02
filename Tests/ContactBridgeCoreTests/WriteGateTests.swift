@@ -1,6 +1,7 @@
 import Foundation
 import Synchronization
 import Testing
+
 @testable import ContactBridgeCore
 
 struct WriteGateTests {
@@ -25,7 +26,14 @@ struct WriteGateTests {
             let (entered, enteredSignal) = AsyncStream<Void>.makeStream()
             self.continuation = continuation
             self.entered = entered
-            task.withLock { $0 = Task { try await gate.withLock { enteredSignal.yield(); for await _ in stream { break } } } }
+            task.withLock {
+                $0 = Task {
+                    try await gate.withLock {
+                        enteredSignal.yield()
+                        for await _ in stream { break }
+                    }
+                }
+            }
         }
 
         func release() async throws {
@@ -42,9 +50,15 @@ struct WriteGateTests {
             for _ in 0..<20 {
                 group.addTask {
                     try await gate.withLock {
-                        active.withLock { $0.now += 1; $0.peak = max($0.peak, $0.now) }
+                        active.withLock {
+                            $0.now += 1
+                            $0.peak = max($0.peak, $0.now)
+                        }
                         for _ in 0..<5 { await Task.yield() }
-                        active.withLock { $0.now -= 1; $0.total += 1 }
+                        active.withLock {
+                            $0.now -= 1
+                            $0.total += 1
+                        }
                     }
                 }
             }
@@ -109,17 +123,26 @@ struct WriteGateTests {
 
     // MARK: workflows
 
-    @Test("Clean up, Import and Merge wait for the gate: nothing is deleted while a sync run holds it")
+    @Test(
+        "Clean up, Import and Merge wait for the gate: nothing is deleted while a sync run holds it"
+    )
     func workflowsWaitForTheGate() async throws {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("gate-tests-\(UUID().uuidString)", isDirectory: true)
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "gate-tests-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: directory) }
-        let records = [SyncFixtures.icloud("A", "Ann", "Lee", phones: ["415-555-0001"]), SyncFixtures.icloud("B", "Bob", "Stone", phones: ["415-555-0002"])]
+        let records = [
+            SyncFixtures.icloud("A", "Ann", "Lee", phones: ["415-555-0001"]),
+            SyncFixtures.icloud("B", "Bob", "Stone", phones: ["415-555-0002"]),
+        ]
         let store = InMemoryContactStore(records: records)
         let notes = InMemoryNotesStore()
-        let backups = BackupCoordinator(makeWriter: { BackupWriter(store: store, notes: notes, baseDirectory: directory) })
+        let backups = BackupCoordinator(makeWriter: {
+            BackupWriter(store: store, notes: notes, baseDirectory: directory)
+        })
         let gate = WriteGate()
         let workflows = ContactWorkflows(
-            store: store, google: nil, notes: notes, backups: backups, links: InMemoryLinkStore(), gate: gate, dismissals: InMemoryDismissalStore()
+            store: store, google: nil, notes: notes, backups: backups, links: InMemoryLinkStore(),
+            gate: gate, dismissals: InMemoryDismissalStore()
         )
 
         let holder = await Holder.holding(gate)
@@ -138,29 +161,42 @@ struct WriteGateTests {
 
 struct SyncProcessLockTests {
     private func lockURL() -> URL {
-        FileManager.default.temporaryDirectory.appendingPathComponent("lock-tests-\(UUID().uuidString)/Contact Bridge/sync.lock")
+        FileManager.default.temporaryDirectory.appendingPathComponent(
+            "lock-tests-\(UUID().uuidString)/Contact Bridge/sync.lock")
     }
 
     @Test("A second holder is refused while the first is alive, and gets in once it lets go")
     func exclusive() throws {
         let url = lockURL()
-        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent().deletingLastPathComponent()) }
+        defer {
+            try? FileManager.default.removeItem(
+                at: url.deletingLastPathComponent().deletingLastPathComponent())
+        }
         let first = try SyncProcessLock.acquire(at: url)
-        #expect(throws: SyncLockError.heldByAnotherInstance) { try SyncProcessLock.acquire(at: url) }
+        #expect(throws: SyncLockError.heldByAnotherInstance) {
+            try SyncProcessLock.acquire(at: url)
+        }
         first.release()
-        first.release() // harmless twice
+        first.release()  // harmless twice
         let second = try SyncProcessLock.acquire(at: url)
-        #expect(throws: SyncLockError.heldByAnotherInstance) { try SyncProcessLock.acquire(at: url) }
+        #expect(throws: SyncLockError.heldByAnotherInstance) {
+            try SyncProcessLock.acquire(at: url)
+        }
         second.release()
     }
 
     @Test("The lock is dropped when its holder goes away, as when a process dies")
     func droppedOnDeinit() throws {
         let url = lockURL()
-        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent().deletingLastPathComponent()) }
+        defer {
+            try? FileManager.default.removeItem(
+                at: url.deletingLastPathComponent().deletingLastPathComponent())
+        }
         do {
             let held = try SyncProcessLock.acquire(at: url)
-            #expect(throws: SyncLockError.heldByAnotherInstance) { try SyncProcessLock.acquire(at: url) }
+            #expect(throws: SyncLockError.heldByAnotherInstance) {
+                try SyncProcessLock.acquire(at: url)
+            }
             withExtendedLifetime(held) {}
         }
         let again = try SyncProcessLock.acquire(at: url)

@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+
 @testable import ContactBridgeCore
 
 /// An `ExecutorRig`'s world and stores with the review workflows on top, sharing one write gate.
@@ -12,8 +13,10 @@ final class ReviewRig: @unchecked Sendable {
         self.base = base
         let clock = base.clock
         workflows = ReviewWorkflows(
-            store: base.world.store, google: base.faulty, notes: notes ? base.world.notes : nil, backups: base.backups,
-            links: base.linkStore, state: base.stateStore, reviews: base.reviews, journal: base.journal, history: base.history,
+            store: base.world.store, google: base.faulty, notes: notes ? base.world.notes : nil,
+            backups: base.backups,
+            links: base.linkStore, state: base.stateStore, reviews: base.reviews,
+            journal: base.journal, history: base.history,
             gate: gate, now: { clock.now() }
         )
     }
@@ -37,21 +40,32 @@ final class ReviewRig: @unchecked Sendable {
     @discardableResult
     func syncOnce() async throws -> SyncRunReport {
         let plan = try await base.plan(.syncNow)
-        _ = try base.reviews.reconcile(with: plan, ignoredGoogle: try state.ignoredGoogle, at: base.clock.now())
+        _ = try base.reviews.reconcile(
+            with: plan, ignoredGoogle: try state.ignoredGoogle, at: base.clock.now())
         return try await base.run(plan)
     }
 
-    func item(_ id: String) throws -> ReviewItem { try #require(try storedItems.first { $0.id == id }) }
+    func item(_ id: String) throws -> ReviewItem {
+        try #require(try storedItems.first { $0.id == id })
+    }
 
-    func detail(_ id: String) async throws -> ReviewDetail { try await workflows.loadDetail(try item(id)) }
+    func detail(_ id: String) async throws -> ReviewDetail {
+        try await workflows.loadDetail(try item(id))
+    }
 
-    func icloud(_ id: String) async throws -> ContactRecord { try #require(try await world.icloudRecord(id)) }
+    func icloud(_ id: String) async throws -> ContactRecord {
+        try #require(try await world.icloudRecord(id))
+    }
 
     /// A plan made now should have nothing to do: no echo of what the user just decided.
-    func expectSettled(_ comment: Comment? = nil, sourceLocation: SourceLocation = #_sourceLocation) async throws {
+    func expectSettled(_ comment: Comment? = nil, sourceLocation: SourceLocation = #_sourceLocation)
+        async throws
+    {
         let plan = try await base.plan()
         #expect(plan.isEmpty, comment, sourceLocation: sourceLocation)
-        #expect(plan.updates.isEmpty && plan.review.isEmpty && plan.baselineRefreshes.isEmpty, sourceLocation: sourceLocation)
+        #expect(
+            plan.updates.isEmpty && plan.review.isEmpty && plan.baselineRefreshes.isEmpty,
+            sourceLocation: sourceLocation)
     }
 
     func cleanUp() { base.cleanUp() }

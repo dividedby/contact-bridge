@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+
 @testable import ContactBridgeCore
 
 struct LinkStoreTests {
@@ -7,7 +8,8 @@ struct LinkStoreTests {
     private let t1 = Date(timeIntervalSince1970: 1_800_003_600)
 
     private func makeDirectory() throws -> URL {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("link-store-tests-\(UUID().uuidString)", isDirectory: true)
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "link-store-tests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         return directory
     }
@@ -38,13 +40,16 @@ struct LinkStoreTests {
         #expect(table.icloudID(forGoogleResourceName: "people/nope") == nil)
     }
 
-    @Test("The file is versioned, readable JSON: iCloud id to resource name plus an ISO-8601 timestamp")
+    @Test(
+        "The file is versioned, readable JSON: iCloud id to resource name plus an ISO-8601 timestamp"
+    )
     func fileFormat() throws {
         let directory = try makeDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let url = directory.appendingPathComponent("links.json")
         try LinkStore(url: url).add([link("i1", "people/c1")], at: t0)
-        let object = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+        let object = try #require(
+            JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
         #expect(object["version"] as? Int == 1)
         let links = try #require(object["links"] as? [String: [String: Any]])
         #expect(links["i1"]?["googleResourceName"] as? String == "people/c1")
@@ -115,7 +120,9 @@ struct LinkStoreTests {
         try future.write(to: url)
         let store = LinkStore(url: url)
         #expect(throws: LinkStoreError.unsupportedVersion(2)) { try store.load() }
-        #expect(throws: LinkStoreError.unsupportedVersion(2)) { try store.add([link("i1", "people/c1")], at: t0) }
+        #expect(throws: LinkStoreError.unsupportedVersion(2)) {
+            try store.add([link("i1", "people/c1")], at: t0)
+        }
         #expect(try Data(contentsOf: url) == future)
     }
 

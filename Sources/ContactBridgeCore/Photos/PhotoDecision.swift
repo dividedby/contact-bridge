@@ -61,7 +61,8 @@ public enum PhotoDecision {
             case (nil, nil): self = .absent
             case (nil, _?): self = .removed
             case (_?, nil): self = .added
-            case (let now?, let base?): self = now.fingerprint.isSimilar(to: base) ? .unchanged : .changed
+            case (let now?, let base?):
+                self = now.fingerprint.isSimilar(to: base) ? .unchanged : .changed
             }
         }
 
@@ -73,16 +74,20 @@ public enum PhotoDecision {
     ///   - baseline: nil the first time the pair's photos are looked at.
     ///   - profileEnabled: profile photos are on and this contact is not opted out.
     public static func decide(
-        baseline: PhotoBaseline?, seen: PhotoSnapshot, profileEnabled: Bool, now: Date, removalWait: TimeInterval = removalWait
+        baseline: PhotoBaseline?, seen: PhotoSnapshot, profileEnabled: Bool, now: Date,
+        removalWait: TimeInterval = removalWait
     ) -> Outcome {
-        guard let baseline else { return firstSight(seen, profileEnabled: profileEnabled, now: now) }
+        guard let baseline else {
+            return firstSight(seen, profileEnabled: profileEnabled, now: now)
+        }
         let profile = profileEnabled ? seen.profile : nil
         let icloud = Change(seen.icloud, since: baseline.icloud)
         let google = Change(seen.google, since: baseline.google)
 
         func removal(of side: PhotoSide, _ reason: PhotoConflictReason) -> Outcome {
             if let pending = baseline.pendingRemoval, pending.side == side {
-                return now.timeIntervalSince(pending.firstSeenAt) >= removalWait ? .review(reason) : .settled
+                return now.timeIntervalSince(pending.firstSeenAt) >= removalWait
+                    ? .review(reason) : .settled
             }
             var seenOnce = baseline
             seenOnce.pendingRemoval = PhotoBaseline.PendingRemoval(side: side, firstSeenAt: now)
@@ -101,7 +106,9 @@ public enum PhotoDecision {
                         ? removal(of: .icloud, .profileRemovedInICloud)
                         : record(baseline, seen, profile: nil, origin: .user, now: now)
                 }
-                return google == .unchanged ? removal(of: .icloud, .removedInICloud) : record(baseline, seen, profile: nil, now: now)
+                return google == .unchanged
+                    ? removal(of: .icloud, .removedInICloud)
+                    : record(baseline, seen, profile: nil, now: now)
             }
         }
         if google == .removed {
@@ -113,9 +120,15 @@ public enum PhotoDecision {
         }
 
         if icloud.isSettled && google.isSettled {
-            if let outcome = profileOutcome(baseline, seen, icloud: icloud, google: google, profile: profile, now: now) { return outcome }
+            if let outcome = profileOutcome(
+                baseline, seen, icloud: icloud, google: google, profile: profile, now: now)
+            {
+                return outcome
+            }
             // Only a profile copy keeps track of the profile photo; for anyone else it plays no part.
-            return record(baseline, seen, profile: baseline.icloudOrigin == .googleProfile ? profile : nil, now: now)
+            return record(
+                baseline, seen, profile: baseline.icloudOrigin == .googleProfile ? profile : nil,
+                now: now)
         }
 
         // At least one side has a new picture.
@@ -125,7 +138,8 @@ public enum PhotoDecision {
             return .copyToGoogle(copied(baseline, from: source, seen: seen, now: now, to: .google))
         case (false, true):
             guard let source = seen.google else { return .settled }
-            return .copyToICloud(.googleContact, copied(baseline, from: source, seen: seen, now: now, to: .icloud))
+            return .copyToICloud(
+                .googleContact, copied(baseline, from: source, seen: seen, now: now, to: .icloud))
         default:
             guard let here = seen.icloud, let there = seen.google else { return .settled }
             if here.fingerprint.isSimilar(to: there.fingerprint) {
@@ -137,29 +151,43 @@ public enum PhotoDecision {
 
     // MARK: first sight
 
-    private static func firstSight(_ seen: PhotoSnapshot, profileEnabled: Bool, now: Date) -> Outcome {
+    private static func firstSight(_ seen: PhotoSnapshot, profileEnabled: Bool, now: Date)
+        -> Outcome
+    {
         switch (seen.icloud, seen.google) {
         case (nil, nil):
             if let profile = profileEnabled ? seen.profile : nil {
-                return .copyToICloud(.googleProfile, PhotoBaseline(
-                    icloud: profile.fingerprint, googleProfile: profile.fingerprint, googleProfileKey: profile.token,
-                    icloudOrigin: .googleProfile, syncedAt: now
-                ))
+                return .copyToICloud(
+                    .googleProfile,
+                    PhotoBaseline(
+                        icloud: profile.fingerprint, googleProfile: profile.fingerprint,
+                        googleProfileKey: profile.token,
+                        icloudOrigin: .googleProfile, syncedAt: now
+                    ))
             }
             return .record(PhotoBaseline(syncedAt: now))
         case (let icloud?, nil):
-            return .copyToGoogle(PhotoBaseline(
-                icloud: icloud.fingerprint, google: icloud.fingerprint, icloudHint: icloud.token, syncedAt: now
-            ))
+            return .copyToGoogle(
+                PhotoBaseline(
+                    icloud: icloud.fingerprint, google: icloud.fingerprint,
+                    icloudHint: icloud.token, syncedAt: now
+                ))
         case (nil, let google?):
-            return .copyToICloud(.googleContact, PhotoBaseline(
-                icloud: google.fingerprint, google: google.fingerprint, googleURLKey: google.token, syncedAt: now
-            ))
+            return .copyToICloud(
+                .googleContact,
+                PhotoBaseline(
+                    icloud: google.fingerprint, google: google.fingerprint,
+                    googleURLKey: google.token, syncedAt: now
+                ))
         case (let icloud?, let google?):
-            guard icloud.fingerprint.isSimilar(to: google.fingerprint) else { return .review(.firstSightDiffers) }
-            return .record(PhotoBaseline(
-                icloud: icloud.fingerprint, google: google.fingerprint, icloudHint: icloud.token, googleURLKey: google.token, syncedAt: now
-            ))
+            guard icloud.fingerprint.isSimilar(to: google.fingerprint) else {
+                return .review(.firstSightDiffers)
+            }
+            return .record(
+                PhotoBaseline(
+                    icloud: icloud.fingerprint, google: google.fingerprint,
+                    icloudHint: icloud.token, googleURLKey: google.token, syncedAt: now
+                ))
         }
     }
 
@@ -167,17 +195,26 @@ public enum PhotoDecision {
 
     /// Both contact photos are as the baseline says; the profile photo may still fill or refresh the iCloud one.
     private static func profileOutcome(
-        _ baseline: PhotoBaseline, _ seen: PhotoSnapshot, icloud: Change, google: Change, profile: PhotoSeen?, now: Date
+        _ baseline: PhotoBaseline, _ seen: PhotoSnapshot, icloud: Change, google: Change,
+        profile: PhotoSeen?, now: Date
     ) -> Outcome? {
         if baseline.icloudOrigin == .googleProfile {
-            guard icloud == .unchanged else { return record(baseline, seen, profile: nil, origin: .user, now: now) }
+            guard icloud == .unchanged else {
+                return record(baseline, seen, profile: nil, origin: .user, now: now)
+            }
             // Profile photos turned off, or the profile photo is gone: the copy stays, as the user's own from now on.
-            guard let profile else { return record(baseline, seen, profile: nil, origin: .user, now: now) }
-            guard let known = baseline.googleProfile, profile.fingerprint.isSimilar(to: known) else {
-                return .copyToICloud(.googleProfile, PhotoBaseline(
-                    icloud: profile.fingerprint, googleProfile: profile.fingerprint, googleProfileKey: profile.token,
-                    icloudOrigin: .googleProfile, syncedAt: now
-                ))
+            guard let profile else {
+                return record(baseline, seen, profile: nil, origin: .user, now: now)
+            }
+            guard let known = baseline.googleProfile, profile.fingerprint.isSimilar(to: known)
+            else {
+                return .copyToICloud(
+                    .googleProfile,
+                    PhotoBaseline(
+                        icloud: profile.fingerprint, googleProfile: profile.fingerprint,
+                        googleProfileKey: profile.token,
+                        icloudOrigin: .googleProfile, syncedAt: now
+                    ))
             }
             return nil
         }
@@ -199,9 +236,11 @@ public enum PhotoDecision {
 
     /// The baseline for a pair whose photos agree as they are now: nothing is stored unless something moved.
     private static func record(
-        _ baseline: PhotoBaseline, _ seen: PhotoSnapshot, profile: PhotoSeen?, origin: PhotoOrigin? = nil, now: Date
+        _ baseline: PhotoBaseline, _ seen: PhotoSnapshot, profile: PhotoSeen?,
+        origin: PhotoOrigin? = nil, now: Date
     ) -> Outcome {
-        let updated = agreed(baseline, seen, profile: profile, origin: origin ?? baseline.icloudOrigin, now: now)
+        let updated = agreed(
+            baseline, seen, profile: profile, origin: origin ?? baseline.icloudOrigin, now: now)
         var unstamped = updated
         unstamped.syncedAt = baseline.syncedAt
         return unstamped == baseline ? .settled : .record(updated)
@@ -210,7 +249,8 @@ public enum PhotoDecision {
     /// The baseline with both sides as seen now. A picture still similar to the baseline's keeps the baseline's fingerprint,
     /// so many tiny differences cannot add up to a change; only its sign (hint or URL key) moves.
     private static func agreed(
-        _ baseline: PhotoBaseline, _ seen: PhotoSnapshot, profile: PhotoSeen?, origin: PhotoOrigin, now: Date
+        _ baseline: PhotoBaseline, _ seen: PhotoSnapshot, profile: PhotoSeen?, origin: PhotoOrigin,
+        now: Date
     ) -> PhotoBaseline {
         var updated = baseline
         updated.icloud = settledFingerprint(seen.icloud, baseline.icloud)
@@ -227,7 +267,9 @@ public enum PhotoDecision {
         return updated
     }
 
-    private static func settledFingerprint(_ seen: PhotoSeen?, _ known: PhotoFingerprint?) -> PhotoFingerprint? {
+    private static func settledFingerprint(_ seen: PhotoSeen?, _ known: PhotoFingerprint?)
+        -> PhotoFingerprint?
+    {
         guard let seen else { return nil }
         if let known, seen.fingerprint.isSimilar(to: known) { return known }
         return seen.fingerprint
@@ -236,7 +278,8 @@ public enum PhotoDecision {
     /// The baseline after `source` has been copied to the `target` side: both sides then hold that picture. The target's own
     /// sign is not known until it is written, so it is left for the executor.
     private static func copied(
-        _ baseline: PhotoBaseline, from source: PhotoSeen, seen: PhotoSnapshot, now: Date, to target: PhotoSide
+        _ baseline: PhotoBaseline, from source: PhotoSeen, seen: PhotoSnapshot, now: Date,
+        to target: PhotoSide
     ) -> PhotoBaseline {
         var updated = baseline
         updated.icloud = source.fingerprint

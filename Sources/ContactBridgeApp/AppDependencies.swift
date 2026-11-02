@@ -74,7 +74,8 @@ struct AppDependencies {
             syncJournal: SyncJournalStore(),
             syncHistory: SyncHistoryStore(),
             photoSupport: SyncPhotoSupport(
-                fetcher: URLSessionGooglePhotoFetcher(), history: PhotoHistoryStore(), icloudFallback: ContactsAppPhotoWriter(launcher: ContactsAppLauncher())
+                fetcher: URLSessionGooglePhotoFetcher(), history: PhotoHistoryStore(),
+                icloudFallback: ContactsAppPhotoWriter(launcher: ContactsAppLauncher())
             ),
             writeGate: WriteGate(),
             acquireSyncLock: { try SyncProcessLock.acquire() },
@@ -83,10 +84,13 @@ struct AppDependencies {
             defaults: .standard,
             loginItem: SMAppServiceLoginItem(),
             notifications: UserNotificationDelivery.ifInstalledApp(),
-            notificationsUnavailableReason: "Notifications need the installed Contact Bridge app, not a build run from the command line.",
+            notificationsUnavailableReason:
+                "Notifications need the installed Contact Bridge app, not a build run from the command line.",
             signIn: SignInController(),
             googleClient: { signIn in
-                guard case .signedIn = signIn.status, let session = signIn.session else { return nil }
+                guard case .signedIn = signIn.status, let session = signIn.session else {
+                    return nil
+                }
                 return URLSessionGoogleContactsClient(auth: session)
             }
         )
@@ -99,9 +103,12 @@ struct AppDependencies {
         let demo = DemoData.make(forgottenLinks: demoForgetLinksRequested)
         let suite = "dev.dividedby.contactbridge.demo"
         // Never fall back to .standard: demo mode must not read or write the real saved container choice.
-        guard let defaults = UserDefaults(suiteName: suite) else { fatalError("Cannot create the demo UserDefaults suite \(suite)") }
+        guard let defaults = UserDefaults(suiteName: suite) else {
+            fatalError("Cannot create the demo UserDefaults suite \(suite)")
+        }
         defaults.removePersistentDomain(forName: suite)
-        let backups = FileManager.default.temporaryDirectory.appendingPathComponent("ContactBridgeDemoBackups", isDirectory: true)
+        let backups = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "ContactBridgeDemoBackups", isDirectory: true)
         return AppDependencies(
             isDemo: true,
             makeStore: { _ in demo.store },
@@ -114,15 +121,19 @@ struct AppDependencies {
             syncJournal: demo.journal,
             syncHistory: demo.history,
             // Placeholder portraits served from the fake Google account; no pause between writes, since nothing is real.
-            photoSupport: SyncPhotoSupport(fetcher: FakeGooglePhotoFetcher(client: demo.google), history: demo.photoHistory, sleep: { _ in }),
+            photoSupport: SyncPhotoSupport(
+                fetcher: FakeGooglePhotoFetcher(client: demo.google), history: demo.photoHistory,
+                sleep: { _ in }),
             writeGate: WriteGate(),
             acquireSyncLock: nil,
             contactsAppRunning: { false },
             backupDirectory: backups,
             defaults: defaults,
             loginItem: InMemoryLoginItem(),
-            notifications: demoNotificationsRequested ? UserNotificationDelivery.ifInstalledApp() : nil,
-            notificationsUnavailableReason: "Notifications are off in demo mode. Start with --demo-notifications to try them.",
+            notifications: demoNotificationsRequested
+                ? UserNotificationDelivery.ifInstalledApp() : nil,
+            notificationsUnavailableReason:
+                "Notifications are off in demo mode. Start with --demo-notifications to try them.",
             signIn: SignInController(demoEmail: demo.accountEmail),
             googleClient: { signIn in
                 if case .signedIn = signIn.status { demo.google } else { nil }

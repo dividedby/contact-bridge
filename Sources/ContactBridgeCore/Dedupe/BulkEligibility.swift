@@ -40,7 +40,9 @@ public struct BulkMergeReport: Sendable {
     public enum GroupOutcome: Sendable, Equatable {
         /// `notes` can be `.writeFailed`: the merge happened, only the combined note was not saved. That stops the run, and
         /// so do `links.followUpWarnings` (the merge happened, its Google links could not be updated).
-        case merged(survivor: ContactRecord, deleted: [ContactRecord], notes: MergeExecutor.NotesOutcome, links: MergeLinkOutcome)
+        case merged(
+            survivor: ContactRecord, deleted: [ContactRecord], notes: MergeExecutor.NotesOutcome,
+            links: MergeLinkOutcome)
         /// Nothing in this group was changed.
         case failed(reason: String)
         /// The run stopped before reaching it.
@@ -76,7 +78,11 @@ public struct BulkMergeReport: Sendable {
 
     public var deletedCount: Int {
         entries.reduce(0) { total, entry in
-            if case .merged(_, let deleted, _, _) = entry.outcome { total + deleted.count } else { total }
+            if case .merged(_, let deleted, _, _) = entry.outcome {
+                total + deleted.count
+            } else {
+                total
+            }
         }
     }
 

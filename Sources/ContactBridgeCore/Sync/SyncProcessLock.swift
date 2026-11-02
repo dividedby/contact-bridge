@@ -42,7 +42,8 @@ public final class SyncProcessLock: SyncLockHolding, Sendable {
     /// each opens its own descriptor.
     public static func acquire(at url: URL = SyncProcessLock.defaultURL) throws -> SyncProcessLock {
         do {
-            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         } catch {
             throw SyncLockError.unavailable(error.localizedDescription)
         }
@@ -51,7 +52,9 @@ public final class SyncProcessLock: SyncLockHolding, Sendable {
         guard flock(fd, LOCK_EX | LOCK_NB) == 0 else {
             let code = errno
             close(fd)
-            throw code == EWOULDBLOCK ? SyncLockError.heldByAnotherInstance : SyncLockError.unavailable(String(cString: strerror(code)))
+            throw code == EWOULDBLOCK
+                ? SyncLockError.heldByAnotherInstance
+                : SyncLockError.unavailable(String(cString: strerror(code)))
         }
         return SyncProcessLock(descriptor: fd)
     }

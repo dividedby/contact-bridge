@@ -45,6 +45,7 @@ enum StringSimilarity {
         }
 
         let m = Double(matches)
-        return (m / Double(s.count) + m / Double(t.count) + (m - Double(transpositions) / 2) / m) / 3
+        return (m / Double(s.count) + m / Double(t.count) + (m - Double(transpositions) / 2) / m)
+            / 3
     }
 }

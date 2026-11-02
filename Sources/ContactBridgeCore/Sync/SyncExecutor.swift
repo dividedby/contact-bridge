@@ -16,7 +16,8 @@ extension SyncExecutorError: LocalizedError {
         switch self {
         case .previewPlan: "Syncing has not been started yet, so nothing was changed."
         case .paused: "Syncing is paused, so nothing was changed."
-        case .createsNotVerified: "New contacts were not checked against all of your Google contacts, so nothing was changed."
+        case .createsNotVerified:
+            "New contacts were not checked against all of your Google contacts, so nothing was changed."
         case .interruptedRunPending(let count):
             "An earlier sync stopped part-way (\(count) change\(count == 1 ? "" : "s") unconfirmed). It has to be checked before syncing again."
         }
@@ -124,8 +125,10 @@ public struct SyncExecutor: Sendable {
     private let recovery: SyncJournalRecovery
 
     public init(
-        google: any GoogleContactsClient, links: any LinkStoring, state: any SyncStateStoring, reviews: any ReviewStoring,
-        journal: any SyncJournalStoring, history: any SyncHistoryStoring, backups: BackupCoordinator, containerID: String? = nil,
+        google: any GoogleContactsClient, links: any LinkStoring, state: any SyncStateStoring,
+        reviews: any ReviewStoring,
+        journal: any SyncJournalStoring, history: any SyncHistoryStoring,
+        backups: BackupCoordinator, containerID: String? = nil,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.google = google
@@ -137,7 +140,9 @@ public struct SyncExecutor: Sendable {
         self.backups = backups
         self.containerID = containerID
         self.now = now
-        recovery = SyncJournalRecovery(google: google, links: links, state: state, journal: journal, history: history, now: now)
+        recovery = SyncJournalRecovery(
+            google: google, links: links, state: state, journal: journal, history: history, now: now
+        )
     }
 
     /// Settles journal entries left by a crash or an unconfirmed batch. Run it at launch and before planning; a plan made
@@ -151,28 +156,41 @@ public struct SyncExecutor: Sendable {
     /// - Parameter approvedDeletes: iCloud id to the Google etag the user saw and decided to delete (`deletedInICloudEditedInGoogle`).
     ///   Those deletes skip the "open review item" check and the "Google changed" check, but only for that version: if
     ///   Google's etag has moved since, nothing is deleted and the review item is refreshed instead.
-    public func execute(plan: SyncPlan, approvedDeletes: [String: String] = [:]) async throws -> SyncRunReport {
-        guard !plan.isPreview, try state.load().firstSyncApproved else { throw SyncExecutorError.previewPlan }
+    public func execute(plan: SyncPlan, approvedDeletes: [String: String] = [:]) async throws
+        -> SyncRunReport
+    {
+        guard !plan.isPreview, try state.load().firstSyncApproved else {
+            throw SyncExecutorError.previewPlan
+        }
         if let pause = plan.pause { throw SyncExecutorError.paused(pause) }
-        guard plan.creates.isEmpty || plan.createsVerifiedAgainstFullListing else { throw SyncExecutorError.createsNotVerified }
+        guard plan.creates.isEmpty || plan.createsVerifiedAgainstFullListing else {
+            throw SyncExecutorError.createsNotVerified
+        }
         // Only creates that recovery has already looked for and is holding back may stay in the journal; everything else
         // needs `recoverInterruptedRun()` first.
         let pending = try journal.load().entries
         let blocking = pending.filter { $0.kind != .create || $0.recheckedAt == nil }
-        guard blocking.isEmpty else { throw SyncExecutorError.interruptedRunPending(entries: blocking.count) }
+        guard blocking.isEmpty else {
+            throw SyncExecutorError.interruptedRunPending(entries: blocking.count)
+        }
         let heldCreates = Set(pending.map(\.icloudID))
 
         var report = SyncRunReport()
         if plan.mutationCount > 0 {
             report.backup = try await backups.freshReceipt(
-                requiring: BackupRequirement(containerID: containerID, needsGoogle: true), maxAge: Self.maxBackupAge
+                requiring: BackupRequirement(containerID: containerID, needsGoogle: true),
+                maxAge: Self.maxBackupAge
             )
         }
         try applyLocalChanges(of: plan, to: &report)
 
         try await runUpdates(plan.updates, retrying: false, reviewed: plan.review, report: &report)
-        if report.halted == nil { try await runCreates(plan.creates, held: heldCreates, report: &report) }
-        if report.halted == nil { try await runDeletes(plan.deletes, approved: approvedDeletes, report: &report) }
+        if report.halted == nil {
+            try await runCreates(plan.creates, held: heldCreates, report: &report)
+        }
+        if report.halted == nil {
+            try await runDeletes(plan.deletes, approved: approvedDeletes, report: &report)
+        }
 
         // The iCloud change token stays as the scan read it: this executor makes no iCloud writes, and re-reading the
         // token here would swallow edits made since the scan.
@@ -181,7 +199,9 @@ public struct SyncExecutor: Sendable {
             // scan would compare Google against those and report a different conflict, so while one is open every run
             // scans iCloud in full.
             let stored = try reviews.load()
-            let holdsConflicts = !report.conflictsFound.isEmpty || plan.review.contains { Self.iCloudSideKinds.contains($0.kind) }
+            let holdsConflicts =
+                !report.conflictsFound.isEmpty
+                || plan.review.contains { Self.iCloudSideKinds.contains($0.kind) }
                 || stored.contains { Self.iCloudSideKinds.contains($0.kind) }
             try state.update { state in
                 let token = state.icloudChangeToken
@@ -191,7 +211,10 @@ public struct SyncExecutor: Sendable {
             report.icloudTokenHeld = holdsConflicts
             report.checkpointCommitted = true
         }
-        do { try history.prune(now: now()) } catch { report.warnings.append("Old sync history could not be cleaned up: \(error.localizedDescription)") }
+        do { try history.prune(now: now()) } catch {
+            report.warnings.append(
+                "Old sync history could not be cleaned up: \(error.localizedDescription)")
+        }
         return report
     }
 
@@ -202,11 +225,15 @@ public struct SyncExecutor: Sendable {
         let newLinks = plan.links.filter(\.isNewLink)
         // New links go in before dropped ones come out: `LinkTable.add` takes a Google contact from its old owner, so a contact
         // that is re-pointed from a vanished iCloud id to a surviving one never has two owners or none.
-        try links.add(newLinks.map {
-            ImportedLink(icloudID: $0.icloudID, googleResourceName: $0.resourceName, origin: $0.origin, displayName: $0.baseline.icloud.displayName)
-        }, at: at)
+        try links.add(
+            newLinks.map {
+                ImportedLink(
+                    icloudID: $0.icloudID, googleResourceName: $0.resourceName, origin: $0.origin,
+                    displayName: $0.baseline.icloud.displayName)
+            }, at: at)
         try links.remove(icloudIDs: plan.droppedLinks)
-        guard !plan.links.isEmpty || !plan.baselineRefreshes.isEmpty || !plan.droppedLinks.isEmpty else { return }
+        guard !plan.links.isEmpty || !plan.baselineRefreshes.isEmpty || !plan.droppedLinks.isEmpty
+        else { return }
         try state.update { state in
             for link in plan.links { state.baselines[link.icloudID] = link.baseline }
             for (id, baseline) in plan.baselineRefreshes { state.store(baseline, for: id) }
@@ -227,36 +254,49 @@ public struct SyncExecutor: Sendable {
     }
 
     private func runUpdates(
-        _ updates: [PlannedUpdate], retrying: Bool, reviewed: [ReviewCandidate], report: inout SyncRunReport
+        _ updates: [PlannedUpdate], retrying: Bool, reviewed: [ReviewCandidate],
+        report: inout SyncRunReport
     ) async throws {
         for chunk in updates.chunked(into: GoogleBatchLimits.maxItemsPerCall) {
             guard report.halted == nil else {
-                for update in chunk { skip(update.icloudID, update.resourceName, .notAttempted(report.halted ?? ""), &report) }
+                for update in chunk {
+                    skip(
+                        update.icloudID, update.resourceName, .notAttempted(report.halted ?? ""),
+                        &report)
+                }
                 continue
             }
             try Task.checkCancellation()
 
             var prepared: [PreparedUpdate] = []
             for update in chunk {
-                if let item = try await prepare(update, retrying: retrying, reviewed: reviewed, report: &report) { prepared.append(item) }
+                if let item = try await prepare(
+                    update, retrying: retrying, reviewed: reviewed, report: &report)
+                {
+                    prepared.append(item)
+                }
             }
             guard !prepared.isEmpty else { continue }
 
             let at = now()
-            try history.append(prepared.map {
-                SyncHistoryEntry(
-                    at: at, operation: .update, icloudID: $0.update.icloudID, resourceName: $0.update.resourceName,
-                    before: $0.existing, after: nil, confirmed: false
-                )
-            })
-            try journal.append(prepared.map(\.entry))
-            let results = try await send(prepared.map(\.entry)) {
-                try await google.batchUpdate(prepared.map {
-                    GoogleContactUpdate(
-                        resourceName: $0.update.resourceName, etag: $0.existing.etag ?? $0.update.etag, person: $0.payload.person,
-                        updatePersonFields: $0.payload.updatePersonFields
+            try history.append(
+                prepared.map {
+                    SyncHistoryEntry(
+                        at: at, operation: .update, icloudID: $0.update.icloudID,
+                        resourceName: $0.update.resourceName,
+                        before: $0.existing, after: nil, confirmed: false
                     )
                 })
+            try journal.append(prepared.map(\.entry))
+            let results = try await send(prepared.map(\.entry)) {
+                try await google.batchUpdate(
+                    prepared.map {
+                        GoogleContactUpdate(
+                            resourceName: $0.update.resourceName,
+                            etag: $0.existing.etag ?? $0.update.etag, person: $0.payload.person,
+                            updatePersonFields: $0.payload.updatePersonFields
+                        )
+                    })
             }
 
             var confirmed: [(item: PreparedUpdate, person: GooglePerson)] = []
@@ -264,10 +304,16 @@ public struct SyncExecutor: Sendable {
             var retry: [PlannedUpdate] = []
             var unknown: [PreparedUpdate] = []
             for (index, item) in prepared.enumerated() {
-                let outcome = results?[index].outcome ?? .ambiguous(reason: "Google's answer did not match the request")
+                let outcome =
+                    results?[index].outcome
+                    ?? .ambiguous(reason: "Google's answer did not match the request")
                 switch outcome {
                 case .applied:
-                    if let person = results?[index].person { confirmed.append((item, person)) } else { unknown.append(item) }
+                    if let person = results?[index].person {
+                        confirmed.append((item, person))
+                    } else {
+                        unknown.append(item)
+                    }
                 case .failed(let error):
                     settled.append(item.entry.opID)
                     if error == .etagMismatch, !retrying {
@@ -275,14 +321,20 @@ public struct SyncExecutor: Sendable {
                     } else if error == .etagMismatch {
                         skip(item.update.icloudID, item.update.resourceName, .etagChanged, &report)
                     } else if error == .notFound {
-                        skip(item.update.icloudID, item.update.resourceName, .vanishedInGoogle, &report)
+                        skip(
+                            item.update.icloudID, item.update.resourceName, .vanishedInGoogle,
+                            &report)
                     } else {
-                        skip(item.update.icloudID, item.update.resourceName, .failed(error.localizedDescription), &report)
+                        skip(
+                            item.update.icloudID, item.update.resourceName,
+                            .failed(error.localizedDescription), &report)
                         report.halted = report.halted ?? Self.haltReason(for: error)
                     }
                 case .notAttempted(let reason):
                     settled.append(item.entry.opID)
-                    skip(item.update.icloudID, item.update.resourceName, .notAttempted(reason), &report)
+                    skip(
+                        item.update.icloudID, item.update.resourceName, .notAttempted(reason),
+                        &report)
                     report.halted = report.halted ?? reason
                 case .ambiguous:
                     unknown.append(item)
@@ -294,17 +346,20 @@ public struct SyncExecutor: Sendable {
                 try state.update { state in
                     for (item, person) in confirmed {
                         state.store(
-                            item.update.baseline.afterUpdate(fields: item.update.fields, returned: person, at: confirmedAt),
+                            item.update.baseline.afterUpdate(
+                                fields: item.update.fields, returned: person, at: confirmedAt),
                             for: item.update.icloudID
                         )
                     }
                 }
-                recordConfirmations(confirmed.map {
-                    SyncHistoryEntry(
-                        at: confirmedAt, operation: .update, icloudID: $0.item.update.icloudID, resourceName: $0.item.update.resourceName,
-                        before: $0.item.existing, after: $0.person, confirmed: true
-                    )
-                }, &report)
+                recordConfirmations(
+                    confirmed.map {
+                        SyncHistoryEntry(
+                            at: confirmedAt, operation: .update, icloudID: $0.item.update.icloudID,
+                            resourceName: $0.item.update.resourceName,
+                            before: $0.item.existing, after: $0.person, confirmed: true
+                        )
+                    }, &report)
                 report.updated += confirmed.count
             }
             try journal.remove(opIDs: settled + confirmed.map(\.item.entry.opID))
@@ -314,7 +369,9 @@ public struct SyncExecutor: Sendable {
                 merge(settledByRecovery, into: &report)
                 report.updated += settledByRecovery.applied
                 for item in unknown where settledByRecovery.outcomes[item.entry.opID] != .applied {
-                    let reason: SyncRunReport.Skipped.Reason = settledByRecovery.outcomes[item.entry.opID] == .unresolved ? .unconfirmed : .notApplied
+                    let reason: SyncRunReport.Skipped.Reason =
+                        settledByRecovery.outcomes[item.entry.opID] == .unresolved
+                        ? .unconfirmed : .notApplied
                     skip(item.update.icloudID, item.update.resourceName, reason, &report)
                 }
             }
@@ -329,7 +386,8 @@ public struct SyncExecutor: Sendable {
     /// Fetches the Google contact if the plan did not list it, re-diffs when its etag moved, and builds the payload and
     /// journal entry. Nil when the update is skipped (and recorded as such).
     private func prepare(
-        _ update: PlannedUpdate, retrying: Bool, reviewed: [ReviewCandidate], report: inout SyncRunReport
+        _ update: PlannedUpdate, retrying: Bool, reviewed: [ReviewCandidate],
+        report: inout SyncRunReport
     ) async throws -> PreparedUpdate? {
         let existing: GooglePerson
         if !retrying, let listed = update.existing {
@@ -343,8 +401,12 @@ public struct SyncExecutor: Sendable {
             } catch is CancellationError {
                 throw CancellationError()
             } catch {
-                skip(update.icloudID, update.resourceName, .failed(error.localizedDescription), &report)
-                if let api = error as? GoogleAPIError { report.halted = report.halted ?? Self.haltReason(for: api) }
+                skip(
+                    update.icloudID, update.resourceName, .failed(error.localizedDescription),
+                    &report)
+                if let api = error as? GoogleAPIError {
+                    report.halted = report.halted ?? Self.haltReason(for: api)
+                }
                 return nil
             }
         }
@@ -362,19 +424,23 @@ public struct SyncExecutor: Sendable {
         }
 
         let payload = GooglePersonMapper.updatePayload(
-            for: effective.desired, existing: existing, ownershipSourceID: effective.icloudID, restrictedTo: effective.fields, note: effective.note
+            for: effective.desired, existing: existing, ownershipSourceID: effective.icloudID,
+            restrictedTo: effective.fields, note: effective.note
         )
         guard !payload.updatePersonFields.isEmpty else {
             skip(update.icloudID, update.resourceName, .nothingToSend, &report)
             return nil
         }
         let entry = SyncJournalEntry(
-            opID: UUID().uuidString, kind: .update, icloudID: effective.icloudID, resourceName: effective.resourceName,
+            opID: UUID().uuidString, kind: .update, icloudID: effective.icloudID,
+            resourceName: effective.resourceName,
             tag: effective.icloudID, baseEtag: existing.etag,
             payloadHash: SyncJournalEntry.projectionHash(
-                of: effective.desired, fields: effective.fields, noteHash: NoteHash.hash(effective.note ?? "")
+                of: effective.desired, fields: effective.fields,
+                noteHash: NoteHash.hash(effective.note ?? "")
             ),
-            fields: SyncField.allCases.filter(effective.fields.contains), baseline: effective.baseline
+            fields: SyncField.allCases.filter(effective.fields.contains),
+            baseline: effective.baseline
         )
         return PreparedUpdate(update: effective, existing: existing, payload: payload, entry: entry)
     }
@@ -388,24 +454,38 @@ public struct SyncExecutor: Sendable {
         _ update: PlannedUpdate, against existing: GooglePerson, reviewed: [ReviewCandidate]
     ) throws -> (update: PlannedUpdate?, conflicts: [ReviewCandidate]) {
         guard let base = try state.load().baselines[update.icloudID],
-              let record = GooglePersonMapper.record(from: existing, source: .google)
+            let record = GooglePersonMapper.record(from: existing, source: .google)
         else { return (nil, []) }
         let diff = ThreeWayDiff.diff(
-            icloud: update.baseline.icloud, google: record, base: base, icloudNoteHash: update.baseline.icloudNoteHash,
-            googleNoteHash: GooglePersonMapper.noteHash(of: existing), googleEtag: existing.etag, at: now()
+            icloud: update.baseline.icloud, google: record, base: base,
+            icloudNoteHash: update.baseline.icloudNoteHash,
+            googleNoteHash: GooglePersonMapper.noteHash(of: existing), googleEtag: existing.etag,
+            at: now()
         )
 
-        let known = Set(reviewed.filter { $0.icloudID == update.icloudID && Self.iCloudSideKinds.contains($0.kind) }.flatMap(\.fields))
+        let known = Set(
+            reviewed.filter {
+                $0.icloudID == update.icloudID && Self.iCloudSideKinds.contains($0.kind)
+            }.flatMap(\.fields))
         var conflicts: [ReviewCandidate] = []
-        for (kind, change) in [(ReviewKind.googleEdited, FieldChange.googleEdited), (.bothEdited, .bothEditedDifferent)] {
-            let fields = diff.reviewFields.filter { !known.contains($0) && diff.changes[$0] == change }
+        for (kind, change) in [
+            (ReviewKind.googleEdited, FieldChange.googleEdited),
+            (.bothEdited, .bothEditedDifferent),
+        ] {
+            let fields = diff.reviewFields.filter {
+                !known.contains($0) && diff.changes[$0] == change
+            }
             guard !fields.isEmpty else { continue }
-            conflicts.append(ReviewCandidate(
-                kind: kind, icloudID: update.icloudID, resourceName: update.resourceName, googleEtag: existing.etag, fields: fields
-            ))
+            conflicts.append(
+                ReviewCandidate(
+                    kind: kind, icloudID: update.icloudID, resourceName: update.resourceName,
+                    googleEtag: existing.etag, fields: fields
+                ))
         }
 
-        guard diff.needsPush, !diff.pushFields.contains(.note) || update.note != nil else { return (nil, conflicts) }
+        guard diff.needsPush, !diff.pushFields.contains(.note) || update.note != nil else {
+            return (nil, conflicts)
+        }
         var redone = update
         redone.etag = existing.etag ?? update.etag
         redone.existing = existing
@@ -418,11 +498,15 @@ public struct SyncExecutor: Sendable {
 
     /// Conflicts found while writing become review items (unless the list already has them) and keep the iCloud token
     /// from moving.
-    private func recordConflicts(_ conflicts: [ReviewCandidate], _ report: inout SyncRunReport) throws {
+    private func recordConflicts(_ conflicts: [ReviewCandidate], _ report: inout SyncRunReport)
+        throws
+    {
         let stored = Set(try reviews.load().map(\.id))
         let fresh = conflicts.filter { !stored.contains($0.id) }
         if !fresh.isEmpty { try reviews.add(fresh, at: now()) }
-        for conflict in conflicts where !report.conflictsFound.contains(conflict.id) { report.conflictsFound.append(conflict.id) }
+        for conflict in conflicts where !report.conflictsFound.contains(conflict.id) {
+            report.conflictsFound.append(conflict.id)
+        }
     }
 
     // MARK: creates
@@ -433,11 +517,15 @@ public struct SyncExecutor: Sendable {
         var entry: SyncJournalEntry
     }
 
-    private func runCreates(_ creates: [PlannedCreate], held: Set<String>, report: inout SyncRunReport) async throws {
+    private func runCreates(
+        _ creates: [PlannedCreate], held: Set<String>, report: inout SyncRunReport
+    ) async throws {
         let linked = try links.load().links
         for chunk in creates.chunked(into: GoogleBatchLimits.maxItemsPerCall) {
             guard report.halted == nil else {
-                for create in chunk { skip(create.icloudID, nil, .notAttempted(report.halted ?? ""), &report) }
+                for create in chunk {
+                    skip(create.icloudID, nil, .notAttempted(report.halted ?? ""), &report)
+                }
                 continue
             }
             try Task.checkCancellation()
@@ -454,28 +542,38 @@ public struct SyncExecutor: Sendable {
                     skip(create.icloudID, nil, .alreadyLinked, &report)
                     continue
                 }
-                var person = GooglePersonMapper.createPayload(for: create.record, ownershipSourceID: create.icloudID)
+                var person = GooglePersonMapper.createPayload(
+                    for: create.record, ownershipSourceID: create.icloudID)
                 if let note = create.note { GooglePersonMapper.setNote(note, on: &person) }
                 let baseline = SyncBaseline(
-                    icloud: create.record, google: ContactRecord(id: "", source: .google, sourceIdentifier: ""), googleEtag: "",
-                    icloudNoteHash: create.icloudNoteHash, googleNoteHash: create.icloudNoteHash, syncedAt: at
+                    icloud: create.record,
+                    google: ContactRecord(id: "", source: .google, sourceIdentifier: ""),
+                    googleEtag: "",
+                    icloudNoteHash: create.icloudNoteHash, googleNoteHash: create.icloudNoteHash,
+                    syncedAt: at
                 )
                 let entry = SyncJournalEntry(
-                    opID: UUID().uuidString, kind: .create, icloudID: create.icloudID, resourceName: nil, tag: create.icloudID,
-                    baseEtag: nil, payloadHash: ContactFingerprint.of(create.record), fields: [], baseline: baseline, attemptedAt: at
+                    opID: UUID().uuidString, kind: .create, icloudID: create.icloudID,
+                    resourceName: nil, tag: create.icloudID,
+                    baseEtag: nil, payloadHash: ContactFingerprint.of(create.record), fields: [],
+                    baseline: baseline, attemptedAt: at
                 )
                 prepared.append(PreparedCreate(create: create, person: person, entry: entry))
             }
             guard !prepared.isEmpty else { continue }
 
             try journal.append(prepared.map(\.entry))
-            let results = try await send(prepared.map(\.entry)) { try await google.batchCreate(prepared.map(\.person)) }
+            let results = try await send(prepared.map(\.entry)) {
+                try await google.batchCreate(prepared.map(\.person))
+            }
 
             var confirmed: [(item: PreparedCreate, person: GooglePerson, name: String)] = []
             var settled: [String] = []
             var unknown: [PreparedCreate] = []
             for (index, item) in prepared.enumerated() {
-                let outcome = results?[index].outcome ?? .ambiguous(reason: "Google's answer did not match the request")
+                let outcome =
+                    results?[index].outcome
+                    ?? .ambiguous(reason: "Google's answer did not match the request")
                 switch outcome {
                 case .applied:
                     if let person = results?[index].person, let name = person.resourceName {
@@ -499,18 +597,25 @@ public struct SyncExecutor: Sendable {
             if !confirmed.isEmpty {
                 let confirmedAt = now()
                 // The link first: a crash between the two leaves a link without a baseline, which the next plan adopts.
-                try links.add(confirmed.map {
-                    ImportedLink(
-                        icloudID: $0.item.create.icloudID, googleResourceName: $0.name, origin: .createdInGoogle,
-                        displayName: $0.item.create.record.displayName
-                    )
-                }, at: confirmedAt)
+                try links.add(
+                    confirmed.map {
+                        ImportedLink(
+                            icloudID: $0.item.create.icloudID, googleResourceName: $0.name,
+                            origin: .createdInGoogle,
+                            displayName: $0.item.create.record.displayName
+                        )
+                    }, at: confirmedAt)
                 try state.update { state in
                     for (item, person, _) in confirmed {
-                        state.baselines[item.create.icloudID] = (item.entry.baseline ?? SyncBaseline(
-                            icloud: item.create.record, google: ContactRecord(id: "", source: .google, sourceIdentifier: ""),
-                            googleEtag: "", icloudNoteHash: item.create.icloudNoteHash, syncedAt: confirmedAt
-                        )).afterCreate(returned: person, at: confirmedAt)
+                        state.baselines[item.create.icloudID] =
+                            (item.entry.baseline
+                            ?? SyncBaseline(
+                                icloud: item.create.record,
+                                google: ContactRecord(
+                                    id: "", source: .google, sourceIdentifier: ""),
+                                googleEtag: "", icloudNoteHash: item.create.icloudNoteHash,
+                                syncedAt: confirmedAt
+                            )).afterCreate(returned: person, at: confirmedAt)
                     }
                 }
                 report.created += confirmed.count
@@ -522,7 +627,9 @@ public struct SyncExecutor: Sendable {
                 merge(settledByRecovery, into: &report)
                 report.created += settledByRecovery.applied
                 for item in unknown where settledByRecovery.outcomes[item.entry.opID] != .applied {
-                    let reason: SyncRunReport.Skipped.Reason = settledByRecovery.outcomes[item.entry.opID] == .unresolved ? .unconfirmed : .notApplied
+                    let reason: SyncRunReport.Skipped.Reason =
+                        settledByRecovery.outcomes[item.entry.opID] == .unresolved
+                        ? .unconfirmed : .notApplied
                     skip(item.create.icloudID, nil, reason, &report)
                 }
             }
@@ -531,10 +638,16 @@ public struct SyncExecutor: Sendable {
 
     // MARK: deletes
 
-    private func runDeletes(_ deletes: [PlannedDelete], approved: [String: String], report: inout SyncRunReport) async throws {
+    private func runDeletes(
+        _ deletes: [PlannedDelete], approved: [String: String], report: inout SyncRunReport
+    ) async throws {
         for chunk in deletes.chunked(into: GoogleBatchLimits.maxItemsPerCall) {
             guard report.halted == nil else {
-                for delete in chunk { skip(delete.icloudID, delete.resourceName, .notAttempted(report.halted ?? ""), &report) }
+                for delete in chunk {
+                    skip(
+                        delete.icloudID, delete.resourceName, .notAttempted(report.halted ?? ""),
+                        &report)
+                }
                 continue
             }
             try Task.checkCancellation()
@@ -547,12 +660,17 @@ public struct SyncExecutor: Sendable {
             var doomed: [(delete: PlannedDelete, person: GooglePerson, baseline: SyncBaseline)] = []
 
             for delete in chunk {
-                guard linked[delete.icloudID]?.googleResourceName == delete.resourceName, let baseline = baselines[delete.icloudID] else {
+                guard linked[delete.icloudID]?.googleResourceName == delete.resourceName,
+                    let baseline = baselines[delete.icloudID]
+                else {
                     skip(delete.icloudID, delete.resourceName, .notLinked, &report)
                     continue
                 }
                 if approved[delete.icloudID] == nil,
-                   open.contains(where: { $0.concerns(icloudID: delete.icloudID, resourceName: delete.resourceName) }) {
+                    open.contains(where: {
+                        $0.concerns(icloudID: delete.icloudID, resourceName: delete.resourceName)
+                    })
+                {
                     report.blockedByReview.append(delete.icloudID)
                     continue
                 }
@@ -565,8 +683,12 @@ public struct SyncExecutor: Sendable {
                 } catch is CancellationError {
                     throw CancellationError()
                 } catch {
-                    skip(delete.icloudID, delete.resourceName, .failed(error.localizedDescription), &report)
-                    if let api = error as? GoogleAPIError { report.halted = report.halted ?? Self.haltReason(for: api) }
+                    skip(
+                        delete.icloudID, delete.resourceName, .failed(error.localizedDescription),
+                        &report)
+                    if let api = error as? GoogleAPIError {
+                        report.halted = report.halted ?? Self.haltReason(for: api)
+                    }
                     continue
                 }
                 let changed: Bool
@@ -576,9 +698,11 @@ public struct SyncExecutor: Sendable {
                     changed = ThreeWayDiff.googleChanged(person, since: baseline, at: now())
                 }
                 if changed {
-                    candidates.append(ReviewCandidate(
-                        kind: .deletedInICloudEditedInGoogle, icloudID: delete.icloudID, resourceName: delete.resourceName, googleEtag: person.etag
-                    ))
+                    candidates.append(
+                        ReviewCandidate(
+                            kind: .deletedInICloudEditedInGoogle, icloudID: delete.icloudID,
+                            resourceName: delete.resourceName, googleEtag: person.etag
+                        ))
                 } else {
                     doomed.append((delete, person, baseline))
                 }
@@ -597,25 +721,33 @@ public struct SyncExecutor: Sendable {
             let at = now()
             let entries = doomed.map {
                 SyncJournalEntry(
-                    opID: UUID().uuidString, kind: .delete, icloudID: $0.delete.icloudID, resourceName: $0.delete.resourceName,
-                    tag: $0.delete.icloudID, baseEtag: $0.person.etag, payloadHash: nil, fields: [], baseline: $0.baseline
+                    opID: UUID().uuidString, kind: .delete, icloudID: $0.delete.icloudID,
+                    resourceName: $0.delete.resourceName,
+                    tag: $0.delete.icloudID, baseEtag: $0.person.etag, payloadHash: nil, fields: [],
+                    baseline: $0.baseline
                 )
             }
-            try history.append(doomed.map {
-                SyncHistoryEntry(
-                    at: at, operation: .delete, icloudID: $0.delete.icloudID, resourceName: $0.delete.resourceName,
-                    before: $0.person, after: nil, confirmed: false
-                )
-            })
+            try history.append(
+                doomed.map {
+                    SyncHistoryEntry(
+                        at: at, operation: .delete, icloudID: $0.delete.icloudID,
+                        resourceName: $0.delete.resourceName,
+                        before: $0.person, after: nil, confirmed: false
+                    )
+                })
             try journal.append(entries)
-            let results = try await send(entries) { try await google.batchDelete(doomed.map(\.delete.resourceName)) }
+            let results = try await send(entries) {
+                try await google.batchDelete(doomed.map(\.delete.resourceName))
+            }
 
             var removed: [String] = []
             var settled: [String] = []
             var unknown: [SyncJournalEntry] = []
             for (index, item) in doomed.enumerated() {
                 let entry = entries[index]
-                let outcome = results?[index].outcome ?? .ambiguous(reason: "Google's answer did not match the request")
+                let outcome =
+                    results?[index].outcome
+                    ?? .ambiguous(reason: "Google's answer did not match the request")
                 switch outcome {
                 case .applied:
                     removed.append(item.delete.icloudID)
@@ -627,11 +759,15 @@ public struct SyncExecutor: Sendable {
                     report.alreadyGone += 1
                 case .failed(let error):
                     settled.append(entry.opID)
-                    skip(item.delete.icloudID, item.delete.resourceName, .failed(error.localizedDescription), &report)
+                    skip(
+                        item.delete.icloudID, item.delete.resourceName,
+                        .failed(error.localizedDescription), &report)
                     report.halted = report.halted ?? Self.haltReason(for: error)
                 case .notAttempted(let reason):
                     settled.append(entry.opID)
-                    skip(item.delete.icloudID, item.delete.resourceName, .notAttempted(reason), &report)
+                    skip(
+                        item.delete.icloudID, item.delete.resourceName, .notAttempted(reason),
+                        &report)
                     report.halted = report.halted ?? reason
                 case .ambiguous:
                     unknown.append(entry)
@@ -639,12 +775,14 @@ public struct SyncExecutor: Sendable {
             }
             if !removed.isEmpty {
                 try dropLinks(removed)
-                recordConfirmations(doomed.filter { removed.contains($0.delete.icloudID) }.map {
-                    SyncHistoryEntry(
-                        at: now(), operation: .delete, icloudID: $0.delete.icloudID, resourceName: $0.delete.resourceName,
-                        before: $0.person, after: nil, confirmed: true
-                    )
-                }, &report)
+                recordConfirmations(
+                    doomed.filter { removed.contains($0.delete.icloudID) }.map {
+                        SyncHistoryEntry(
+                            at: now(), operation: .delete, icloudID: $0.delete.icloudID,
+                            resourceName: $0.delete.resourceName,
+                            before: $0.person, after: nil, confirmed: true
+                        )
+                    }, &report)
             }
             try journal.remove(opIDs: settled)
 
@@ -653,7 +791,9 @@ public struct SyncExecutor: Sendable {
                 merge(settledByRecovery, into: &report)
                 report.deleted += settledByRecovery.applied
                 for entry in unknown where settledByRecovery.outcomes[entry.opID] != .applied {
-                    let reason: SyncRunReport.Skipped.Reason = settledByRecovery.outcomes[entry.opID] == .unresolved ? .unconfirmed : .notApplied
+                    let reason: SyncRunReport.Skipped.Reason =
+                        settledByRecovery.outcomes[entry.opID] == .unresolved
+                        ? .unconfirmed : .notApplied
                     skip(entry.icloudID, entry.resourceName, reason, &report)
                 }
             }
@@ -673,7 +813,9 @@ public struct SyncExecutor: Sendable {
     /// Sends one batch. `GoogleBatchError` means the request was refused before anything was sent, so its entries come
     /// back out of the journal; any other thrown error (cancellation, say) may have happened mid-flight, so they stay for
     /// recovery. Nil when Google's answer has the wrong number of results, which callers treat as unconfirmed.
-    private func send(_ entries: [SyncJournalEntry], _ call: () async throws -> [GoogleBatchResult]) async throws -> [GoogleBatchResult]? {
+    private func send(_ entries: [SyncJournalEntry], _ call: () async throws -> [GoogleBatchResult])
+        async throws -> [GoogleBatchResult]?
+    {
         do {
             let results = try await call()
             return results.count == entries.count ? results : nil
@@ -683,13 +825,20 @@ public struct SyncExecutor: Sendable {
         }
     }
 
-    private func skip(_ icloudID: String, _ resourceName: String?, _ reason: SyncRunReport.Skipped.Reason, _ report: inout SyncRunReport) {
-        report.leftForNextRun.append(SyncRunReport.Skipped(icloudID: icloudID, resourceName: resourceName, reason: reason))
+    private func skip(
+        _ icloudID: String, _ resourceName: String?, _ reason: SyncRunReport.Skipped.Reason,
+        _ report: inout SyncRunReport
+    ) {
+        report.leftForNextRun.append(
+            SyncRunReport.Skipped(icloudID: icloudID, resourceName: resourceName, reason: reason))
     }
 
     /// The confirmation lines are a convenience: the attempt line already holds the "before", so a failure here only warns.
     private func recordConfirmations(_ entries: [SyncHistoryEntry], _ report: inout SyncRunReport) {
-        do { try history.append(entries) } catch { report.warnings.append("The sync history could not be updated: \(error.localizedDescription)") }
+        do { try history.append(entries) } catch {
+            report.warnings.append(
+                "The sync history could not be updated: \(error.localizedDescription)")
+        }
     }
 
     private func merge(_ settled: SyncRecoveryReport, into report: inout SyncRunReport) {

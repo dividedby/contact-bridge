@@ -30,7 +30,9 @@ public struct MergeExecutor: Sendable {
     private let notes: (any NotesStoring)?
     private let maxBackupAge: TimeInterval
 
-    public init(store: any ContactStoring, notes: (any NotesStoring)?, maxBackupAge: TimeInterval = 3600) {
+    public init(
+        store: any ContactStoring, notes: (any NotesStoring)?, maxBackupAge: TimeInterval = 3600
+    ) {
         self.store = store
         self.notes = notes
         self.maxBackupAge = maxBackupAge
@@ -38,7 +40,9 @@ public struct MergeExecutor: Sendable {
 
     /// Throws `Failure.staleBackup` before doing anything if the backup is not fresh. If reading notes throws (for
     /// example `NotesAccessError.notAuthorized`), nothing has been merged yet. Pass no notes store to merge without notes.
-    public func execute(survivor: ContactRecord, absorbing ids: [String], backup: BackupReceipt, now: Date = Date()) async throws -> Outcome {
+    public func execute(
+        survivor: ContactRecord, absorbing ids: [String], backup: BackupReceipt, now: Date = Date()
+    ) async throws -> Outcome {
         guard backup.isFresh(maxAge: maxBackupAge, now: now) else { throw Failure.staleBackup }
 
         let survivorID = survivor.sourceIdentifier
@@ -51,7 +55,8 @@ public struct MergeExecutor: Sendable {
             let fetched = try await notes.fetchNotes(ids: [survivorID] + duplicateIDs)
             // "" means found without a note.
             survivorNote = fetched[survivorID].flatMap { $0.isEmpty ? nil : $0 }
-            combined = NotesMerge.combine(survivor: survivorNote, others: duplicateIDs.map { (id: $0, note: fetched[$0]) })
+            combined = NotesMerge.combine(
+                survivor: survivorNote, others: duplicateIDs.map { (id: $0, note: fetched[$0]) })
         }
 
         try await store.merge(survivor: survivor, absorbing: duplicateIDs, backup: backup)
@@ -62,7 +67,8 @@ public struct MergeExecutor: Sendable {
             try await notes.setNote(combined, forID: survivorID)
             return Outcome(notes: .written)
         } catch {
-            return Outcome(notes: .writeFailed(combined: combined, reason: error.localizedDescription))
+            return Outcome(
+                notes: .writeFailed(combined: combined, reason: error.localizedDescription))
         }
     }
 }

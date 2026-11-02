@@ -4,15 +4,21 @@ import Foundation
 public enum NameNormalizer {
     /// Case-, diacritic-, width- and whitespace-folded; punctuation dropped, hyphens become spaces.
     public static func foldedKey(_ raw: String) -> String {
-        let folded = raw.folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: nil)
+        let folded = raw.folding(
+            options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: nil)
         // Latin-ASCII handles letters folding leaves alone (Ł, ø, ß, æ) and curly quotes; other scripts pass through.
-        let latin = folded.applyingTransform(StringTransform("Latin-ASCII"), reverse: false) ?? folded
+        let latin =
+            folded.applyingTransform(StringTransform("Latin-ASCII"), reverse: false) ?? folded
 
         var out = ""
         for ch in latin.lowercased() {
             if ch.isLetter || ch.isNumber {
                 out.append(ch)
-            } else if ch.isWhitespace || ch.unicodeScalars.allSatisfy({ $0.properties.generalCategory == .dashPunctuation }) {
+            } else if ch.isWhitespace
+                || ch.unicodeScalars.allSatisfy({
+                    $0.properties.generalCategory == .dashPunctuation
+                })
+            {
                 out.append(" ")
             }
         }

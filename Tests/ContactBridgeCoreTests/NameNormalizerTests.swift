@@ -1,24 +1,27 @@
 import Testing
+
 @testable import ContactBridgeCore
 
 struct NameNormalizerTests {
-    @Test("Folded keys ignore case, diacritics, width and whitespace", arguments: [
-        ("  José   García ", "jose garcia"),
-        ("JOSÉ", "jose"),
-        ("Jose\u{301}", "jose"),
-        ("Müller", "muller"),
-        ("Łukasz", "lukasz"),
-        ("Straße", "strasse"),
-        ("Zoë", "zoe"),
-        ("Ｊｏｈｎ", "john"),
-        ("John\u{00A0}Smith", "john smith"),
-        ("O'Brien", "obrien"),
-        ("O\u{2019}Brien", "obrien"),
-        ("Mary-Jane", "mary jane"),
-        ("St. John", "st john"),
-        ("", ""),
-        ("   ", ""),
-    ])
+    @Test(
+        "Folded keys ignore case, diacritics, width and whitespace",
+        arguments: [
+            ("  José   García ", "jose garcia"),
+            ("JOSÉ", "jose"),
+            ("Jose\u{301}", "jose"),
+            ("Müller", "muller"),
+            ("Łukasz", "lukasz"),
+            ("Straße", "strasse"),
+            ("Zoë", "zoe"),
+            ("Ｊｏｈｎ", "john"),
+            ("John\u{00A0}Smith", "john smith"),
+            ("O'Brien", "obrien"),
+            ("O\u{2019}Brien", "obrien"),
+            ("Mary-Jane", "mary jane"),
+            ("St. John", "st john"),
+            ("", ""),
+            ("   ", ""),
+        ])
     func folding(raw: String, expected: String) {
         #expect(NameNormalizer.foldedKey(raw) == expected)
     }
@@ -29,15 +32,17 @@ struct NameNormalizerTests {
         #expect(NameNormalizer.foldedKey("Иван") == "иван")
     }
 
-    @Test("Nicknames collapse to one canonical given-name key", arguments: [
-        ("Bob", "robert"), ("Bobby", "robert"), ("Robert", "robert"), ("ROB", "robert"),
-        ("Bill", "william"), ("Will", "william"),
-        ("Liz", "elizabeth"), ("Lizzie", "elizabeth"), ("Elizabeth", "elizabeth"),
-        ("Mike", "michael"), ("Jim", "james"), ("Steve", "steven"), ("Stephen", "steven"),
-        ("Katy", "katherine"), ("Katie", "katherine"), ("Kate", "katherine"),
-        ("Catherine", "katherine"), ("Kathryn", "katherine"), ("Katherine", "katherine"),
-        ("Kathy", "kathy"), ("Cathy", "cathy"), ("Zed", "zed"), ("Zoë", "zoe"), ("", ""),
-    ])
+    @Test(
+        "Nicknames collapse to one canonical given-name key",
+        arguments: [
+            ("Bob", "robert"), ("Bobby", "robert"), ("Robert", "robert"), ("ROB", "robert"),
+            ("Bill", "william"), ("Will", "william"),
+            ("Liz", "elizabeth"), ("Lizzie", "elizabeth"), ("Elizabeth", "elizabeth"),
+            ("Mike", "michael"), ("Jim", "james"), ("Steve", "steven"), ("Stephen", "steven"),
+            ("Katy", "katherine"), ("Katie", "katherine"), ("Kate", "katherine"),
+            ("Catherine", "katherine"), ("Kathryn", "katherine"), ("Katherine", "katherine"),
+            ("Kathy", "kathy"), ("Cathy", "cathy"), ("Zed", "zed"), ("Zoë", "zoe"), ("", ""),
+        ])
     func nicknames(raw: String, expected: String) {
         #expect(NameNormalizer.givenNameMatchKey(raw) == expected)
     }

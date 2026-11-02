@@ -1,24 +1,31 @@
 import Foundation
 import Testing
+
 @testable import ContactBridgeCore
 
 struct DismissalStoreTests {
     private let t0 = Date(timeIntervalSince1970: 1_800_000_000)
 
     private func makeDirectory() throws -> URL {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("dismissal-tests-\(UUID().uuidString)", isDirectory: true)
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "dismissal-tests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         return directory
     }
 
     private func cluster(_ ids: [String]) -> DuplicateCluster {
         DuplicateCluster(
-            id: ids[0], members: ids.map { ContactRecord(id: $0, source: .icloud, sourceIdentifier: $0, givenName: $0) },
+            id: ids[0],
+            members: ids.map {
+                ContactRecord(id: $0, source: .icloud, sourceIdentifier: $0, givenName: $0)
+            },
             confidence: 0.9, reasons: [], flags: [], edges: [], relatedEdges: []
         )
     }
 
-    @Test("A dismissed set hides the same cluster and any subset of it, but not a cluster that gained a member")
+    @Test(
+        "A dismissed set hides the same cluster and any subset of it, but not a cluster that gained a member"
+    )
     func subsetRule() {
         var table = DismissalTable()
         table.dismiss(["b", "a", "c"], at: t0)
@@ -47,7 +54,9 @@ struct DismissalStoreTests {
     func filter() {
         var table = DismissalTable()
         table.dismiss(["a", "b"], at: t0)
-        let kept = table.visible(from: [cluster(["a", "b"]), cluster(["c", "d"]), cluster(["a", "b", "e"])])
+        let kept = table.visible(from: [
+            cluster(["a", "b"]), cluster(["c", "d"]), cluster(["a", "b", "e"]),
+        ])
         #expect(kept.map(\.id) == ["c", "a"])
     }
 
@@ -61,8 +70,10 @@ struct DismissalStoreTests {
         try store.dismiss(memberIDs: ["b", "a"], at: t0)
         let reloaded = try DismissalStore(url: url).load()
         #expect(reloaded.version == 1)
-        #expect(reloaded.dismissed == [DismissalTable.Entry(memberIDs: ["a", "b"], dismissedAt: t0)])
-        let object = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+        #expect(
+            reloaded.dismissed == [DismissalTable.Entry(memberIDs: ["a", "b"], dismissedAt: t0)])
+        let object = try #require(
+            JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
         #expect(object["version"] as? Int == 1 && (object["dismissed"] as? [Any])?.count == 1)
         try store.clear()
         #expect(try store.load().dismissed.isEmpty)
@@ -77,10 +88,14 @@ struct DismissalStoreTests {
         try future.write(to: url)
         let store = DismissalStore(url: url)
         #expect(throws: DismissalStoreError.unsupportedVersion(9)) { try store.load() }
-        #expect(throws: DismissalStoreError.unsupportedVersion(9)) { try store.dismiss(memberIDs: ["a", "b"], at: t0) }
+        #expect(throws: DismissalStoreError.unsupportedVersion(9)) {
+            try store.dismiss(memberIDs: ["a", "b"], at: t0)
+        }
         #expect(try Data(contentsOf: url) == future)
         try Data("nope".utf8).write(to: url)
-        #expect(throws: DismissalStoreError.self) { try store.dismiss(memberIDs: ["a", "b"], at: t0) }
+        #expect(throws: DismissalStoreError.self) {
+            try store.dismiss(memberIDs: ["a", "b"], at: t0)
+        }
         #expect(try Data(contentsOf: url) == Data("nope".utf8))
     }
 

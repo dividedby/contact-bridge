@@ -33,7 +33,9 @@ public struct PhotoFingerprint: Sendable, Hashable, Codable {
         self.centreColors = centreColors
     }
 
-    public func hammingDistance(to other: PhotoFingerprint) -> Int { (hash ^ other.hash).nonzeroBitCount }
+    public func hammingDistance(to other: PhotoFingerprint) -> Int {
+        (hash ^ other.hash).nonzeroBitCount
+    }
 
     /// Mean absolute colour difference between the grids; infinite when they are not the same shape.
     public func colorDistance(to other: PhotoFingerprint) -> Double {
@@ -59,19 +61,25 @@ public struct PhotoFingerprint: Sendable, Hashable, Codable {
         return views.contains { mine in
             other.views.contains { theirs in
                 (mine.isCentre || theirs.isCentre)
-                    && mine.picture.wholeMatches(theirs.picture, Self.centreHammingThreshold, Self.centreMaxColorDistance)
+                    && mine.picture.wholeMatches(
+                        theirs.picture, Self.centreHammingThreshold, Self.centreMaxColorDistance)
             }
         }
     }
 
-    private func wholeMatches(_ other: PhotoFingerprint, _ hammingThreshold: Int, _ maxColorDistance: Double) -> Bool {
-        hammingDistance(to: other) <= hammingThreshold && colorDistance(to: other) <= maxColorDistance
+    private func wholeMatches(
+        _ other: PhotoFingerprint, _ hammingThreshold: Int, _ maxColorDistance: Double
+    ) -> Bool {
+        hammingDistance(to: other) <= hammingThreshold
+            && colorDistance(to: other) <= maxColorDistance
     }
 
     /// The whole picture, then its centre square when stored.
     private var views: [(picture: PhotoFingerprint, isCentre: Bool)] {
         var views = [(PhotoFingerprint(hash: hash, colors: colors), false)]
-        if let centreHash, let centreColors { views.append((PhotoFingerprint(hash: centreHash, colors: centreColors), true)) }
+        if let centreHash, let centreColors {
+            views.append((PhotoFingerprint(hash: centreHash, colors: centreColors), true))
+        }
         return views
     }
 }
@@ -94,14 +102,17 @@ public struct ImageIOPhotoFingerprinter: PhotoFingerprinting {
 
     public func fingerprint(of imageData: Data) -> PhotoFingerprint? {
         guard let image = PhotoImage.thumbnail(from: imageData, maxPixel: Self.decodeSize),
-              var fingerprint = Self.fingerprint(of: image)
+            var fingerprint = Self.fingerprint(of: image)
         else { return nil }
         // The centre is cut from a decode whose shorter side is `decodeSize`, so it has as much detail as a square picture.
-        let longest = max(image.width, image.height), shortest = min(image.width, image.height)
+        let longest = max(image.width, image.height)
+        let shortest = min(image.width, image.height)
         if longest != shortest, shortest > 0,
-           let larger = PhotoImage.thumbnail(from: imageData, maxPixel: (Self.decodeSize * longest + shortest - 1) / shortest),
-           let square = larger.cropping(to: Self.centreSquare(of: larger)),
-           let centre = Self.fingerprint(of: square) {
+            let larger = PhotoImage.thumbnail(
+                from: imageData, maxPixel: (Self.decodeSize * longest + shortest - 1) / shortest),
+            let square = larger.cropping(to: Self.centreSquare(of: larger)),
+            let centre = Self.fingerprint(of: square)
+        {
             fingerprint.centreHash = centre.hash
             fingerprint.centreColors = centre.colors
         }
@@ -110,23 +121,28 @@ public struct ImageIOPhotoFingerprinter: PhotoFingerprinting {
 
     private static func centreSquare(of image: CGImage) -> CGRect {
         let side = min(image.width, image.height)
-        return CGRect(x: (image.width - side) / 2, y: (image.height - side) / 2, width: side, height: side)
+        return CGRect(
+            x: (image.width - side) / 2, y: (image.height - side) / 2, width: side, height: side)
     }
 
     private static func fingerprint(of image: CGImage) -> PhotoFingerprint? {
         guard let gradient = PhotoImage.pixels(of: image, width: hashColumns, height: hashRows),
-              let grid = PhotoImage.pixels(of: image, width: PhotoFingerprint.gridSide, height: PhotoFingerprint.gridSide)
+            let grid = PhotoImage.pixels(
+                of: image, width: PhotoFingerprint.gridSide, height: PhotoFingerprint.gridSide)
         else { return nil }
 
         func luminance(_ column: Int, _ row: Int) -> Double {
             let offset = (row * hashColumns + column) * 4
-            return 0.299 * Double(gradient[offset]) + 0.587 * Double(gradient[offset + 1]) + 0.114 * Double(gradient[offset + 2])
+            return 0.299 * Double(gradient[offset]) + 0.587 * Double(gradient[offset + 1]) + 0.114
+                * Double(gradient[offset + 2])
         }
         var hash: UInt64 = 0
         for row in 0..<hashRows {
             for column in 0..<(hashColumns - 1) {
                 hash <<= 1
-                if luminance(column, row) > luminance(column + 1, row) + luminanceMargin { hash |= 1 }
+                if luminance(column, row) > luminance(column + 1, row) + luminanceMargin {
+                    hash |= 1
+                }
             }
         }
 

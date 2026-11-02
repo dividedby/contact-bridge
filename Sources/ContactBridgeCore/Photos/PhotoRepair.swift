@@ -18,7 +18,9 @@ public enum PhotoRepair {
 
     /// Returns the iCloud ids looked at afresh by version 1.
     @discardableResult
-    static func run(store: any ContactStoring, state: any SyncStateStoring, reviews: any ReviewStoring) async throws -> [String] {
+    static func run(
+        store: any ContactStoring, state: any SyncStateStoring, reviews: any ReviewStoring
+    ) async throws -> [String] {
         let from = try state.load().photoRepairVersion
         var fresh: [String] = []
         if from < 1 { fresh = try await lookAfresh(store: store, state: state, reviews: reviews) }
@@ -27,12 +29,16 @@ public enum PhotoRepair {
         return fresh
     }
 
-    private static func lookAfresh(store: any ContactStoring, state: any SyncStateStoring, reviews: any ReviewStoring) async throws -> [String] {
+    private static func lookAfresh(
+        store: any ContactStoring, state: any SyncStateStoring, reviews: any ReviewStoring
+    ) async throws -> [String] {
         let recorded = try state.load().baselines.filter { $0.value.photo != nil }.map(\.key)
         let signatures = recorded.isEmpty ? [:] : try await store.photoSignatures(ids: recorded)
         let fresh = Set(recorded.filter { signatures[$0]?.hasPhoto == true })
         // Questions first: should the state update fail, the next run finds the same pairs and does this again.
-        let questions = try reviews.load().filter { $0.kind == .photoConflict && $0.icloudID.map(fresh.contains) == true }
+        let questions = try reviews.load().filter {
+            $0.kind == .photoConflict && $0.icloudID.map(fresh.contains) == true
+        }
         if !questions.isEmpty { try reviews.remove(ids: questions.map(\.id)) }
         try state.update {
             for id in fresh { $0.baselines[id]?.photo = nil }
@@ -48,7 +54,8 @@ public enum PhotoRepair {
         var retried: [String] = []
         try state.update {
             for (id, baseline) in $0.baselines {
-                guard var photo = baseline.photo, photo.failure?.message.contains("134092") == true else { continue }
+                guard var photo = baseline.photo, photo.failure?.message.contains("134092") == true
+                else { continue }
                 photo.failure = nil
                 $0.baselines[id]?.photo = holdsNothing(photo) ? nil : photo
                 retried.append(id)
@@ -58,7 +65,9 @@ public enum PhotoRepair {
     }
 
     private static func holdsNothing(_ photo: PhotoBaseline) -> Bool {
-        photo.icloud == nil && photo.google == nil && photo.googleProfile == nil && photo.icloudHint == nil
-            && photo.googleURLKey == nil && photo.googleProfileKey == nil && photo.pendingRemoval == nil && photo.failure == nil
+        photo.icloud == nil && photo.google == nil && photo.googleProfile == nil
+            && photo.icloudHint == nil
+            && photo.googleURLKey == nil && photo.googleProfileKey == nil
+            && photo.pendingRemoval == nil && photo.failure == nil
     }
 }

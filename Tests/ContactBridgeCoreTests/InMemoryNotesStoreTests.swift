@@ -1,8 +1,11 @@
 import Testing
+
 @testable import ContactBridgeCore
 
 struct InMemoryNotesStoreTests {
-    @Test("Reads give every requested id its note, or empty text when it has none; writes replace or clear")
+    @Test(
+        "Reads give every requested id its note, or empty text when it has none; writes replace or clear"
+    )
     func readWrite() async throws {
         let store = InMemoryNotesStore(notes: ["a": "one", "b": "two"])
         #expect(try await store.fetchNotes(ids: ["a", "zzz"]) == ["a": "one", "zzz": ""])
@@ -22,8 +25,14 @@ struct InMemoryNotesStoreTests {
 
     @Test("Injected errors are thrown")
     func errors() async {
-        let store = InMemoryNotesStore(readError: NotesAccessError.notAuthorized, writeError: NotesAccessError.contactsAppUnavailable)
-        await #expect(throws: NotesAccessError.notAuthorized) { _ = try await store.fetchNotes(ids: ["a"]) }
-        await #expect(throws: NotesAccessError.contactsAppUnavailable) { try await store.setNote("x", forID: "a") }
+        let store = InMemoryNotesStore(
+            readError: NotesAccessError.notAuthorized,
+            writeError: NotesAccessError.contactsAppUnavailable)
+        await #expect(throws: NotesAccessError.notAuthorized) {
+            _ = try await store.fetchNotes(ids: ["a"])
+        }
+        await #expect(throws: NotesAccessError.contactsAppUnavailable) {
+            try await store.setNote("x", forID: "a")
+        }
     }
 }

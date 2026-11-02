@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+
 @testable import ContactBridgeCore
 
 struct PhotoSettingsTests {
@@ -15,7 +16,9 @@ struct PhotoSettingsTests {
         #expect(try store.load().syncPhotos)
     }
 
-    @Test("Turning profile photos on forgets the last full listing, so the next run lists Google in full; turning them off keeps what was copied")
+    @Test(
+        "Turning profile photos on forgets the last full listing, so the next run lists Google in full; turning them off keeps what was copied"
+    )
     func profileSwitch() throws {
         let store = InMemorySyncStateStore(SyncState(lastPhotoFullListingAt: SyncFixtures.t0))
         try PhotoSettings.setUseGoogleProfilePhotos(true, in: store)
@@ -29,11 +32,15 @@ struct PhotoSettingsTests {
         #expect(!off.useGoogleProfilePhotos && off.lastPhotoFullListingAt == SyncFixtures.t0)
     }
 
-    @Test("Profile photos need photo sync: with it off they cannot be switched on, and the settings say so")
+    @Test(
+        "Profile photos need photo sync: with it off they cannot be switched on, and the settings say so"
+    )
     func profileNeedsPhotoSync() throws {
         let store = InMemorySyncStateStore(SyncState(syncPhotos: false))
         #expect(try PhotoSettings.read(store).canChooseProfilePhotos == false)
-        #expect(throws: PhotoSettingsError.photoSyncIsOff) { try PhotoSettings.setUseGoogleProfilePhotos(true, in: store) }
+        #expect(throws: PhotoSettingsError.photoSyncIsOff) {
+            try PhotoSettings.setUseGoogleProfilePhotos(true, in: store)
+        }
         #expect(try store.load().useGoogleProfilePhotos == false)
         try PhotoSettings.setSyncPhotos(true, in: store)
         #expect(try PhotoSettings.read(store).canChooseProfilePhotos)

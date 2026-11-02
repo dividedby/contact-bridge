@@ -10,8 +10,10 @@ enum CNContactMapper {
     /// Everything `record(from:)` reads. Deliberately excludes the note and image keys.
     static var requiredKeys: [CNKeyDescriptor] {
         [
-            CNContactGivenNameKey, CNContactMiddleNameKey, CNContactFamilyNameKey, CNContactNicknameKey,
-            CNContactOrganizationNameKey, CNContactJobTitleKey, CNContactPhoneNumbersKey, CNContactEmailAddressesKey,
+            CNContactGivenNameKey, CNContactMiddleNameKey, CNContactFamilyNameKey,
+            CNContactNicknameKey,
+            CNContactOrganizationNameKey, CNContactJobTitleKey, CNContactPhoneNumbersKey,
+            CNContactEmailAddressesKey,
             CNContactPostalAddressesKey, CNContactUrlAddressesKey, CNContactBirthdayKey,
         ].map { $0 as NSString }
     }
@@ -19,18 +21,24 @@ enum CNContactMapper {
     /// `requiredKeys` plus everything ContactRecord cannot express, and the full photo, for the merge path only.
     /// Still never the note key.
     static var mergeKeys: [CNKeyDescriptor] {
-        requiredKeys + [
-            CNContactNamePrefixKey, CNContactNameSuffixKey, CNContactDepartmentNameKey, CNContactPreviousFamilyNameKey,
-            CNContactPhoneticGivenNameKey, CNContactPhoneticMiddleNameKey, CNContactPhoneticFamilyNameKey,
-            CNContactPhoneticOrganizationNameKey, CNContactSocialProfilesKey, CNContactInstantMessageAddressesKey,
-            CNContactRelationsKey, CNContactDatesKey, CNContactImageDataKey, CNContactImageDataAvailableKey,
-        ].map { $0 as NSString }
+        requiredKeys
+            + [
+                CNContactNamePrefixKey, CNContactNameSuffixKey, CNContactDepartmentNameKey,
+                CNContactPreviousFamilyNameKey,
+                CNContactPhoneticGivenNameKey, CNContactPhoneticMiddleNameKey,
+                CNContactPhoneticFamilyNameKey,
+                CNContactPhoneticOrganizationNameKey, CNContactSocialProfilesKey,
+                CNContactInstantMessageAddressesKey,
+                CNContactRelationsKey, CNContactDatesKey, CNContactImageDataKey,
+                CNContactImageDataAvailableKey,
+            ].map { $0 as NSString }
     }
 
     /// True for CNErrorCodeUnauthorizedKeys (102): a requested key needs an entitlement the app lacks.
     static func isUnauthorizedKeys(_ error: Error) -> Bool {
         let nsError = error as NSError
-        return nsError.domain == CNErrorDomain && nsError.code == CNError.Code.unauthorizedKeys.rawValue
+        return nsError.domain == CNErrorDomain
+            && nsError.code == CNError.Code.unauthorizedKeys.rawValue
     }
 
     // MARK: CNContact -> ContactRecord
@@ -46,10 +54,18 @@ enum CNContactMapper {
             nickname: contact.nickname,
             organization: contact.organizationName,
             jobTitle: contact.jobTitle,
-            phones: contact.phoneNumbers.map { Labeled(label: friendlyLabel($0.label), value: $0.value.stringValue) },
-            emails: contact.emailAddresses.map { Labeled(label: friendlyLabel($0.label), value: $0.value as String) },
-            postalAddresses: contact.postalAddresses.map { Labeled(label: friendlyLabel($0.label), value: address(from: $0.value)) },
-            urls: contact.urlAddresses.map { Labeled(label: friendlyLabel($0.label), value: $0.value as String) },
+            phones: contact.phoneNumbers.map {
+                Labeled(label: friendlyLabel($0.label), value: $0.value.stringValue)
+            },
+            emails: contact.emailAddresses.map {
+                Labeled(label: friendlyLabel($0.label), value: $0.value as String)
+            },
+            postalAddresses: contact.postalAddresses.map {
+                Labeled(label: friendlyLabel($0.label), value: address(from: $0.value))
+            },
+            urls: contact.urlAddresses.map {
+                Labeled(label: friendlyLabel($0.label), value: $0.value as String)
+            },
             birthday: recordBirthday(contact.birthday)
         )
     }
@@ -68,7 +84,9 @@ enum CNContactMapper {
 
     /// Contacts stores year-less birthdays with no year, a year of 0, or the placeholder year 1604.
     private static func recordBirthday(_ components: DateComponents?) -> DateComponents? {
-        guard let components, let month = defined(components.month), let day = defined(components.day) else { return nil }
+        guard let components, let month = defined(components.month),
+            let day = defined(components.day)
+        else { return nil }
         var year = defined(components.year)
         if let y = year, y <= 0 || y == 1604 { year = nil }
         return DateComponents(year: year, month: month, day: day)
@@ -122,7 +140,8 @@ enum CNContactMapper {
     }
 
     private static func normalizedBirthday(_ birthday: DateComponents?) -> DateComponents? {
-        guard let birthday, let month = defined(birthday.month), let day = defined(birthday.day) else { return nil }
+        guard let birthday, let month = defined(birthday.month), let day = defined(birthday.day)
+        else { return nil }
         return DateComponents(year: defined(birthday.year), month: month, day: day)
     }
 
@@ -135,31 +154,48 @@ enum CNContactMapper {
     static func absorb(_ duplicates: [CNContact], into survivor: CNMutableContact) {
         guard !duplicates.isEmpty else { return }
 
-        survivor.socialProfiles = unionByValue([survivor.socialProfiles] + duplicates.map(\.socialProfiles)) {
+        survivor.socialProfiles = unionByValue(
+            [survivor.socialProfiles] + duplicates.map(\.socialProfiles)
+        ) {
             [$0.service, $0.username, $0.urlString].map { $0.lowercased() }.joined(separator: "|")
         }
-        survivor.instantMessageAddresses = unionByValue([survivor.instantMessageAddresses] + duplicates.map(\.instantMessageAddresses)) {
+        survivor.instantMessageAddresses = unionByValue(
+            [survivor.instantMessageAddresses] + duplicates.map(\.instantMessageAddresses)
+        ) {
             [$0.service, $0.username].map { $0.lowercased() }.joined(separator: "|")
         }
-        survivor.contactRelations = unionByValue([survivor.contactRelations] + duplicates.map(\.contactRelations)) {
+        survivor.contactRelations = unionByValue(
+            [survivor.contactRelations] + duplicates.map(\.contactRelations)
+        ) {
             $0.name.lowercased()
         }
-        survivor.dates = unionByValue([survivor.dates] + duplicates.map(\.dates)) { "\($0.year)-\($0.month)-\($0.day)" }
+        survivor.dates = unionByValue([survivor.dates] + duplicates.map(\.dates)) {
+            "\($0.year)-\($0.month)-\($0.day)"
+        }
 
-        let blankFillable: [(read: KeyPath<CNContact, String>, write: ReferenceWritableKeyPath<CNMutableContact, String>)] = [
-            (\.namePrefix, \.namePrefix), (\.nameSuffix, \.nameSuffix), (\.departmentName, \.departmentName),
-            (\.previousFamilyName, \.previousFamilyName),
-            (\.phoneticGivenName, \.phoneticGivenName), (\.phoneticMiddleName, \.phoneticMiddleName),
-            (\.phoneticFamilyName, \.phoneticFamilyName), (\.phoneticOrganizationName, \.phoneticOrganizationName),
-        ]
+        let blankFillable:
+            [(
+                read: KeyPath<CNContact, String>,
+                write: ReferenceWritableKeyPath<CNMutableContact, String>
+            )] = [
+                (\.namePrefix, \.namePrefix), (\.nameSuffix, \.nameSuffix),
+                (\.departmentName, \.departmentName),
+                (\.previousFamilyName, \.previousFamilyName),
+                (\.phoneticGivenName, \.phoneticGivenName),
+                (\.phoneticMiddleName, \.phoneticMiddleName),
+                (\.phoneticFamilyName, \.phoneticFamilyName),
+                (\.phoneticOrganizationName, \.phoneticOrganizationName),
+            ]
         for field in blankFillable where survivor[keyPath: field.read].isBlank {
-            if let value = duplicates.map({ $0[keyPath: field.read] }).first(where: { !$0.isBlank }) {
+            if let value = duplicates.map({ $0[keyPath: field.read] }).first(where: { !$0.isBlank })
+            {
                 survivor[keyPath: field.write] = value
             }
         }
 
         if survivor.isKeyAvailable(CNContactImageDataKey), survivor.imageData == nil {
-            survivor.imageData = duplicates.lazy
+            survivor.imageData =
+                duplicates.lazy
                 .compactMap { $0.isKeyAvailable(CNContactImageDataKey) ? $0.imageData : nil }
                 .first
         }
@@ -172,7 +208,9 @@ enum CNContactMapper {
         return lists.joined().filter { seen.insert(key($0.value)).inserted }
     }
 
-    private static func reconcile<CNValue: NSCopying & NSSecureCoding, Value: Sendable & Hashable & Codable>(
+    private static func reconcile<
+        CNValue: NSCopying & NSSecureCoding, Value: Sendable & Hashable & Codable
+    >(
         existing: [CNLabeledValue<CNValue>],
         desired: [Labeled<Value>],
         read: (CNValue) -> Value,
@@ -180,7 +218,9 @@ enum CNContactMapper {
     ) -> [CNLabeledValue<CNValue>] {
         var unused = existing
         return desired.map { wanted in
-            let match = unused.firstIndex { Labeled(label: friendlyLabel($0.label), value: read($0.value)) == wanted }
+            let match = unused.firstIndex {
+                Labeled(label: friendlyLabel($0.label), value: read($0.value)) == wanted
+            }
             if let match { return unused.remove(at: match) }
             return CNLabeledValue(label: cnLabel(wanted.label), value: make(wanted.value))
         }
@@ -200,9 +240,11 @@ enum CNContactMapper {
     }
 
     private static func cnBirthday(_ birthday: DateComponents?) -> DateComponents? {
-        guard let birthday, let month = defined(birthday.month), let day = defined(birthday.day) else { return nil }
+        guard let birthday, let month = defined(birthday.month), let day = defined(birthday.day)
+        else { return nil }
         return DateComponents(
-            calendar: Calendar(identifier: .gregorian), year: defined(birthday.year), month: month, day: day
+            calendar: Calendar(identifier: .gregorian), year: defined(birthday.year), month: month,
+            day: day
         )
     }
 

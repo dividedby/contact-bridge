@@ -16,14 +16,16 @@ public struct NormalizedPhone: Sendable, Hashable {
     public var shortCodeDigits: String? {
         guard !isNormalizable, extensionDigits == nil else { return nil }
         let stripped = value.filter { !PhoneNormalizer.separators.contains($0) }
-        guard (3...6).contains(stripped.count), stripped.allSatisfy({ $0.isASCII && $0.isNumber }) else { return nil }
+        guard (3...6).contains(stripped.count), stripped.allSatisfy({ $0.isASCII && $0.isNumber })
+        else { return nil }
         return stripped
     }
     public var isShortCode: Bool { shortCodeDigits != nil }
 }
 
 public enum PhoneNormalizer {
-    public static func normalize(_ raw: String, defaultRegion: PhoneRegion = .us) -> NormalizedPhone {
+    public static func normalize(_ raw: String, defaultRegion: PhoneRegion = .us) -> NormalizedPhone
+    {
         // Contacts exported from iOS often wrap numbers in bidi controls (Cf).
         let cleaned = String(raw.unicodeScalars.filter { $0.properties.generalCategory != .format })
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -41,7 +43,9 @@ public enum PhoneNormalizer {
     private static func splitExtension(_ s: String) -> (body: String, ext: String?) {
         // Every marker ("x", "ext", "extension", "," or ";") holds one of these; most numbers have none and skip the regex,
         // which costs about 100 times the rest of normalizing.
-        guard s.contains(where: { $0 == "x" || $0 == "X" || $0 == "," || $0 == ";" }) else { return (s, nil) }
+        guard s.contains(where: { $0 == "x" || $0 == "X" || $0 == "," || $0 == ";" }) else {
+            return (s, nil)
+        }
         // Regex isn't Sendable, so it can't live in a static under strict concurrency.
         let pattern = /^(.*?)\s*(?:extension|ext\.?|x|[,;]+)\s*(\d+)$/.ignoresCase()
         guard let match = s.wholeMatch(of: pattern) else { return (s, nil) }
@@ -49,7 +53,8 @@ public enum PhoneNormalizer {
     }
 
     fileprivate static let separators: Set<Character> = [
-        " ", "-", ".", "(", ")", "/", "\u{00A0}", "\u{2010}", "\u{2011}", "\u{2012}", "\u{2013}", "\u{2014}",
+        " ", "-", ".", "(", ")", "/", "\u{00A0}", "\u{2010}", "\u{2011}", "\u{2012}", "\u{2013}",
+        "\u{2014}",
     ]
 
     private static func e164(from body: String, region: PhoneRegion) -> String? {
@@ -86,7 +91,8 @@ public enum PhoneNormalizer {
             }
             switch digits.count {
             case 10 where isNANP(digits): return "+1" + digits
-            case 11 where digits.hasPrefix("1") && isNANP(String(digits.dropFirst())): return "+" + digits
+            case 11 where digits.hasPrefix("1") && isNANP(String(digits.dropFirst())):
+                return "+" + digits
             default: return nil
             }
         }
@@ -94,7 +100,9 @@ public enum PhoneNormalizer {
 
     private static func internationalNumber(_ digits: String) -> String? {
         guard (8...15).contains(digits.count), !digits.hasPrefix("0") else { return nil }
-        if digits.hasPrefix("1"), !(digits.count == 11 && isNANP(String(digits.dropFirst()))) { return nil }
+        if digits.hasPrefix("1"), !(digits.count == 11 && isNANP(String(digits.dropFirst()))) {
+            return nil
+        }
         return "+" + digits
     }
 

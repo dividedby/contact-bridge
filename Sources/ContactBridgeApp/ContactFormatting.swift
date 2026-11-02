@@ -45,8 +45,10 @@ struct ConfidenceBadge: View {
                 .padding(.vertical, 2)
                 .background(level.color.opacity(0.25), in: Capsule())
         } else {
-            Text("No link").font(.caption.weight(.medium)).padding(.horizontal, 8).padding(.vertical, 2)
-                .background(Color.orange.opacity(0.25), in: Capsule())
+            Text("No link").font(.caption.weight(.medium)).padding(.horizontal, 8).padding(
+                .vertical, 2
+            )
+            .background(Color.orange.opacity(0.25), in: Capsule())
         }
     }
 }
@@ -67,21 +69,28 @@ struct FlagLabel: View {
 enum ContactText {
     static func phonesOrEmails(_ values: [Labeled<String>]) -> String {
         values.filter { !$0.value.isBlank }.map { entry in
-            if let label = entry.label, !label.isBlank { "\(entry.value) (\(label))" } else { entry.value }
+            if let label = entry.label, !label.isBlank {
+                "\(entry.value) (\(label))"
+            } else {
+                entry.value
+            }
         }.joined(separator: "\n")
     }
 
     static func addresses(_ values: [Labeled<PostalAddress>]) -> String {
         values.filter { !$0.value.isEmpty }.map { entry in
             let a = entry.value
-            let line = [a.street, a.city, a.state, a.postalCode, a.country].filter { !$0.isBlank }.joined(separator: ", ")
+            let line = [a.street, a.city, a.state, a.postalCode, a.country].filter { !$0.isBlank }
+                .joined(separator: ", ")
             if let label = entry.label, !label.isBlank { return "\(line) (\(label))" }
             return line
         }.joined(separator: "\n")
     }
 
     static func birthday(_ components: DateComponents?) -> String {
-        guard let components, let month = components.month, let day = components.day else { return "" }
+        guard let components, let month = components.month, let day = components.day else {
+            return ""
+        }
         let year = components.year.map { String(format: "%04d-", $0) } ?? "--"
         return year + String(format: "%02d-%02d", month, day)
     }
@@ -91,14 +100,18 @@ enum ContactText {
 
     /// What tells two same-named contacts apart: first email and first phone (or the organization), else a plain note.
     static func distinguishing(_ record: ContactRecord) -> String {
-        let parts = [record.emails.first?.value, record.phones.first?.value].compactMap { $0 }.filter { !$0.isBlank }
+        let parts = [record.emails.first?.value, record.phones.first?.value].compactMap { $0 }
+            .filter { !$0.isBlank }
         if !parts.isEmpty { return parts.joined(separator: " · ") }
         return record.organization.isBlank ? "no email or phone" : record.organization
     }
 
     /// One-line summary for lists: first email, else first phone.
     static func contactLine(_ record: ContactRecord) -> String {
-        let parts = [record.emails.first?.value, record.phones.first?.value, record.organization.isBlank ? nil : record.organization]
+        let parts = [
+            record.emails.first?.value, record.phones.first?.value,
+            record.organization.isBlank ? nil : record.organization,
+        ]
         return parts.compactMap { $0 }.filter { !$0.isBlank }.joined(separator: " · ")
     }
 }

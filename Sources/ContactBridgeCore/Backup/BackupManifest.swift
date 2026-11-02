@@ -12,7 +12,8 @@ public struct BackupManifest: Sendable, Hashable, Codable {
         public var googlePhotos: Int?
 
         public init(
-            icloud: Int? = nil, googleConnections: Int? = nil, googleOther: Int? = nil, icloudPhotos: Int? = nil, googlePhotos: Int? = nil
+            icloud: Int? = nil, googleConnections: Int? = nil, googleOther: Int? = nil,
+            icloudPhotos: Int? = nil, googlePhotos: Int? = nil
         ) {
             self.icloud = icloud
             self.googleConnections = googleConnections

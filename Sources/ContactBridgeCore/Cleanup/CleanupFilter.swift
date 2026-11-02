@@ -20,7 +20,9 @@ public struct CleanupRow: Sendable, Hashable, Identifiable {
     fileprivate var phoneDigits: [String]
 
     public init(record: ContactRecord, isImported: Bool) {
-        let nameParts = [record.givenName, record.middleName, record.familyName].filter { !$0.isBlank }
+        let nameParts = [record.givenName, record.middleName, record.familyName].filter {
+            !$0.isBlank
+        }
         let phones = record.phones.map(\.value).filter { !$0.isBlank }
         let emails = record.emails.map(\.value).filter { !$0.isBlank }
         id = record.sourceIdentifier
@@ -38,13 +40,18 @@ public struct CleanupRow: Sendable, Hashable, Identifiable {
         hasNoName = nameParts.isEmpty && record.nickname.isBlank && record.organization.isBlank
         hasNoPhoneOrEmail = phones.isEmpty && emails.isEmpty
         self.isImported = isImported
-        searchText = ([record.givenName, record.middleName, record.familyName, record.nickname, record.organization] + phones + emails)
+        searchText =
+            ([
+                record.givenName, record.middleName, record.familyName, record.nickname,
+                record.organization,
+            ] + phones + emails)
             .map(Self.fold).joined(separator: "\n")
         phoneDigits = phones.map { $0.filter(\.isNumber) }
     }
 
     static func fold(_ text: String) -> String {
-        text.folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: nil)
+        text.folding(
+            options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: nil)
     }
 
     /// Every word of the query is in the name, organization, a phone or an email. A word made of digits and phone
@@ -67,7 +74,8 @@ public struct CleanupFilter: Sendable, Equatable {
     public var search: String
 
     public init(
-        textMessageSenders: Bool = false, noName: Bool = false, noPhoneOrEmail: Bool = false, importedByContactBridge: Bool = false,
+        textMessageSenders: Bool = false, noName: Bool = false, noPhoneOrEmail: Bool = false,
+        importedByContactBridge: Bool = false,
         search: String = ""
     ) {
         self.textMessageSenders = textMessageSenders
@@ -78,7 +86,9 @@ public struct CleanupFilter: Sendable, Equatable {
     }
 
     /// Any of the four options is on.
-    public var hasActiveOptions: Bool { textMessageSenders || noName || noPhoneOrEmail || importedByContactBridge }
+    public var hasActiveOptions: Bool {
+        textMessageSenders || noName || noPhoneOrEmail || importedByContactBridge
+    }
 
     /// The rows that pass every active option and the search, in their given order.
     public func apply(to rows: [CleanupRow]) -> [CleanupRow] {
@@ -86,7 +96,9 @@ public struct CleanupFilter: Sendable, Equatable {
             let text = String(word)
             let isPhoneLike = text.allSatisfy { $0.isNumber || "+-().".contains($0) }
             let digits = text.filter(\.isNumber)
-            return (folded: CleanupRow.fold(text), digits: isPhoneLike && !digits.isEmpty ? digits : nil)
+            return (
+                folded: CleanupRow.fold(text), digits: isPhoneLike && !digits.isEmpty ? digits : nil
+            )
         }
         return rows.filter { row in
             (!textMessageSenders || row.isTextMessageSender)

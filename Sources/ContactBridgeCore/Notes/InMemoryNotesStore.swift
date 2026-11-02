@@ -17,9 +17,13 @@ public final class InMemoryNotesStore: NotesStoring, Sendable {
     private let state: Mutex<State>
 
     public init(
-        notes: [String: String] = [:], unmatchedIDs: Set<String> = [], readError: (any Error)? = nil, writeError: (any Error)? = nil
+        notes: [String: String] = [:], unmatchedIDs: Set<String> = [],
+        readError: (any Error)? = nil, writeError: (any Error)? = nil
     ) {
-        state = Mutex(State(notes: notes, unmatched: unmatchedIDs, readError: readError, writeError: writeError))
+        state = Mutex(
+            State(
+                notes: notes, unmatched: unmatchedIDs, readError: readError, writeError: writeError)
+        )
     }
 
     /// Every `fetchNotes` call's ids, in order.
@@ -34,7 +38,8 @@ public final class InMemoryNotesStore: NotesStoring, Sendable {
             state.fetched.append(ids)
             if let error = state.readError { throw error }
             return Dictionary(
-                ids.filter { !state.unmatched.contains($0) }.map { ($0, state.notes[$0] ?? "") }, uniquingKeysWith: { first, _ in first }
+                ids.filter { !state.unmatched.contains($0) }.map { ($0, state.notes[$0] ?? "") },
+                uniquingKeysWith: { first, _ in first }
             )
         }
     }

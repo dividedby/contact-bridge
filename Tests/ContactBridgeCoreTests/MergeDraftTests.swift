@@ -1,20 +1,29 @@
 import Foundation
 import Testing
+
 @testable import ContactBridgeCore
 
 struct MergeDraftTests {
     private func person(
-        _ id: String, _ given: String, _ family: String, phones: [(String, String)] = [], emails: [String] = [],
+        _ id: String, _ given: String, _ family: String, phones: [(String, String)] = [],
+        emails: [String] = [],
         org: String = "", job: String = ""
     ) -> ContactRecord {
         ContactRecord(
-            id: id, source: .icloud, sourceIdentifier: id, givenName: given, familyName: family, organization: org, jobTitle: job,
-            phones: phones.map { Labeled(label: $0.0, value: $0.1) }, emails: emails.map { Labeled(label: "home", value: $0) }
+            id: id, source: .icloud, sourceIdentifier: id, givenName: given, familyName: family,
+            organization: org, jobTitle: job,
+            phones: phones.map { Labeled(label: $0.0, value: $0.1) },
+            emails: emails.map { Labeled(label: "home", value: $0) }
         )
     }
 
-    private func edge(_ a: String, _ b: String, _ confidence: Double, flags: [MatchFlag] = [], reasons: [String] = ["r"]) -> ClusterEdge {
-        ClusterEdge(firstID: a, secondID: b, match: PairMatch(confidence: confidence, reasons: reasons, flags: flags))
+    private func edge(
+        _ a: String, _ b: String, _ confidence: Double, flags: [MatchFlag] = [],
+        reasons: [String] = ["r"]
+    ) -> ClusterEdge {
+        ClusterEdge(
+            firstID: a, secondID: b,
+            match: PairMatch(confidence: confidence, reasons: reasons, flags: flags))
     }
 
     /// a-b strong, b-c strong, a-c unscored; d hangs off c by a weak related edge to an outsider "z".
@@ -22,17 +31,26 @@ struct MergeDraftTests {
         DuplicateCluster(
             id: "a",
             members: [
-                person("a", "Maria", "Garcia", phones: [("mobile", "415-555-0001")], emails: ["m@example.com"], org: "Acme"),
-                person("b", "Maria", "Garcia", phones: [("iPhone", "(415) 555-0001")], emails: ["m@example.com"], org: "Acme Corp", job: "CFO"),
+                person(
+                    "a", "Maria", "Garcia", phones: [("mobile", "415-555-0001")],
+                    emails: ["m@example.com"], org: "Acme"),
+                person(
+                    "b", "Maria", "Garcia", phones: [("iPhone", "(415) 555-0001")],
+                    emails: ["m@example.com"], org: "Acme Corp", job: "CFO"),
                 person("c", "Maria", "Garcia", emails: ["m@example.com", "other@example.com"]),
             ],
             confidence: 0.9, reasons: ["same email m@example.com", "same name"], flags: [],
             edges: [edge("a", "b", 0.95), edge("b", "c", 0.9), edge("a", "c", 0.9)],
-            relatedEdges: [edge("c", "z", 0.4, flags: [.sharedPhoneDifferentNames], reasons: ["same phone +14155550100"])]
+            relatedEdges: [
+                edge(
+                    "c", "z", 0.4, flags: [.sharedPhoneDifferentNames],
+                    reasons: ["same phone +14155550100"])
+            ]
         )
     }
 
-    @Test("A fresh draft mirrors the cluster and suggests the member with the most data as survivor")
+    @Test(
+        "A fresh draft mirrors the cluster and suggests the member with the most data as survivor")
     func initialState() {
         let draft = MergeDraft(cluster: threeMemberCluster())
         #expect(draft.members.map(\.id) == ["a", "b", "c"])
@@ -46,7 +64,9 @@ struct MergeDraftTests {
 
     @Test("Ties for most data go to the lowest id")
     func survivorTieBreak() {
-        let members = [person("y", "A", "B", emails: ["a@b.com"]), person("x", "A", "B", emails: ["a@b.com"])]
+        let members = [
+            person("y", "A", "B", emails: ["a@b.com"]), person("x", "A", "B", emails: ["a@b.com"]),
+        ]
         #expect(MergeDraft.suggestedSurvivor(in: members).id == "x")
     }
 
@@ -90,10 +110,15 @@ struct MergeDraftTests {
     func droppedLabels() {
         var draft = MergeDraft(cluster: threeMemberCluster())
         draft.chooseSurvivor("a")
-        #expect(draft.plan.droppedLabels.contains { $0.field == .phones && $0.keptLabel == "mobile" && $0.droppedLabel == "iPhone" })
+        #expect(
+            draft.plan.droppedLabels.contains {
+                $0.field == .phones && $0.keptLabel == "mobile" && $0.droppedLabel == "iPhone"
+            })
     }
 
-    @Test("Removing a member re-scopes edges: its links become related edges and the cluster stats are recomputed")
+    @Test(
+        "Removing a member re-scopes edges: its links become related edges and the cluster stats are recomputed"
+    )
     func removeMember() {
         var draft = MergeDraft(cluster: threeMemberCluster())
         let removedC = draft.remove(memberID: "c")
@@ -102,7 +127,10 @@ struct MergeDraftTests {
         #expect(draft.removedMembers.map(\.id) == ["c"])
         #expect(draft.edges.map(\.secondID) == ["b"])
         // The removed member's links to the rest are now "possibly related"; its own outside link is not this cluster's business.
-        #expect(Set(draft.relatedEdges.map { Set([$0.firstID, $0.secondID]) }) == [["a", "c"], ["b", "c"]])
+        #expect(
+            Set(draft.relatedEdges.map { Set([$0.firstID, $0.secondID]) }) == [
+                ["a", "c"], ["b", "c"],
+            ])
         #expect(draft.confidence == 0.95)
         #expect(draft.survivor.id != "c" && !draft.plan.deleteIDs.contains("c"))
         #expect(draft.deleteSourceIdentifiers.count == 1)
@@ -135,12 +163,13 @@ struct MergeDraftTests {
 
     @Test("Members joined only through a removed member are reported as separate components")
     func components() {
-        var draft = MergeDraft(cluster: DuplicateCluster(
-            id: "a",
-            members: [person("a", "A", "X"), person("b", "A", "X"), person("c", "A", "X")],
-            confidence: 0.7, reasons: [], flags: [],
-            edges: [edge("a", "b", 0.9), edge("b", "c", 0.9)], relatedEdges: []
-        ))
+        var draft = MergeDraft(
+            cluster: DuplicateCluster(
+                id: "a",
+                members: [person("a", "A", "X"), person("b", "A", "X"), person("c", "A", "X")],
+                confidence: 0.7, reasons: [], flags: [],
+                edges: [edge("a", "b", 0.9), edge("b", "c", 0.9)], relatedEdges: []
+            ))
         #expect(draft.components == [["a", "b", "c"]])
         let removedB = draft.remove(memberID: "b")
         #expect(removedB)
@@ -152,9 +181,13 @@ struct MergeDraftTests {
     @Test("Weak edges are the conflict-flagged or sub-medium links among the remaining members")
     func weakEdges() {
         let cluster = DuplicateCluster(
-            id: "a", members: [person("a", "A", "X"), person("b", "A", "X"), person("c", "A", "X")],
+            id: "a",
+            members: [person("a", "A", "X"), person("b", "A", "X"), person("c", "A", "X")],
             confidence: 0.35, reasons: [], flags: [.sharedPhoneDifferentNames],
-            edges: [edge("a", "b", 0.9), edge("b", "c", 0.9), edge("a", "c", 0.35, flags: [.sharedPhoneDifferentNames])],
+            edges: [
+                edge("a", "b", 0.9), edge("b", "c", 0.9),
+                edge("a", "c", 0.35, flags: [.sharedPhoneDifferentNames]),
+            ],
             relatedEdges: []
         )
         var draft = MergeDraft(cluster: cluster)
@@ -177,10 +210,26 @@ struct MergeDraftTests {
     @Test("Display names fall back from person name to organization to contact details")
     func displayNames() {
         #expect(person("1", "Ann", "Lee").displayName == "Ann Lee")
-        #expect(ContactRecord(id: "2", source: .icloud, sourceIdentifier: "2", organization: "Acme").displayName == "Acme")
-        #expect(ContactRecord(id: "3", source: .icloud, sourceIdentifier: "3", emails: [Labeled(label: nil, value: "x@y.com")]).displayName == "x@y.com")
-        #expect(ContactRecord(id: "4", source: .icloud, sourceIdentifier: "4", phones: [Labeled(label: nil, value: "555")]).displayName == "555")
-        #expect(ContactRecord(id: "5", source: .icloud, sourceIdentifier: "5").displayName == "(No name)")
-        #expect(ContactRecord(id: "6", source: .icloud, sourceIdentifier: "6", givenName: "Ann", middleName: "B", familyName: "Lee").displayName == "Ann B Lee")
+        #expect(
+            ContactRecord(id: "2", source: .icloud, sourceIdentifier: "2", organization: "Acme")
+                .displayName == "Acme")
+        #expect(
+            ContactRecord(
+                id: "3", source: .icloud, sourceIdentifier: "3",
+                emails: [Labeled(label: nil, value: "x@y.com")]
+            ).displayName == "x@y.com")
+        #expect(
+            ContactRecord(
+                id: "4", source: .icloud, sourceIdentifier: "4",
+                phones: [Labeled(label: nil, value: "555")]
+            ).displayName == "555")
+        #expect(
+            ContactRecord(id: "5", source: .icloud, sourceIdentifier: "5").displayName
+                == "(No name)")
+        #expect(
+            ContactRecord(
+                id: "6", source: .icloud, sourceIdentifier: "6", givenName: "Ann", middleName: "B",
+                familyName: "Lee"
+            ).displayName == "Ann B Lee")
     }
 }

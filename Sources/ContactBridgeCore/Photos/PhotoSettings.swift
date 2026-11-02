@@ -6,7 +6,9 @@ public enum PhotoSettingsError: Error, Sendable, Equatable {
 }
 
 extension PhotoSettingsError: LocalizedError {
-    public var errorDescription: String? { "Turn on Sync photos first: profile photos are part of it." }
+    public var errorDescription: String? {
+        "Turn on Sync photos first: profile photos are part of it."
+    }
 }
 
 /// The two photo switches in Setup, kept in `SyncState`.
@@ -26,7 +28,8 @@ public struct PhotoSettings: Sendable, Hashable {
 
     public static func read(_ store: any SyncStateStoring) throws -> PhotoSettings {
         let state = try store.load()
-        return PhotoSettings(syncPhotos: state.syncPhotos, useGoogleProfilePhotos: state.useGoogleProfilePhotos)
+        return PhotoSettings(
+            syncPhotos: state.syncPhotos, useGoogleProfilePhotos: state.useGoogleProfilePhotos)
     }
 
     /// Switching photo sync off stops all photo reads, writes and questions (stored questions are kept, and shown again when it
@@ -37,7 +40,8 @@ public struct PhotoSettings: Sendable, Hashable {
 
     /// Switching profile photos on forgets when Google was last listed in full, so the next run lists it in full and finds
     /// the profile photos (an incremental listing would not mention them).
-    public static func setUseGoogleProfilePhotos(_ on: Bool, in store: any SyncStateStoring) throws {
+    public static func setUseGoogleProfilePhotos(_ on: Bool, in store: any SyncStateStoring) throws
+    {
         try store.update { state in
             if on {
                 guard state.syncPhotos else { throw PhotoSettingsError.photoSyncIsOff }

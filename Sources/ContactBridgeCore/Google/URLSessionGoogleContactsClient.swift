@@ -14,7 +14,10 @@ public struct URLSessionGoogleContactsClient: GoogleContactsClient {
     /// Every modeled field plus the notes (`biographies`, kept in `GooglePerson.extras`) and the bookkeeping the sync
     /// needs. `modeledFields` stays the single source of truth. A sync token is only valid for the fields it was issued
     /// for, so changing this list makes `GoogleChangeFeed` start over with a full listing.
-    static let personFields = (GooglePersonMapper.modeledFields + ["biographies", "metadata", "clientData", "memberships", "photos"])
+    static let personFields =
+        (GooglePersonMapper.modeledFields + [
+            "biographies", "metadata", "clientData", "memberships", "photos",
+        ])
         .joined(separator: ",")
     /// The only fields `otherContacts.list` accepts that this app uses.
     static let otherContactsReadMask = "names,emailAddresses,phoneNumbers,metadata"
@@ -36,7 +39,9 @@ public struct URLSessionGoogleContactsClient: GoogleContactsClient {
     ///   - jitter: a value in 0..<1 that stretches each computed backoff by up to 50%.
     public init(
         transport: any HTTPTransport = URLSessionTransport(), auth: any GoogleAccessTokenProviding,
-        sleep: @escaping @Sendable (TimeInterval) async throws -> Void = { try await Task.sleep(for: .seconds($0)) },
+        sleep: @escaping @Sendable (TimeInterval) async throws -> Void = {
+            try await Task.sleep(for: .seconds($0))
+        },
         jitter: @escaping @Sendable () -> Double = { Double.random(in: 0..<1) }
     ) {
         self.transport = transport
@@ -47,9 +52,14 @@ public struct URLSessionGoogleContactsClient: GoogleContactsClient {
 
     // MARK: reads
 
-    public func listConnections(syncToken: String?, pageToken: String?) async throws -> GooglePeoplePage {
+    public func listConnections(syncToken: String?, pageToken: String?) async throws
+        -> GooglePeoplePage
+    {
         // A sync token is only valid with the same parameters as the call that issued it, so they never vary.
-        var query = [("personFields", Self.personFields), ("pageSize", "\(Self.pageSize)"), ("requestSyncToken", "true")]
+        var query = [
+            ("personFields", Self.personFields), ("pageSize", "\(Self.pageSize)"),
+            ("requestSyncToken", "true"),
+        ]
         if let pageToken { query.append(("pageToken", pageToken)) }
         if let syncToken { query.append(("syncToken", syncToken)) }
         let data = try await perform("GET", "people/me/connections", query: query, idempotent: true)
@@ -64,23 +74,33 @@ public struct URLSessionGoogleContactsClient: GoogleContactsClient {
     }
 
     public func getPerson(resourceName: String) async throws -> GooglePerson {
-        try decode(GooglePerson.self, try await perform("GET", resourceName, query: [("personFields", Self.personFields)], idempotent: true))
+        try decode(
+            GooglePerson.self,
+            try await perform(
+                "GET", resourceName, query: [("personFields", Self.personFields)], idempotent: true)
+        )
     }
 
     // MARK: single writes
 
     public func createContact(_ person: GooglePerson) async throws -> GooglePerson {
-        let data = try await perform("POST", "people:createContact", query: [("personFields", Self.personFields)], body: encode(person))
+        let data = try await perform(
+            "POST", "people:createContact", query: [("personFields", Self.personFields)],
+            body: encode(person))
         return try decode(GooglePerson.self, data)
     }
 
-    public func updateContact(resourceName: String, etag: String, person: GooglePerson, updatePersonFields: String) async throws -> GooglePerson {
+    public func updateContact(
+        resourceName: String, etag: String, person: GooglePerson, updatePersonFields: String
+    ) async throws -> GooglePerson {
         var body = person
         body.resourceName = resourceName
         body.etag = etag
         let data = try await perform(
             "PATCH", "\(resourceName):updateContact",
-            query: [("updatePersonFields", updatePersonFields), ("personFields", Self.personFields)], body: encode(body)
+            query: [
+                ("updatePersonFields", updatePersonFields), ("personFields", Self.personFields),
+            ], body: encode(body)
         )
         return try decode(GooglePerson.self, data)
     }
@@ -93,14 +113,19 @@ public struct URLSessionGoogleContactsClient: GoogleContactsClient {
 
     /// Both calls answer with `{"person": {...}}`. Repeating either is harmless (same bytes in, same photo out; nothing left
     /// to delete), so server errors are retried like reads.
-    public func updateContactPhoto(resourceName: String, photoBytes: Data) async throws -> GooglePerson {
+    public func updateContactPhoto(resourceName: String, photoBytes: Data) async throws
+        -> GooglePerson
+    {
         let body = UpdatePhotoBody(photoBytes: photoBytes, personFields: Self.personFields)
-        let data = try await perform("PATCH", "\(resourceName):updateContactPhoto", body: encode(body), idempotent: true)
+        let data = try await perform(
+            "PATCH", "\(resourceName):updateContactPhoto", body: encode(body), idempotent: true)
         return try photoResult(data)
     }
 
     public func deleteContactPhoto(resourceName: String) async throws -> GooglePerson {
-        let data = try await perform("DELETE", "\(resourceName):deleteContactPhoto", query: [("personFields", Self.personFields)], idempotent: true)
+        let data = try await perform(
+            "DELETE", "\(resourceName):deleteContactPhoto",
+            query: [("personFields", Self.personFields)], idempotent: true)
         return try photoResult(data)
     }
 
@@ -119,10 +144,15 @@ public struct URLSessionGoogleContactsClient: GoogleContactsClient {
 
         var run = GoogleBatchRun()
         var results: [GoogleBatchResult] = []
-        for chunk in zip(people, tags).map({ (person: $0, tag: $1) }).chunked(into: GoogleBatchLimits.maxItemsPerCall) {
+        for chunk in zip(people, tags).map({ (person: $0, tag: $1) }).chunked(
+            into: GoogleBatchLimits.maxItemsPerCall)
+        {
             results += await run.run(chunk, resourceName: { _ in nil }) { chunk in
-                let body = BatchCreateBody(contacts: chunk.map { .init(contactPerson: $0.person) }, readMask: Self.personFields)
-                let data = try await self.perform("POST", "people:batchCreateContacts", body: self.encode(body))
+                let body = BatchCreateBody(
+                    contacts: chunk.map { .init(contactPerson: $0.person) },
+                    readMask: Self.personFields)
+                let data = try await self.perform(
+                    "POST", "people:batchCreateContacts", body: self.encode(body))
                 let created = try self.decode(BatchCreateResponse.self, data).createdPeople ?? []
                 return Self.matchCreated(tags: chunk.map(\.tag), response: created)
             }
@@ -132,7 +162,9 @@ public struct URLSessionGoogleContactsClient: GoogleContactsClient {
 
     /// Pairs created people with inputs by tag. An input with no match is a failure only if the response's failure
     /// items account for exactly the unmatched inputs; otherwise it may have been created, so it is ambiguous.
-    private static func matchCreated(tags: [String], response: [PersonResponse]) -> [GoogleBatchResult] {
+    private static func matchCreated(tags: [String], response: [PersonResponse])
+        -> [GoogleBatchResult]
+    {
         var byTag: [String: GoogleBatchResult] = [:]
         var failures: [GoogleBatchResult] = []
         var unexplained = 0
@@ -140,7 +172,9 @@ public struct URLSessionGoogleContactsClient: GoogleContactsClient {
             let result = item.result()
             if !result.isSuccess {
                 failures.append(result)
-            } else if let person = result.person, let tag = GoogleOwnership.sourceID(of: person), tags.contains(tag), byTag[tag] == nil {
+            } else if let person = result.person, let tag = GoogleOwnership.sourceID(of: person),
+                tags.contains(tag), byTag[tag] == nil
+            {
                 byTag[tag] = result
             } else {
                 unexplained += 1
@@ -150,10 +184,14 @@ public struct URLSessionGoogleContactsClient: GoogleContactsClient {
         var remainingFailures = failures[...]
         return tags.map { tag in
             if let result = byTag[tag] { return result }
-            if unexplained == 0, failures.count == unmatched, let failure = remainingFailures.popFirst() {
+            if unexplained == 0, failures.count == unmatched,
+                let failure = remainingFailures.popFirst()
+            {
                 return GoogleBatchResult(resourceName: nil, outcome: failure.outcome)
             }
-            return GoogleBatchResult(resourceName: nil, outcome: .ambiguous(reason: "the response did not include this contact"))
+            return GoogleBatchResult(
+                resourceName: nil,
+                outcome: .ambiguous(reason: "the response did not include this contact"))
         }
     }
 
@@ -162,7 +200,8 @@ public struct URLSessionGoogleContactsClient: GoogleContactsClient {
         var run = GoogleBatchRun()
         for group in updates.maskGroupedChunks() {
             for call in Self.uniquelyNamed(group) {
-                let outcomes = await run.run(call, resourceName: { $0.update.resourceName }) { call in
+                let outcomes = await run.run(call, resourceName: { $0.update.resourceName }) {
+                    call in
                     var contacts: [String: GooglePerson] = [:]
                     for (_, update) in call {
                         var person = update.person
@@ -170,14 +209,21 @@ public struct URLSessionGoogleContactsClient: GoogleContactsClient {
                         person.etag = update.etag
                         contacts[update.resourceName] = person
                     }
-                    let body = BatchUpdateBody(contacts: contacts, updateMask: call[0].update.updatePersonFields, readMask: Self.personFields)
-                    let data = try await self.perform("POST", "people:batchUpdateContacts", body: self.encode(body))
-                    let answered = try self.decode(BatchUpdateResponse.self, data).updateResult ?? [:]
+                    let body = BatchUpdateBody(
+                        contacts: contacts, updateMask: call[0].update.updatePersonFields,
+                        readMask: Self.personFields)
+                    let data = try await self.perform(
+                        "POST", "people:batchUpdateContacts", body: self.encode(body))
+                    let answered =
+                        try self.decode(BatchUpdateResponse.self, data).updateResult ?? [:]
                     return call.map { _, update in
-                        answered[update.resourceName]?.result(resourceName: update.resourceName) ?? Self.missingResult(for: update.resourceName)
+                        answered[update.resourceName]?.result(resourceName: update.resourceName)
+                            ?? Self.missingResult(for: update.resourceName)
                     }
                 }
-                for (position, result) in outcomes.enumerated() { results[call[position].index] = result }
+                for (position, result) in outcomes.enumerated() {
+                    results[call[position].index] = result
+                }
             }
         }
         return results.compactMap { $0 }
@@ -188,7 +234,9 @@ public struct URLSessionGoogleContactsClient: GoogleContactsClient {
         var results: [GoogleBatchResult] = []
         for chunk in resourceNames.chunked(into: GoogleBatchLimits.maxItemsPerCall) {
             var chunkResults = await run.run(chunk, resourceName: { $0 }) { names in
-                _ = try await self.perform("POST", "people:batchDeleteContacts", body: self.encode(BatchDeleteBody(resourceNames: names)), idempotent: true)
+                _ = try await self.perform(
+                    "POST", "people:batchDeleteContacts",
+                    body: self.encode(BatchDeleteBody(resourceNames: names)), idempotent: true)
                 return names.map { GoogleBatchResult(resourceName: $0) }
             }
             // Google rejects the whole chunk if any contact is already gone, which would leave the rest undeleted.
@@ -196,7 +244,8 @@ public struct URLSessionGoogleContactsClient: GoogleContactsClient {
                 chunkResults = []
                 for name in chunk {
                     chunkResults += await run.run([name], resourceName: { $0 }) { _ in
-                        _ = try await self.perform("DELETE", "\(name):deleteContact", idempotent: true)
+                        _ = try await self.perform(
+                            "DELETE", "\(name):deleteContact", idempotent: true)
                         return [GoogleBatchResult(resourceName: name)]
                     }
                 }
@@ -207,10 +256,14 @@ public struct URLSessionGoogleContactsClient: GoogleContactsClient {
     }
 
     /// The map in a batch update body is keyed by resource name, so one call cannot carry the same person twice.
-    private static func uniquelyNamed(_ group: [(index: Int, update: GoogleContactUpdate)]) -> [[(index: Int, update: GoogleContactUpdate)]] {
+    private static func uniquelyNamed(_ group: [(index: Int, update: GoogleContactUpdate)]) -> [[(
+        index: Int, update: GoogleContactUpdate
+    )]] {
         var calls: [[(index: Int, update: GoogleContactUpdate)]] = []
         for item in group {
-            if let open = calls.firstIndex(where: { call in !call.contains { $0.update.resourceName == item.update.resourceName } }) {
+            if let open = calls.firstIndex(where: { call in
+                !call.contains { $0.update.resourceName == item.update.resourceName }
+            }) {
                 calls[open].append(item)
             } else {
                 calls.append([item])
@@ -220,7 +273,9 @@ public struct URLSessionGoogleContactsClient: GoogleContactsClient {
     }
 
     private static func missingResult(for resourceName: String?) -> GoogleBatchResult {
-        GoogleBatchResult(resourceName: resourceName, outcome: .ambiguous(reason: "the batch response did not include this contact"))
+        GoogleBatchResult(
+            resourceName: resourceName,
+            outcome: .ambiguous(reason: "the batch response did not include this contact"))
     }
 
     // MARK: groups
@@ -230,25 +285,37 @@ public struct URLSessionGoogleContactsClient: GoogleContactsClient {
         repeat {
             var query = [("pageSize", "\(Self.pageSize)")]
             if let pageToken { query.append(("pageToken", pageToken)) }
-            let page = try decode(ContactGroupsResponse.self, try await perform("GET", "contactGroups", query: query, idempotent: true))
+            let page = try decode(
+                ContactGroupsResponse.self,
+                try await perform("GET", "contactGroups", query: query, idempotent: true))
             // System groups (myContacts, starred, ...) can share a name with a user's; only user groups count.
-            if let match = page.contactGroups?.first(where: { $0.name == name && ($0.groupType ?? "USER_CONTACT_GROUP") == "USER_CONTACT_GROUP" }),
-               let resourceName = match.resourceName {
+            if let match = page.contactGroups?.first(where: {
+                $0.name == name && ($0.groupType ?? "USER_CONTACT_GROUP") == "USER_CONTACT_GROUP"
+            }),
+                let resourceName = match.resourceName
+            {
                 return resourceName
             }
             pageToken = page.nextPageToken
         } while pageToken != nil
 
-        let created = try decode(GoogleContactGroup.self, try await perform("POST", "contactGroups", body: encode(CreateGroupBody(contactGroup: .init(name: name)))))
+        let created = try decode(
+            GoogleContactGroup.self,
+            try await perform(
+                "POST", "contactGroups",
+                body: encode(CreateGroupBody(contactGroup: .init(name: name)))))
         guard let resourceName = created.resourceName else {
-            throw GoogleAPIError.other(status: 200, message: "Google created the group but returned no resource name")
+            throw GoogleAPIError.other(
+                status: 200, message: "Google created the group but returned no resource name")
         }
         return resourceName
     }
 
     public func addMembers(groupResourceName: String, memberResourceNames: [String]) async throws {
         for chunk in memberResourceNames.chunked(into: Self.maxMembersPerCall) {
-            let data = try await perform("POST", "\(groupResourceName)/members:modify", body: encode(ModifyMembersBody(resourceNamesToAdd: chunk)))
+            let data = try await perform(
+                "POST", "\(groupResourceName)/members:modify",
+                body: encode(ModifyMembersBody(resourceNamesToAdd: chunk)))
             let response = try decode(ModifyMembersResponse.self, data)
             if !(response.notFoundResourceNames ?? []).isEmpty { throw GoogleAPIError.notFound }
         }
@@ -258,16 +325,21 @@ public struct URLSessionGoogleContactsClient: GoogleContactsClient {
 
     /// - Parameter idempotent: repeating the call is harmless (reads, deletes), so server errors (500/502/503/504) are
     ///   retried like rate limits. For everything else a 5xx is thrown as is: the change may have been applied.
-    private func perform(_ method: String, _ path: String, query: [(String, String)] = [], body: Data? = nil, idempotent: Bool = false) async throws -> Data {
+    private func perform(
+        _ method: String, _ path: String, query: [(String, String)] = [], body: Data? = nil,
+        idempotent: Bool = false
+    ) async throws -> Data {
         var token = try await auth.validAccessToken()
         var refreshedAfter401 = false
         var attempt = 1
         while true {
-            let result = try await transport.send(try request(method, path, query: query, body: body, token: token))
+            let result = try await transport.send(
+                try request(method, path, query: query, body: body, token: token))
             if result.isSuccess { return result.body }
 
             let retryAfter = GoogleAPIError.retryAfter(fromHeader: result.header("Retry-After"))
-            let error = GoogleAPIError.parse(status: result.status, body: result.body, retryAfter: retryAfter)
+            let error = GoogleAPIError.parse(
+                status: result.status, body: result.body, retryAfter: retryAfter)
             switch error {
             case .unauthorized where !refreshedAfter401:
                 refreshedAfter401 = true
@@ -275,7 +347,9 @@ public struct URLSessionGoogleContactsClient: GoogleContactsClient {
             case .rateLimited(let hint) where attempt < Self.maxAttempts:
                 try await sleep(delay(afterAttempt: attempt, hint: hint))
                 attempt += 1
-            case .other(let status, _) where idempotent && Self.retryableServerStatuses.contains(status) && attempt < Self.maxAttempts:
+            case .other(let status, _)
+            where idempotent && Self.retryableServerStatuses.contains(status)
+                && attempt < Self.maxAttempts:
                 try await sleep(delay(afterAttempt: attempt, hint: retryAfter))
                 attempt += 1
             default:
@@ -290,8 +364,11 @@ public struct URLSessionGoogleContactsClient: GoogleContactsClient {
         return exponential * (1 + 0.5 * jitter())
     }
 
-    private func request(_ method: String, _ path: String, query: [(String, String)], body: Data?, token: String) throws -> URLRequest {
-        let encodedPath = path.addingPercentEncoding(withAllowedCharacters: Self.pathAllowed) ?? path
+    private func request(
+        _ method: String, _ path: String, query: [(String, String)], body: Data?, token: String
+    ) throws -> URLRequest {
+        let encodedPath =
+            path.addingPercentEncoding(withAllowedCharacters: Self.pathAllowed) ?? path
         let queryString = query.isEmpty ? "" : "?" + FormEncoding.encode(query)
         guard let url = URL(string: Self.baseURL + encodedPath + queryString) else {
             throw GoogleAPIError.other(status: 0, message: "Could not form a request URL")
@@ -396,7 +473,9 @@ private struct PersonResponse: Decodable {
         let name = person?.resourceName ?? resourceName ?? requestedResourceName
         if let error { return GoogleBatchResult(resourceName: name, error: error) }
         guard let person else {
-            return GoogleBatchResult(resourceName: name, outcome: .ambiguous(reason: "the batch response did not include this contact"))
+            return GoogleBatchResult(
+                resourceName: name,
+                outcome: .ambiguous(reason: "the batch response did not include this contact"))
         }
         return GoogleBatchResult(resourceName: name, person: person)
     }
@@ -407,9 +486,12 @@ private struct PersonResponse: Decodable {
         let http = httpStatusCode.flatMap { (200..<300).contains($0) ? nil : $0 }
         guard rpcCode != 0 || http != nil else { return nil }
         let httpStatus = http ?? Self.httpStatus(forRPCCode: rpcCode)
-        let envelope: [String: Any] = ["error": [
-            "code": httpStatus, "message": status?.message ?? "Request failed", "status": Self.rpcName(rpcCode),
-        ]]
+        let envelope: [String: Any] = [
+            "error": [
+                "code": httpStatus, "message": status?.message ?? "Request failed",
+                "status": Self.rpcName(rpcCode),
+            ]
+        ]
         let body = (try? JSONSerialization.data(withJSONObject: envelope)) ?? Data()
         return GoogleAPIError.parse(status: httpStatus, body: body)
     }

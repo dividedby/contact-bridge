@@ -12,7 +12,10 @@ public struct LinkEntry: Sendable, Hashable, Codable {
     /// Optional like `origin` (older files lack it; no version bump) and not part of the link's identity.
     public var displayName: String?
 
-    public init(googleResourceName: String, linkedAt: Date, origin: LinkOrigin? = nil, displayName: String? = nil) {
+    public init(
+        googleResourceName: String, linkedAt: Date, origin: LinkOrigin? = nil,
+        displayName: String? = nil
+    ) {
         self.googleResourceName = googleResourceName
         self.linkedAt = linkedAt
         self.origin = origin
@@ -23,7 +26,8 @@ public struct LinkEntry: Sendable, Hashable, Codable {
 
     // A missing origin and an explicit `.imported` are the same link; the name is a label, not identity.
     public static func == (lhs: LinkEntry, rhs: LinkEntry) -> Bool {
-        lhs.googleResourceName == rhs.googleResourceName && lhs.linkedAt == rhs.linkedAt && lhs.effectiveOrigin == rhs.effectiveOrigin
+        lhs.googleResourceName == rhs.googleResourceName && lhs.linkedAt == rhs.linkedAt
+            && lhs.effectiveOrigin == rhs.effectiveOrigin
     }
 
     public func hash(into hasher: inout Hasher) {
@@ -59,7 +63,9 @@ public struct LinkTable: Sendable, Hashable, Codable {
         for link in new {
             // One owner per Google contact, so reverse lookups are unambiguous.
             links = links.filter { $0.value.googleResourceName != link.googleResourceName }
-            links[link.icloudID] = LinkEntry(googleResourceName: link.googleResourceName, linkedAt: date, origin: link.origin, displayName: link.displayName)
+            links[link.icloudID] = LinkEntry(
+                googleResourceName: link.googleResourceName, linkedAt: date, origin: link.origin,
+                displayName: link.displayName)
         }
     }
 
@@ -86,9 +92,14 @@ public protocol LinkStoring: Sendable {
 public final class LinkStore: LinkStoring, Sendable {
     /// `~/Library/Application Support/Contact Bridge/links.json` (inside the app's container when sandboxed).
     public static var defaultURL: URL {
-        let support = (try? FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true))
-            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support")
-        return support.appendingPathComponent("Contact Bridge", isDirectory: true).appendingPathComponent("links.json")
+        let support =
+            (try? FileManager.default.url(
+                for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil,
+                create: true))
+            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(
+                "Library/Application Support")
+        return support.appendingPathComponent("Contact Bridge", isDirectory: true)
+            .appendingPathComponent("links.json")
     }
 
     private let url: URL
@@ -129,7 +140,9 @@ public final class LinkStore: LinkStoring, Sendable {
         let data: Data
         do {
             data = try Data(contentsOf: url)
-        } catch let error as CocoaError where error.code == .fileReadNoSuchFile || error.code == .fileNoSuchFile {
+        } catch let error as CocoaError
+            where error.code == .fileReadNoSuchFile || error.code == .fileNoSuchFile
+        {
             return LinkTable()
         } catch {
             throw LinkStoreError.unreadable(error.localizedDescription)
@@ -138,7 +151,9 @@ public final class LinkStore: LinkStoring, Sendable {
         decoder.dateDecodingStrategy = .iso8601
         do {
             let header = try decoder.decode(Header.self, from: data)
-            guard header.version == LinkTable.currentVersion else { throw LinkStoreError.unsupportedVersion(header.version) }
+            guard header.version == LinkTable.currentVersion else {
+                throw LinkStoreError.unsupportedVersion(header.version)
+            }
             return try decoder.decode(LinkTable.self, from: data)
         } catch let error as LinkStoreError {
             throw error
@@ -151,7 +166,8 @@ public final class LinkStore: LinkStoring, Sendable {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try encoder.encode(table).write(to: url, options: .atomic)
     }
 }
@@ -163,6 +179,10 @@ public final class InMemoryLinkStore: LinkStoring, Sendable {
     public init() {}
 
     public func load() throws -> LinkTable { table.withLock { $0 } }
-    public func add(_ links: [ImportedLink], at date: Date) throws { table.withLock { $0.add(links, at: date) } }
-    public func remove(icloudIDs: [String]) throws { table.withLock { $0.remove(icloudIDs: icloudIDs) } }
+    public func add(_ links: [ImportedLink], at date: Date) throws {
+        table.withLock { $0.add(links, at: date) }
+    }
+    public func remove(icloudIDs: [String]) throws {
+        table.withLock { $0.remove(icloudIDs: icloudIDs) }
+    }
 }
