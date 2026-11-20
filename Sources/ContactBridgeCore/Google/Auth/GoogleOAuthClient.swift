@@ -109,13 +109,13 @@ public struct GoogleOAuthClient: Sendable {
         let result = try await transport.send(request)
         guard result.isSuccess else { throw Self.tokenError(result) }
         guard let body = try? JSONDecoder().decode(TokenBody.self, from: result.body),
-            !body.access_token.isEmpty
+            !body.accessToken.isEmpty
         else {
             throw GoogleAuthError.invalidResponse
         }
         return GoogleTokenResponse(
-            accessToken: body.access_token, refreshToken: body.refresh_token,
-            expiresIn: body.expires_in ?? 3600,
+            accessToken: body.accessToken, refreshToken: body.refreshToken,
+            expiresIn: body.expiresIn ?? 3600,
             scopes: (body.scope ?? "").split(separator: " ").map(String.init)
         )
     }
@@ -125,18 +125,30 @@ public struct GoogleOAuthClient: Sendable {
         if body?.error == "invalid_grant" { return .needsReauthorization }
         return .tokenEndpoint(
             status: result.status, error: body?.error ?? "unknown_error",
-            description: body?.error_description)
+            description: body?.errorDescription)
     }
 
     private struct TokenBody: Decodable {
-        var access_token: String
-        var refresh_token: String?
-        var expires_in: TimeInterval?
+        var accessToken: String
+        var refreshToken: String?
+        var expiresIn: TimeInterval?
         var scope: String?
+
+        enum CodingKeys: String, CodingKey {
+            case accessToken = "access_token"
+            case refreshToken = "refresh_token"
+            case expiresIn = "expires_in"
+            case scope
+        }
     }
 
     private struct ErrorBody: Decodable {
         var error: String
-        var error_description: String?
+        var errorDescription: String?
+
+        enum CodingKeys: String, CodingKey {
+            case error
+            case errorDescription = "error_description"
+        }
     }
 }

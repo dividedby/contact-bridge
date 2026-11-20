@@ -175,16 +175,20 @@ public enum DemoData {
         let miaResource = "people/c99999"
         let connections = [
             googlePerson(
-                "Ann", "Lee", phones: ["+1 415 555 2671"], emails: ["ann.lee@example.com"]),  // already in iCloud
+                // already in iCloud
+                "Ann", "Lee", phones: ["+1 415 555 2671"], emails: ["ann.lee@example.com"]),
             davidNow,  // imported earlier, edited on both sides since
-            googlePerson("Priya", "Patel", phones: ["415-555-0301"], emails: ["priya@example.com"]),  // new
+            // new
+            googlePerson("Priya", "Patel", phones: ["415-555-0301"], emails: ["priya@example.com"]),
             googlePerson("Tom", "Nguyen", emails: ["tom.nguyen@example.com"]),  // new
-            googlePerson("Janet", "Carter", emails: ["john.carter@example.com"]),  // new, but resembles the Carters
+            // new, but resembles the Carters
+            googlePerson("Janet", "Carter", emails: ["john.carter@example.com"]),
             leoNow,  // imported earlier, edited in Google since
             googlePerson(
                 "", "", phones: ["415-555-0302"], emails: ["front.desk@lakesidedental.example"],
                 org: "Lakeside Dental"),  // new, a business
-            googlePerson("", "", phones: ["48012"], org: "Parcel Express Alerts"),  // new, a text-message sender
+            // new, a text-message sender
+            googlePerson("", "", phones: ["48012"], org: "Parcel Express Alerts"),
             googlePerson("Grace", "Hopper", emails: ["grace.hopper@example.com"]),
             googlePerson("Alan", "Turing", emails: ["alan.turing@example.com"]),
             googlePerson("Ada", "Lovelace", emails: ["ada.lovelace@example.com"]),

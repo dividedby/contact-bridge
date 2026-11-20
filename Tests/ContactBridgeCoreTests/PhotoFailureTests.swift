@@ -36,7 +36,8 @@ struct PhotoFailureTests {
         defer { rig.photos.cleanUp() }
         let carol = try await rig.photos.base.addICloudContact(
             "Carol", "Newman", phone: "415-555-0100", note: "n")
-        try await rig.photos.setICloudPhoto(carol.sourceIdentifier, one)  // a new pair: a follow-up would be wanted
+        // a new pair: a follow-up would be wanted
+        try await rig.photos.setICloudPhoto(carol.sourceIdentifier, one)
         try await rig.photos.setICloudPhoto("I1", two)
         await rig.photos.google.inject(.error(error), on: .updateContactPhoto)
         _ = await rig.engine.startAndRun()

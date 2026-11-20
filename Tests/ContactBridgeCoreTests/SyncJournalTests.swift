@@ -149,7 +149,8 @@ struct SyncJournalTests {
         let store = SyncHistoryStore(directory: directory, retentionDays: 30, timeZone: utc)
         try store.append([historyEntry(base)])
         try Data("keep".utf8).write(to: directory.appendingPathComponent("notes.txt"))
-        let lastDay = Date(timeIntervalSince1970: 1_799_971_200 + 31 * 86400 - 1)  // 2027-02-15 23:59:59 UTC
+        // 2027-02-15 23:59:59 UTC
+        let lastDay = Date(timeIntervalSince1970: 1_799_971_200 + 31 * 86400 - 1)
         let nextDay = lastDay.addingTimeInterval(1)
 
         #expect(try store.prune(now: base.addingTimeInterval(30 * day)) == 0)

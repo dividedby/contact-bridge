@@ -276,7 +276,8 @@ final class SetupModel {
         switch notesStatus {
         case .authorized: app.deps.defaults.set(true, forKey: Self.notesGrantedKey)
         case .notAuthorized: app.deps.defaults.set(false, forKey: Self.notesGrantedKey)
-        case .unknown, .unavailable: break  // Contacts not reachable right now says nothing about the permission.
+        // Contacts not reachable right now says nothing about the permission.
+        case .unknown, .unavailable: break
         }
         app.servicesChanged()
     }

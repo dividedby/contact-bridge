@@ -87,7 +87,8 @@ struct GoogleBatchOutcomeTests {
         #expect(allSame(results, 0..<200, "applied"))
         #expect(allSame(results, 200..<400, "failed") && results[200].error == .unauthorized)
         #expect(allSame(results, 400..<450, "notAttempted"))
-        #expect(await transport.requests.count == 3)  // chunk 1, chunk 2, chunk 2 again after the refresh
+        // chunk 1, chunk 2, chunk 2 again after the refresh
+        #expect(await transport.requests.count == 3)
     }
 
     @Test(

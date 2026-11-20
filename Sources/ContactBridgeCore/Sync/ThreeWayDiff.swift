@@ -361,7 +361,8 @@ public enum ThreeWayDiff {
             }
             present.insert(k)
             guard let mine = current[k] else {
-                if baseExact[k] == nil { result.append(entry) }  // removed in iCloud when the baseline had it
+                // removed in iCloud when the baseline had it
+                if baseExact[k] == nil { result.append(entry) }
                 continue
             }
             result.append(baseExact[k] == exactText(mine) ? entry : mine)

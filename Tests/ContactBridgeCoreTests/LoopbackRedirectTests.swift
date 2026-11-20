@@ -169,7 +169,7 @@ struct LoopbackRedirectListenerTests {
         for client in clients where await client.closedWithin(.milliseconds(400)) { closed += 1 }
         #expect(closed == 1)
         // Dropping the idle ones frees the slots.
-        clients.forEach { $0.close() }
+        for client in clients { client.close() }
         try await Task.sleep(for: .milliseconds(300))
         _ = try await session().data(
             from: try #require(URL(string: "http://127.0.0.1:\(port)/?code=ok&state=s")))
