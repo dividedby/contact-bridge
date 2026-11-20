@@ -150,7 +150,8 @@ public actor BackupCoordinator {
     private func takeBackup(joining policy: Join) async throws -> (BackupReceipt, Coverage) {
         if let running = inFlight {
             if policy.accepts(running.key) { return try await running.task.value }
-            _ = try? await running.task.value  // a run for another container: let it finish, then take our own
+            // a run for another container: let it finish, then take our own
+            _ = try? await running.task.value
             if let again = inFlight, policy.accepts(again.key) { return try await again.task.value }
         }
         let make = makeSetup

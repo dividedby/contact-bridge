@@ -725,7 +725,8 @@ struct BulkMergeSheet: View {
                     "\(ContactText.count(report.deletedCount, "duplicate contact")) deleted.\(report.receipt.map { " A backup was taken first (\(ContactText.count($0.manifest.counts.icloud ?? 0, "contact")))." } ?? "")"
                 )
             }
-            if report.notRunCount > 0, report.receipt != nil {  // no receipt: the backup failed and the title says so
+            // no receipt: the backup failed and the title says so
+            if report.notRunCount > 0, report.receipt != nil {
                 Text("\(ContactText.count(report.notRunCount, "group")) not run.").foregroundStyle(
                     .secondary)
             }

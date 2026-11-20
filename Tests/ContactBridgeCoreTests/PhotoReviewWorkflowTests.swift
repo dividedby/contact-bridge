@@ -492,7 +492,8 @@ struct PhotoReviewWorkflowTests {
         try await rig.photos.setICloudPhoto("I1", one)
         try await rig.photos.setGooglePhoto(1, two)  // first sight, different
         try await rig.settled("I2", picture: three)
-        try await rig.photos.setICloudPhoto("I2", nil)  // removed in iCloud: iCloud's "no photo" wins
+        // removed in iCloud: iCloud's "no photo" wins
+        try await rig.photos.setICloudPhoto("I2", nil)
         try await rig.removalSeenTwice()
         let items = try rig.items()
         try #require(items.count == 2)

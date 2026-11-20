@@ -5,8 +5,9 @@ macOS 27 menu-bar app (Swift 6.4, SwiftPM, no Xcode project) that backs up, dedu
 ## Commands
 
 - Test: `swift test -j 2` (Swift Testing, ~1200 tests, ~5 s warm).
-- Lint: no separate linter; the format checks below are the lint step (`build-app.sh` also runs `plutil -lint` on the plists).
+- Lint: the Swift lint and format checks below (`build-app.sh` also runs `plutil -lint` on the plists).
 - Format check, as CI runs it (`.github/workflows/ci.yml`, `format.yml`): `xcrun swift-format format --in-place --recursive Sources Tests Package.swift && git diff --exit-code` for Swift, `shfmt -d .` for shell, `pnpm format:check` for the rest.
+- Swift lint (`format.yml`): `swift format lint --strict --recursive .`, honouring `.swift-format`. `OnlyOneTrailingClosureArgument` is off there (SwiftUI and `run(_:resourceName:)` call shapes); fix every other finding.
 - Build and install the signed app: `scripts/build-app.sh` (installs to `~/Applications/Contact Bridge.app`).
 
 ## Gotchas

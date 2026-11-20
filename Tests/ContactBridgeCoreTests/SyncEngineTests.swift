@@ -978,7 +978,8 @@ struct SyncEngineTests {
         let running = Task { await rig.engine.syncNow() }
         for await _ in held.entered { break }
 
-        await rig.engine.trigger(.storeChanged)  // due ten seconds from now, before the back-off the failure will start
+        // due ten seconds from now, before the back-off the failure will start
+        await rig.engine.trigger(.storeChanged)
         await rig.clock.waitForSleepers(2)
         held.release.yield(())
         await running.value

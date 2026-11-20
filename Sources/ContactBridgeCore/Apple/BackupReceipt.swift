@@ -11,13 +11,6 @@ public struct BackupReceipt: Sendable, Hashable {
     public let folderURL: URL
     public let manifest: BackupManifest
 
-    init(id: UUID, createdAt: Date, folderURL: URL, manifest: BackupManifest) {
-        self.id = id
-        self.createdAt = createdAt
-        self.folderURL = folderURL
-        self.manifest = manifest
-    }
-
     /// True if the backup is at most `maxAge` seconds old at `now`. Later mutating services use this to demand a recent backup.
     public func isFresh(maxAge: TimeInterval = 3600, now: Date = Date()) -> Bool {
         now.timeIntervalSince(createdAt) <= maxAge
